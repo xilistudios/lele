@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
 func benchOpenStore(b *testing.B) *Store {
 	b.Helper()
 	path := filepath.Join(b.TempDir(), "bench.db")
@@ -25,7 +21,6 @@ func benchOpenStore(b *testing.B) *Store {
 	return s
 }
 
-// makeMessageJSON generates a realistic message JSON blob of ~1KB.
 func makeMessageJSON(role string, idx int) string {
 	msg := map[string]interface{}{
 		"role":    role,
@@ -38,7 +33,6 @@ func makeMessageJSON(role string, idx int) string {
 	return string(b)
 }
 
-// makeSessionMeta returns a SessionMeta for benchmarking.
 func makeSessionMeta(key string) SessionMeta {
 	now := time.Now()
 	return SessionMeta{
@@ -55,7 +49,6 @@ func makeSessionMeta(key string) SessionMeta {
 	}
 }
 
-// seedSession inserts n messages into a session via the repo.
 func seedSession(b *testing.B, repo *SessionRepo, key string, n int) {
 	b.Helper()
 	meta := makeSessionMeta(key)
@@ -74,16 +67,12 @@ func seedSession(b *testing.B, repo *SessionRepo, key string, n int) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// JSON-file reference implementation (mirrors the old session storage)
-// ──────────────────────────────────────────────────────────────────────────────
-
 type jsonSession struct {
 	Key      string   `json:"key"`
 	Name     string   `json:"name"`
 	Mode     string   `json:"mode"`
 	Summary  string   `json:"summary"`
-	Messages []string `json:"messages"` // raw JSON strings
+	Messages []string `json:"messages"`
 	Created  string   `json:"created"`
 	Updated  string   `json:"updated"`
 }
@@ -134,17 +123,12 @@ func jsonListSessions(dir string) ([]string, error) {
 	return keys, nil
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 1: Session Write (full save with N messages)
-// ──────────────────────────────────────────────────────────────────────────────
-
 func BenchmarkSessionWrite_SQLite(b *testing.B) {
 	for _, msgCount := range []int{10, 100, 500} {
 		b.Run(fmt.Sprintf("messages=%d", msgCount), func(b *testing.B) {
 			s := benchOpenStore(b)
 			repo := s.Sessions()
 
-			// Pre-generate messages
 			msgs := make([]string, msgCount)
 			for i := range msgs {
 				role := "user"
@@ -158,13 +142,11 @@ func BenchmarkSessionWrite_SQLite(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				key := fmt.Sprintf("bench:write:%d", i)
 
-				// Upsert metadata
 				meta := makeSessionMeta(key)
 				if err := repo.UpsertSession(meta); err != nil {
 					b.Fatal(err)
 				}
 
-				// Insert all messages (same as saveToSQLite pattern)
 				for j, msgJSON := range msgs {
 					role := "user"
 					if j%2 == 1 {
@@ -184,7 +166,6 @@ func BenchmarkSessionWrite_JSON(b *testing.B) {
 		b.Run(fmt.Sprintf("messages=%d", msgCount), func(b *testing.B) {
 			dir := b.TempDir()
 
-			// Pre-generate messages
 			msgs := make([]string, msgCount)
 			for i := range msgs {
 				role := "user"
@@ -205,10 +186,6 @@ func BenchmarkSessionWrite_JSON(b *testing.B) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 2: Session Read (load full session with N messages)
-// ──────────────────────────────────────────────────────────────────────────────
-
 func BenchmarkSessionRead_SQLite(b *testing.B) {
 	for _, msgCount := range []int{10, 100, 500} {
 		b.Run(fmt.Sprintf("messages=%d", msgCount), func(b *testing.B) {
@@ -219,7 +196,6 @@ func BenchmarkSessionRead_SQLite(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				// Simulate loadFromSQLite: metadata + all messages
 				meta, err := repo.GetSessionMeta("bench:read")
 				if err != nil {
 					b.Fatal(err)
@@ -244,7 +220,6 @@ func BenchmarkSessionRead_JSON(b *testing.B) {
 		b.Run(fmt.Sprintf("messages=%d", msgCount), func(b *testing.B) {
 			dir := b.TempDir()
 
-			// Seed: write the JSON file
 			msgs := make([]string, msgCount)
 			for i := range msgs {
 				role := "user"
@@ -271,11 +246,6 @@ func BenchmarkSessionRead_JSON(b *testing.B) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 3: Incremental Append (add 1 message to existing session)
-// This is the MOST COMMON real-world operation (each user/assistant turn).
-// ──────────────────────────────────────────────────────────────────────────────
-
 func BenchmarkSessionAppend_SQLite(b *testing.B) {
 	for _, existingMsgs := range []int{10, 100, 500} {
 		b.Run(fmt.Sprintf("existing=%d", existingMsgs), func(b *testing.B) {
@@ -301,7 +271,6 @@ func BenchmarkSessionAppend_JSON(b *testing.B) {
 		b.Run(fmt.Sprintf("existing=%d", existingMsgs), func(b *testing.B) {
 			dir := b.TempDir()
 
-			// Seed: create initial JSON file with N messages
 			msgs := make([]string, existingMsgs)
 			for i := range msgs {
 				role := "user"
@@ -318,7 +287,6 @@ func BenchmarkSessionAppend_JSON(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				// JSON path: read entire file, append, rewrite entire file
 				s, err := jsonReadSession(dir, "bench-append")
 				if err != nil {
 					b.Fatal(err)
@@ -332,18 +300,12 @@ func BenchmarkSessionAppend_JSON(b *testing.B) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 4: Full Re-save (delete-and-reinsert pattern, simulating saveToSQLite)
-// This is what happens on every flush in the current dual-write transition.
-// ──────────────────────────────────────────────────────────────────────────────
-
 func BenchmarkSessionFullResave_SQLite(b *testing.B) {
 	for _, msgCount := range []int{10, 100, 500} {
 		b.Run(fmt.Sprintf("messages=%d", msgCount), func(b *testing.B) {
 			s := benchOpenStore(b)
 			repo := s.Sessions()
 
-			// Pre-generate messages
 			msgs := make([]string, msgCount)
 			for i := range msgs {
 				role := "user"
@@ -360,7 +322,6 @@ func BenchmarkSessionFullResave_SQLite(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				// Delete all and re-insert (exact pattern from saveToSQLite)
 				if err := repo.DeleteMessagesFrom("bench:resave", 0); err != nil {
 					b.Fatal(err)
 				}
@@ -383,7 +344,6 @@ func BenchmarkSessionFullResave_JSON(b *testing.B) {
 		b.Run(fmt.Sprintf("messages=%d", msgCount), func(b *testing.B) {
 			dir := b.TempDir()
 
-			// Pre-generate messages
 			msgs := make([]string, msgCount)
 			for i := range msgs {
 				role := "user"
@@ -395,7 +355,6 @@ func BenchmarkSessionFullResave_JSON(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				// JSON: overwrite entire file every time (same semantics)
 				if err := jsonWriteSession(dir, "bench-resave", msgs); err != nil {
 					b.Fatal(err)
 				}
@@ -403,10 +362,6 @@ func BenchmarkSessionFullResave_JSON(b *testing.B) {
 		})
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 5: List Sessions (metadata-only scan)
-// ──────────────────────────────────────────────────────────────────────────────
 
 func BenchmarkSessionList_SQLite(b *testing.B) {
 	for _, sessionCount := range []int{10, 50, 200} {
@@ -441,7 +396,6 @@ func BenchmarkSessionList_JSON(b *testing.B) {
 		b.Run(fmt.Sprintf("sessions=%d", sessionCount), func(b *testing.B) {
 			dir := b.TempDir()
 
-			// Seed: create session files
 			for i := 0; i < sessionCount; i++ {
 				key := fmt.Sprintf("bench-list-%04d", i)
 				msgs := []string{makeMessageJSON("user", i)}
@@ -464,10 +418,6 @@ func BenchmarkSessionList_JSON(b *testing.B) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 6: KV Store (SQLite) vs JSON File
-// ──────────────────────────────────────────────────────────────────────────────
-
 func BenchmarkKV_SQLite(b *testing.B) {
 	s := benchOpenStore(b)
 	kv := s.KV()
@@ -481,7 +431,6 @@ func BenchmarkKV_SQLite(b *testing.B) {
 	})
 
 	b.Run("Get", func(b *testing.B) {
-		// Seed
 		for i := 0; i < 100; i++ {
 			kv.Set(fmt.Sprintf("get-key:%d", i), fmt.Sprintf("value-%d", i))
 		}
@@ -522,7 +471,6 @@ func BenchmarkKV_JSON(b *testing.B) {
 	})
 
 	b.Run("Get", func(b *testing.B) {
-		// Seed
 		for i := 0; i < 100; i++ {
 			k := fmt.Sprintf("get-key:%d", i)
 			path := filepath.Join(dir, k+".json")
@@ -554,10 +502,6 @@ func BenchmarkKV_JSON(b *testing.B) {
 		}
 	})
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 7: Cron Jobs — CRUD comparison
-// ──────────────────────────────────────────────────────────────────────────────
 
 type jsonCronJob struct {
 	ID       string `json:"id"`
@@ -615,7 +559,6 @@ func BenchmarkCronList_SQLite(b *testing.B) {
 	s := benchOpenStore(b)
 	repo := s.Cron()
 
-	// Seed 50 jobs
 	for i := 0; i < 50; i++ {
 		repo.UpsertCronJob(&CronJobRow{
 			ID: fmt.Sprintf("job-%d", i), Name: fmt.Sprintf("Job %d", i),
@@ -639,7 +582,6 @@ func BenchmarkCronList_SQLite(b *testing.B) {
 func BenchmarkCronList_JSON(b *testing.B) {
 	dir := b.TempDir()
 
-	// Seed 50 job files
 	for i := 0; i < 50; i++ {
 		job := jsonCronJob{
 			ID: fmt.Sprintf("job-%d", i), Name: fmt.Sprintf("Job %d", i),
@@ -667,10 +609,6 @@ func BenchmarkCronList_JSON(b *testing.B) {
 		}
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 8: Memory Usage Comparison (allocs/op)
-// ──────────────────────────────────────────────────────────────────────────────
 
 func BenchmarkMemory_SessionLoad100(b *testing.B) {
 	b.Run("SQLite", func(b *testing.B) {
@@ -738,10 +676,6 @@ func BenchmarkMemory_SessionAppend(b *testing.B) {
 		}
 	})
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// BENCHMARK 9: Disk Size Comparison (informational, runs once)
-// ──────────────────────────────────────────────────────────────────────────────
 
 func BenchmarkDiskSize_100Sessions_50Msgs(b *testing.B) {
 	const sessionCount = 100

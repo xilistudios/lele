@@ -7,13 +7,10 @@ import (
 	"strings"
 )
 
-// KVRepo is a small key/value store backed by the kv table. It holds
-// leftover small state (telegram_offset, workspace state, etc.).
 type KVRepo struct {
 	db *sql.DB
 }
 
-// Get returns the value stored for key and whether it was found.
 func (r *KVRepo) Get(key string) (string, bool, error) {
 	var value string
 	err := r.db.QueryRow(`SELECT value FROM kv WHERE key = ?`, key).Scan(&value)
@@ -26,7 +23,6 @@ func (r *KVRepo) Get(key string) (string, bool, error) {
 	return value, true, nil
 }
 
-// Set stores value under key, inserting or updating as needed.
 func (r *KVRepo) Set(key, value string) error {
 	if _, err := r.db.Exec(
 		`INSERT INTO kv(key, value) VALUES(?, ?)
@@ -38,8 +34,6 @@ func (r *KVRepo) Set(key, value string) error {
 	return nil
 }
 
-// Delete removes key from the store. Deleting a missing key is not an
-// error.
 func (r *KVRepo) Delete(key string) error {
 	if _, err := r.db.Exec(`DELETE FROM kv WHERE key = ?`, key); err != nil {
 		return fmt.Errorf("kv delete %q: %w", key, err)
@@ -47,8 +41,6 @@ func (r *KVRepo) Delete(key string) error {
 	return nil
 }
 
-// Keys returns all keys that start with prefix, ordered
-// lexicographically. An empty prefix returns all keys.
 func (r *KVRepo) Keys(prefix string) ([]string, error) {
 	rows, err := r.db.Query(
 		`SELECT key FROM kv WHERE key LIKE ? ESCAPE '\' ORDER BY key`,
@@ -73,7 +65,6 @@ func (r *KVRepo) Keys(prefix string) ([]string, error) {
 	return keys, nil
 }
 
-// likeEscape escapes LIKE wildcards so prefix is matched literally.
 func likeEscape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }

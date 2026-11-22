@@ -12,34 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// SnapshotsForSession — read path for issue #239 (layer 2).
-//
-// Production symptom: a group card in the WebUI disappears permanently after a
-// session switch (or a daemon restart). The history endpoints answered from
-// AllGroupSnapshots(), which is memory-only: once the B6 retention sweep evicted
-// a finished group (30 min), the persisted row in groups_state was never read
-// back into the session-scoped payload.
-//
-// The contract under test:
-//   - SnapshotsForSession returns the UNION of in-memory groups and persisted
-//     rows (SQLite repo first, legacy JSON dir as fallback), so history outlives
-//     retention;
-//   - filtering is by OriginChatID, honouring the injected session-alias
-//     resolver, and a group with no origin never leaks into any session;
-//   - dedupe is per group ID and memory wins (the live state is ahead of the
-//     last persisted flush);
-//   - a persisted row whose status is not terminal means the writer died before
-//     finalizing: it is reported as StatusError with an explanatory synthesis
-//     instead of hanging forever as "running";
-//   - results are ordered newest first (UpdatedAt desc, ID asc tie-break),
-//     matching ListGroups;
-//   - a failing store degrades to memory-only instead of dropping the payload.
-// ---------------------------------------------------------------------------
-
-// pinGroupRepo points the package-level SQLite repo at repo for the duration of
-// the test and restores whatever was configured before. Unlike useTestGroupRepo
-// it restores the previous value instead of nil, keeping tests order-independent.
 func pinGroupRepo(t *testing.T, repo *store.GroupRepo) {
 	t.Helper()
 	prev := getGroupRepo()
@@ -47,8 +19,6 @@ func pinGroupRepo(t *testing.T, repo *store.GroupRepo) {
 	t.Cleanup(func() { UseStore(prev) })
 }
 
-// newSQLiteStoreAt opens a SQLite store without registering a Close, so a test
-// can close it mid-case to exercise store failures.
 func newSQLiteStoreAt(t *testing.T, dir string) *store.Store {
 	t.Helper()
 	s, err := store.Open(filepath.Join(dir, "lele.db"))
@@ -58,8 +28,6 @@ func newSQLiteStoreAt(t *testing.T, dir string) *store.Store {
 	return s
 }
 
-// openSQLiteStoreForSnapshots opens a SQLite store in a fresh temp dir and closes
-// it when the test ends.
 func openSQLiteStoreForSnapshots(t *testing.T) *store.Store {
 	t.Helper()
 	s := newSQLiteStoreAt(t, t.TempDir())
@@ -71,8 +39,6 @@ func openSQLiteStoreForSnapshots(t *testing.T) *store.Store {
 	return s
 }
 
-// seedSQLiteState persists a GroupState through the repository, bypassing the
-// manager so tests can plant arbitrary rows.
 func seedSQLiteState(t *testing.T, repo *store.GroupRepo, st *GroupState) {
 	t.Helper()
 	data, err := json.Marshal(st)
@@ -84,7 +50,6 @@ func seedSQLiteState(t *testing.T, repo *store.GroupRepo, st *GroupState) {
 	}
 }
 
-// seedJSONState writes a GroupState JSON file into dir (legacy backend).
 func seedJSONState(t *testing.T, dir string, st *GroupState) {
 	t.Helper()
 	data, err := json.MarshalIndent(st, "", "  ")
@@ -100,7 +65,6 @@ func seedJSONState(t *testing.T, dir string, st *GroupState) {
 	}
 }
 
-// persistedState builds a GroupState for seeding the store.
 func persistedState(id, originChat, status string, updated time.Time) *GroupState {
 	return &GroupState{
 		ID:            id,
@@ -120,7 +84,6 @@ func persistedState(id, originChat, status string, updated time.Time) *GroupStat
 	}
 }
 
-// findSnapshot returns the snapshot with the given group ID.
 func findSnapshot(snaps []GroupSnapshot, id string) (GroupSnapshot, bool) {
 	for _, s := range snaps {
 		if s.GroupID == id {
@@ -130,7 +93,6 @@ func findSnapshot(snaps []GroupSnapshot, id string) (GroupSnapshot, bool) {
 	return GroupSnapshot{}, false
 }
 
-// snapshotIDs maps a snapshot slice to its group IDs, preserving order.
 func snapshotIDs(snaps []GroupSnapshot) []string {
 	ids := make([]string, 0, len(snaps))
 	for _, s := range snaps {
@@ -139,9 +101,6 @@ func snapshotIDs(snaps []GroupSnapshot) []string {
 	return ids
 }
 
-// TestSnapshotsForSession_IncludesEvictedPersistedGroup is the core #239
-// regression: a finished group that is no longer tracked in memory must still be
-// served from the persisted store.
 func TestSnapshotsForSession_IncludesEvictedPersistedGroup(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -160,7 +119,6 @@ func TestSnapshotsForSession_IncludesEvictedPersistedGroup(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 
-	// Precondition: retention really swept it out of memory.
 	if _, ok := gm.Status(groupID); ok {
 		t.Fatal("precondition failed: group is still tracked in memory")
 	}
@@ -181,7 +139,6 @@ func TestSnapshotsForSession_IncludesEvictedPersistedGroup(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_UnionMemoryAndStore proves both sources contribute.
 func TestSnapshotsForSession_UnionMemoryAndStore(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -199,7 +156,6 @@ func TestSnapshotsForSession_UnionMemoryAndStore(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 
-	// A second group that exists exclusively in the store.
 	seedSQLiteState(t, s.Groups(), persistedState("group:store-only", "chat-1", StatusDone, time.Now()))
 
 	got := gm.SnapshotsForSession("chat-1")
@@ -214,9 +170,6 @@ func TestSnapshotsForSession_UnionMemoryAndStore(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_MemoryWinsOnDedupe pins the dedupe rule: a group that
-// is both tracked in memory and present on disk appears exactly once, carrying
-// the in-memory (fresher) content.
 func TestSnapshotsForSession_MemoryWinsOnDedupe(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -234,9 +187,6 @@ func TestSnapshotsForSession_MemoryWinsOnDedupe(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 
-	// Overwrite the row the run just persisted with a stale, divergent copy:
-	// one turn, still "running". Whatever SnapshotsForSession reports for this
-	// ID can therefore only have come from memory.
 	seedSQLiteState(t, s.Groups(), persistedState(groupID, "chat-1", StatusRunning, time.Now().Add(-time.Hour)))
 
 	got := gm.SnapshotsForSession("chat-1")
@@ -258,16 +208,8 @@ func TestSnapshotsForSession_MemoryWinsOnDedupe(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_FiltersBySessionAndAlias covers the filter branches:
-// exact match, alias match through the injected resolver, and non-match.
-//
-// The alias cases are deliberately built the same way for both sources: the
-// group's origin is the pre-rotation key while the caller asks with the rotated
-// one. A memory group whose origin already equalled the request would match
-// exactly and prove nothing about the resolver, so the live group here is
-// started under "chat-old" and looked up as "chat-1".
 func TestSnapshotsForSession_FiltersBySessionAndAlias(t *testing.T) {
-	pinGroupRepo(t, nil) // legacy JSON store: no shared-repo interference
+	pinGroupRepo(t, nil)
 	dir := t.TempDir()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -284,8 +226,6 @@ func TestSnapshotsForSession_FiltersBySessionAndAlias(t *testing.T) {
 		return chatID
 	})
 
-	// A group tracked in memory whose origin is the pre-rotation key, so the
-	// resolver must be applied to the memory source as well.
 	const memoryID = "group:memory-alias"
 	if _, err := gm.Start(context.Background(), memoryID, "p1", "t", "round_robin",
 		[]Participant{{AgentID: "a", Role: RoleProposer, Label: "A"}},
@@ -295,7 +235,6 @@ func TestSnapshotsForSession_FiltersBySessionAndAlias(t *testing.T) {
 	if _, err := gm.Wait(memoryID); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	// Precondition: it really is tracked in memory, not just on disk.
 	if _, ok := gm.Status(memoryID); !ok {
 		t.Fatal("precondition failed: live group is not tracked in memory")
 	}
@@ -314,8 +253,6 @@ func TestSnapshotsForSession_FiltersBySessionAndAlias(t *testing.T) {
 		t.Fatalf("len(got) = %d, want 3 (%v)", len(got), got)
 	}
 
-	// Control: without the resolver only the exact match survives, which is what
-	// makes the assertions above meaningful.
 	plain := NewGroupManager(mockResolve, (&mockExecutor{}).execute, (&mockPublisher{}).publish)
 	plain.SetStoreDir(dir)
 	if got := snapshotIDs(plain.SnapshotsForSession("chat-1")); len(got) != 1 || got[0] != "group:mine" {
@@ -323,9 +260,6 @@ func TestSnapshotsForSession_FiltersBySessionAndAlias(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_UnknownOriginIsHidden pins the anti-leak rule: a group
-// stored without an origin chat must not be reported for any session, and an
-// empty sessionKey must not act as a wildcard.
 func TestSnapshotsForSession_UnknownOriginIsHidden(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -343,9 +277,6 @@ func TestSnapshotsForSession_UnknownOriginIsHidden(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_NonTerminalStoreRowReportedAsError implements the
-// "non-terminal store rows reported as error" rule: a row still marked running
-// means the writer died mid-run, so the card must not hang as "running" forever.
 func TestSnapshotsForSession_NonTerminalStoreRowReportedAsError(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -367,14 +298,11 @@ func TestSnapshotsForSession_NonTerminalStoreRowReportedAsError(t *testing.T) {
 	if !strings.Contains(snap.Synthesis, "restart") {
 		t.Errorf("Synthesis = %q, want an explanation mentioning the restart", snap.Synthesis)
 	}
-	// The transcript that did survive is still shown.
 	if len(snap.Turns) != 1 {
 		t.Errorf("len(Turns) = %d, want 1 (partial transcript preserved)", len(snap.Turns))
 	}
 }
 
-// TestSnapshotsForSession_TerminalStoreRowKeepsItsStatus is the counterpart: a
-// stopped or failed group must come back as it was, never rewritten.
 func TestSnapshotsForSession_TerminalStoreRowKeepsItsStatus(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -396,8 +324,6 @@ func TestSnapshotsForSession_TerminalStoreRowKeepsItsStatus(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_OrdersNewestFirst pins the ordering contract shared
-// with ListGroups: UpdatedAt descending, ID ascending as tie-break.
 func TestSnapshotsForSession_OrdersNewestFirst(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -406,7 +332,6 @@ func TestSnapshotsForSession_OrdersNewestFirst(t *testing.T) {
 	seedSQLiteState(t, s.Groups(), persistedState("group:oldest", "chat-1", StatusDone, base.Add(-4*time.Hour)))
 	seedSQLiteState(t, s.Groups(), persistedState("group:newest", "chat-1", StatusDone, base))
 	seedSQLiteState(t, s.Groups(), persistedState("group:middle", "chat-1", StatusDone, base.Add(-time.Hour)))
-	// Tie pair (same timestamp) to exercise the ID-ascending tie-break.
 	tie := base.Add(-2 * time.Hour)
 	seedSQLiteState(t, s.Groups(), persistedState("group:middle-b", "chat-1", StatusDone, tie))
 	seedSQLiteState(t, s.Groups(), persistedState("group:middle-a", "chat-1", StatusDone, tie))
@@ -421,8 +346,6 @@ func TestSnapshotsForSession_OrdersNewestFirst(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_LegacyJSONDirFallback covers deployments without a
-// SQLite repo: the JSON directory is the store.
 func TestSnapshotsForSession_LegacyJSONDirFallback(t *testing.T) {
 	pinGroupRepo(t, nil)
 
@@ -439,9 +362,6 @@ func TestSnapshotsForSession_LegacyJSONDirFallback(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_NoStoreConfiguredUsesMemoryOnly pins that a manager
-// without any persistence still answers from memory (the pre-#239 behaviour must
-// not regress for in-memory groups).
 func TestSnapshotsForSession_NoStoreConfiguredUsesMemoryOnly(t *testing.T) {
 	pinGroupRepo(t, nil)
 
@@ -466,8 +386,6 @@ func TestSnapshotsForSession_NoStoreConfiguredUsesMemoryOnly(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_WithoutResolverMatchesExactly documents the default:
-// no resolver installed means exact OriginChatID matching only.
 func TestSnapshotsForSession_WithoutResolverMatchesExactly(t *testing.T) {
 	s := openSQLiteStoreForSnapshots(t)
 	pinGroupRepo(t, s.Groups())
@@ -485,8 +403,6 @@ func TestSnapshotsForSession_WithoutResolverMatchesExactly(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_StoreFailureDegradesToMemory guarantees an unreadable
-// store never blanks the payload: the client still gets what memory holds.
 func TestSnapshotsForSession_StoreFailureDegradesToMemory(t *testing.T) {
 	dir := t.TempDir()
 	s := newSQLiteStoreAt(t, dir)
@@ -505,7 +421,6 @@ func TestSnapshotsForSession_StoreFailureDegradesToMemory(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 
-	// Break the store: closing the pool makes every read fail.
 	if err := s.Close(); err != nil {
 		t.Fatalf("store.Close: %v", err)
 	}
@@ -516,15 +431,10 @@ func TestSnapshotsForSession_StoreFailureDegradesToMemory(t *testing.T) {
 	}
 }
 
-// TestSnapshotsForSession_LiveRunningGroupIsIncluded covers the in-flight case:
-// a group that is still running must appear with status running so the WebUI can
-// reattach its card mid-run after a reconnect.
 func TestSnapshotsForSession_LiveRunningGroupIsIncluded(t *testing.T) {
 	pinGroupRepo(t, nil)
 
 	exec := newStepExecutor(1)
-	// No storeDir on purpose: this case is about the memory source, and an
-	// unconfigured backend means no async flush can race the test's cleanup.
 	gm := NewGroupManager(mockResolve, exec.execute, (&mockPublisher{}).publish)
 
 	const groupID = "group:live"
@@ -536,7 +446,6 @@ func TestSnapshotsForSession_LiveRunningGroupIsIncluded(t *testing.T) {
 	t.Cleanup(func() { releaseStep(exec); _, _ = gm.Wait(groupID) })
 	exec.waitBlockedFor(t, 2)
 
-	// The group is parked inside turn 2: it is running, with one turn stored.
 	snap, ok := findSnapshot(gm.SnapshotsForSession("chat-6"), groupID)
 	if !ok {
 		t.Fatal("live group not reported by SnapshotsForSession")
@@ -547,7 +456,6 @@ func TestSnapshotsForSession_LiveRunningGroupIsIncluded(t *testing.T) {
 	if len(snap.Turns) != 1 {
 		t.Errorf("len(Turns) = %d, want 1", len(snap.Turns))
 	}
-	// Another session must not see it.
 	if got := gm.SnapshotsForSession("chat-other"); len(got) != 0 {
 		t.Errorf("live group leaked to another session: %v", snapshotIDs(got))
 	}

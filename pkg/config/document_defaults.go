@@ -3,7 +3,6 @@ package config
 func applyDefaults(doc *EditableDocument) *EditableDocument {
 	defaults := defaultEditableDocument()
 
-	// Apply defaults where values are missing.
 	if doc.Agents.Defaults.Workspace == "" {
 		doc.Agents.Defaults.Workspace = defaults.Agents.Defaults.Workspace
 	}
@@ -22,10 +21,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.MaxReadLines == 0 {
 		doc.Agents.Defaults.MaxReadLines = defaults.Agents.Defaults.MaxReadLines
 	}
-	// MemoryMaxLines: like SubagentRetentionMinutes below, an explicit 0 cannot
-	// be told apart from unset in a document, so it inherits the default (500)
-	// instead of disabling the cap — a zero that disabled the limit would let
-	// MEMORY.md grow without bound.
 	if doc.Agents.Defaults.MemoryMaxLines == 0 {
 		doc.Agents.Defaults.MemoryMaxLines = defaults.Agents.Defaults.MemoryMaxLines
 	}
@@ -38,10 +33,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.SubagentMaxRetries == 0 {
 		doc.Agents.Defaults.SubagentMaxRetries = defaults.Agents.Defaults.SubagentMaxRetries
 	}
-	// SubagentRetentionMinutes: like SubagentMaxRetries, an explicit 0 cannot be
-	// told apart from unset here, so it inherits the default (5m). Disabling the
-	// retention sweep is not offered on purpose — an unset knob must never let
-	// the task map grow without bound again.
 	if doc.Agents.Defaults.SubagentRetentionMinutes == 0 {
 		doc.Agents.Defaults.SubagentRetentionMinutes = defaults.Agents.Defaults.SubagentRetentionMinutes
 	}
@@ -49,20 +40,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Agents.Defaults.LLMLoopTimeoutMinutes = defaults.Agents.Defaults.LLMLoopTimeoutMinutes
 	}
 
-	// NOTE: ThinkingLevel is intentionally NOT defaulted here. Like Temperature
-	// (a pointer field), absent must stay absent: nil means "inherit the
-	// provider-model reasoning config". Inventing a code default would make
-	// every config explicitly pin a thinking level and break the inheritance
-	// chain (agents.defaults.thinking_level -> model ReasoningConfig).
-
-	// Defaults for the native channel.
-	// NOTE: the Enabled flags (native, web, and every other channel) are
-	// intentionally NOT defaulted here. A plain bool cannot distinguish
-	// "missing" from an explicit false, and the load path already merged the
-	// file over DefaultConfig() (LoadConfig) before the document was built,
-	// so a missing key carries the code default and an explicit false must
-	// survive untouched. Defaulting "!enabled -> enabled" would clobber a
-	// user's deliberate "enabled: false" (e.g. disabling the Web UI).
 	if doc.Channels.Native.Host == "" {
 		doc.Channels.Native.Host = defaults.Channels.Native.Host
 	}
@@ -106,7 +83,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Channels.Native.RateLimit.WSMessagesPerMinute = defaults.Channels.Native.RateLimit.WSMessagesPerMinute
 	}
 
-	// Defaults for session.
 	if doc.Session.EphemeralThreshold == 0 {
 		doc.Session.EphemeralThreshold = defaults.Session.EphemeralThreshold
 	}
@@ -114,7 +90,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Session.CompactionThresholdPercent = defaults.Session.CompactionThresholdPercent
 	}
 
-	// Defaults for gateway.
 	if doc.Gateway.Host == "" {
 		doc.Gateway.Host = defaults.Gateway.Host
 	}
@@ -122,12 +97,10 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Gateway.Port = defaults.Gateway.Port
 	}
 
-	// Defaults for heartbeat.
 	if doc.Heartbeat.Interval == 0 {
 		doc.Heartbeat.Interval = defaults.Heartbeat.Interval
 	}
 
-	// Defaults for logs.
 	if doc.Logs.Path == "" {
 		doc.Logs.Path = defaults.Logs.Path
 	}
@@ -138,7 +111,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Logs.Rotation = defaults.Logs.Rotation
 	}
 
-	// Defaults for tools.
 	if doc.Tools.Cron.ExecTimeoutMinutes == 0 {
 		doc.Tools.Cron.ExecTimeoutMinutes = defaults.Tools.Cron.ExecTimeoutMinutes
 	}
@@ -146,7 +118,6 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Tools.Exec.TimeoutSeconds = defaults.Tools.Exec.TimeoutSeconds
 	}
 
-	// Inicializar mapas si son nil
 	if doc.Providers == nil {
 		doc.Providers = EditableProvidersConfig{}
 	}
@@ -177,11 +148,6 @@ func defaultEditableDocument() *EditableDocument {
 			List: []EditableAgentConfig{},
 		},
 		Session: EditableSessionConfig{
-			// Ephemeral is NOT taken from DefaultConfig() (true) on purpose:
-			// LoadConfig forces session.ephemeral=false when the file omits
-			// the key, so SessionEphemeralFileDefault is the effective default
-			// of a document read from disk — and this document must be the one
-			// the pruned serializer writes nothing for (see toSerializable).
 			Ephemeral:                  SessionEphemeralFileDefault,
 			EphemeralThreshold:         defaults.Session.EphemeralThreshold,
 			CompactionThresholdPercent: defaults.Session.CompactionThresholdPercent,

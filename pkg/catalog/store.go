@@ -7,7 +7,6 @@ import (
 	"sync"
 )
 
-// Index describes the catalog manifest stored in the GitHub repo and cache.
 type Index struct {
 	Version   int                   `json:"version"`
 	UpdatedAt string                `json:"updated_at,omitempty"`
@@ -15,7 +14,6 @@ type Index struct {
 	Providers map[string]IndexEntry `json:"providers"`
 }
 
-// IndexEntry is a lightweight provider row in index.json (no models).
 type IndexEntry struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -32,22 +30,18 @@ var (
 	cacheDirOverride string
 )
 
-// SetCacheDir overrides the default catalog cache directory for testing.
-// Call ResetCacheDir in t.Cleanup to restore default behaviour.
 func SetCacheDir(dir string) {
 	indexMu.Lock()
 	cacheDirOverride = dir
 	indexMu.Unlock()
 }
 
-// ResetCacheDir clears the test cache directory override.
 func ResetCacheDir() {
 	indexMu.Lock()
 	cacheDirOverride = ""
 	indexMu.Unlock()
 }
 
-// CacheDir returns the lele catalog cache directory (~/.lele/cache/catalog).
 func CacheDir() string {
 	indexMu.RLock()
 	if cacheDirOverride != "" {
@@ -64,18 +58,15 @@ func CacheDir() string {
 	return filepath.Join(home, ".lele", "cache", "catalog")
 }
 
-// IndexPath returns the cached index.json path.
 func IndexPath() string {
 	return filepath.Join(CacheDir(), "index.json")
 }
 
-// ProviderCachePath returns the cached path for one provider file.
 func ProviderCachePath(provider string) string {
 	key := normalizeType(provider)
 	return filepath.Join(CacheDir(), "providers", key+".json")
 }
 
-// LoadIndexFromCache reads index.json from disk into memory. No network.
 func LoadIndexFromCache() error {
 	data, err := os.ReadFile(IndexPath())
 	if err != nil {
@@ -88,7 +79,6 @@ func LoadIndexFromCache() error {
 	if idx.Providers == nil {
 		idx.Providers = map[string]IndexEntry{}
 	}
-	// Normalize keys.
 	norm := make(map[string]IndexEntry, len(idx.Providers))
 	for k, e := range idx.Providers {
 		id := normalizeType(k)
@@ -118,7 +108,6 @@ func setIndex(idx *Index) {
 	indexMu.Unlock()
 }
 
-// loadProviderFromDisk reads ~/.lele/cache/catalog/providers/<id>.json.
 func loadProviderFromDisk(key string) *Provider {
 	path := ProviderCachePath(key)
 	data, err := os.ReadFile(path)
@@ -146,28 +135,23 @@ func writeIndexCache(idx Index) error {
 	return writeJSONAtomic(IndexPath(), idx)
 }
 
-// HasCachedProvider reports whether a provider file exists on disk.
 func HasCachedProvider(provider string) bool {
 	key := normalizeType(provider)
 	_, err := os.Stat(ProviderCachePath(key))
 	return err == nil
 }
 
-// HasCachedIndex reports whether index.json exists on disk.
 func HasCachedIndex() bool {
 	_, err := os.Stat(IndexPath())
 	return err == nil
 }
 
-// ApplyLive replaces the in-memory provider model overlay (used by tests and
-// after a full refresh).
 func ApplyLive(providers map[string]Provider) {
 	live := make(map[string]Provider, len(providers))
 	for k, p := range providers {
 		id := normalizeType(k)
 		p.ID = id
 		live[id] = p
-		// Persist per-provider file so subsequent starts load from disk.
 		_ = writeProviderCache(p)
 	}
 	mu.Lock()
@@ -175,17 +159,12 @@ func ApplyLive(providers map[string]Provider) {
 	mu.Unlock()
 }
 
-// ResetLive clears the in-memory overlay (tests).
 func ResetLive() {
 	mu.Lock()
 	liveProviders = map[string]Provider{}
 	mu.Unlock()
 	indexMu.Lock()
 	memIndex = nil
-	// Ensure() gates on loadOnce; without re-arming it, every subsequent
-	// test that installs a fresh SetCacheDir TempDir finds a nil memIndex
-	// (Ensure is a no-op after the first fire) and sees an empty catalog —
-	// the source of the rest_catalog_test.go flakes under -count>1.
 	loadOnce = sync.Once{}
 	indexMu.Unlock()
 }
@@ -205,8 +184,6 @@ func writeJSONAtomic(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
-// SeedProvider writes a provider into the disk cache and in-memory overlay
-// without network I/O. Intended for tests and offline fixtures.
 func SeedProvider(p Provider) error {
 	key := normalizeType(p.ID)
 	p.ID = key

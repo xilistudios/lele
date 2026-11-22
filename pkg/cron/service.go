@@ -24,7 +24,6 @@ type CronSchedule struct {
 	TZ      string `json:"tz,omitempty"`
 }
 
-// SpawnConfig contains configuration for spawning a subagent from a cron job
 type SpawnConfig struct {
 	Task     string `json:"task"`
 	Label    string `json:"label,omitempty"`
@@ -41,8 +40,8 @@ type CronPayload struct {
 	Channel    string       `json:"channel,omitempty"`
 	To         string       `json:"to,omitempty"`
 	Spawn      *SpawnConfig `json:"spawn,omitempty"`
-	SessionKey string       `json:"session_key,omitempty"` // Originating session key (for session-scoped jobs)
-	AgentID    string       `json:"agent_id,omitempty"`    // Creating agent (issue #234): tools run during job execution inherit this identity.
+	SessionKey string       `json:"session_key,omitempty"`
+	AgentID    string       `json:"agent_id,omitempty"`
 }
 
 type CronJobState struct {
@@ -56,7 +55,7 @@ type CronJob struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
 	Enabled        bool         `json:"enabled"`
-	Scope          string       `json:"scope,omitempty"` // "global" (default) or "session"
+	Scope          string       `json:"scope,omitempty"`
 	Schedule       CronSchedule `json:"schedule"`
 	Payload        CronPayload  `json:"payload"`
 	State          CronJobState `json:"state"`
@@ -70,8 +69,6 @@ type CronStore struct {
 	Jobs    []CronJob `json:"jobs"`
 }
 
-// cronPayloadWithMeta wraps CronPayload to persist DeleteAfterRun inside
-// the payload JSON, since cron_jobs has no dedicated column for it.
 type cronPayloadWithMeta struct {
 	CronPayload
 	DeleteAfterRun bool `json:"delete_after_run,omitempty"`
@@ -88,13 +85,8 @@ type CronService struct {
 	running   bool
 	stopChan  chan struct{}
 	gronx     *gronx.Gronx
-	// executing tracks job IDs currently being executed to prevent
-	// concurrent execution of the same job (e.g. a spawn cron that
-	// hasn't finished before the next tick fires).
 	executing sync.Map
-	// jobWg tracks in-flight job goroutines so Stop() can drain them
-	// with a bounded grace period (CHT-04).
-	jobWg sync.WaitGroup
+	jobWg     sync.WaitGroup
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
@@ -103,7 +95,6 @@ func NewCronService(storePath string, onJob JobHandler) *CronService {
 		onJob:     onJob,
 		gronx:     gronx.New(),
 	}
-	// Initialize and load store on creation
 	cs.loadStore()
 	return cs
 }
@@ -146,9 +137,6 @@ func (cs *CronService) Stop() {
 	}
 	cs.mu.Unlock()
 
-	// Wait for in-flight job goroutines to finish with a bounded grace
-	// period (CHT-04). This prevents callers from closing a DB/store
-	// while a job is still writing to it.
 	const gracePeriod = 10 * time.Second
 	done := make(chan struct{})
 	go func() {
@@ -173,11 +161,6 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 		case <-stopChan:
 			return
 		case <-ticker.C:
-			// Recover from panics in the scheduling tick (CRN-01): without
-			// this guard a single panic would kill the runLoop goroutine
-			// silently, permanently stopping all job scheduling, while the
-			// half-ticked state (mutex, next-run resets) would poison every
-			// later call. Log and keep ticking.
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -193,19 +176,11 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 func (cs *CronService) checkJobs() {
 	dueJobIDs := cs.collectDueJobs()
 
-	// Execute jobs outside lock. Run each in its own goroutine so a slow job
-	// (e.g. a spawn branch waiting on a subagent) can't block the scheduler
-	// and delay every other due job.
 	for _, jobID := range dueJobIDs {
 		go cs.executeJobByID(jobID)
 	}
 }
 
-// collectDueJobs holds the scheduler lock while collecting due jobs and
-// resetting their next-run timestamps. The unlock is deferred (CRN-01) so a
-// panic inside the locked section releases cs.mu instead of poisoning it —
-// with a plain mid-function Unlock, a panic would leave the mutex held
-// forever and deadlock every subsequent cron API call.
 func (cs *CronService) collectDueJobs() []string {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -217,9 +192,6 @@ func (cs *CronService) collectDueJobs() []string {
 	now := time.Now().UnixMilli()
 	var dueJobIDs []string
 
-	// Collect jobs that are due (we need to copy them to execute outside lock)
-	// Skip jobs that are already executing to prevent subagent leaks from
-	// spawn crons that haven't finished before the next tick fires.
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
 		if job.Enabled && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
@@ -231,7 +203,6 @@ func (cs *CronService) collectDueJobs() []string {
 		}
 	}
 
-	// Reset next run for due jobs before unlocking to avoid duplicate execution.
 	dueMap := make(map[string]bool, len(dueJobIDs))
 	for _, jobID := range dueJobIDs {
 		dueMap[jobID] = true
@@ -250,15 +221,9 @@ func (cs *CronService) collectDueJobs() []string {
 }
 
 func (cs *CronService) executeJobByID(jobID string) {
-	// CHT-04: track this goroutine in the WaitGroup so Stop() can drain it.
 	cs.jobWg.Add(1)
-	// Decrement the WaitGroup as the very last defer (LIFO order) so Stop()
-	// only sees this job as done after all cleanup completes.
 	defer cs.jobWg.Done()
 
-	// Recover from panics in the handler so a single bad job can't crash
-	// the process (CHT-01). Placed second so it runs second-to-last in
-	// defer LIFO order, after cs.executing.Delete(jobID) releases the slot.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[cron] PANIC in job %s: %v\n%s", jobID, r, debug.Stack())
@@ -274,8 +239,6 @@ func (cs *CronService) executeJobByID(jobID string) {
 		}
 	}()
 
-	// Mark job as executing so checkJobs won't collect it again while
-	// we're waiting on a long-running handler (e.g. spawn subagent).
 	cs.executing.Store(jobID, true)
 	defer cs.executing.Delete(jobID)
 
@@ -311,7 +274,6 @@ func (cs *CronService) executeJobByID(jobID string) {
 		}()
 	}
 
-	// Now acquire lock to update state
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
@@ -341,7 +303,6 @@ func (cs *CronService) executeJobByID(jobID string) {
 		job.State.LastError = ""
 	}
 
-	// Compute next run time
 	if job.Schedule.Kind == "at" {
 		if job.DeleteAfterRun {
 			cs.removeJobUnsafe(job.ID)
@@ -380,7 +341,6 @@ func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int6
 			return nil
 		}
 
-		// Use gronx to calculate next run time
 		now := time.UnixMilli(nowMS)
 		nextTime, err := gronx.NextTickAfter(schedule.Expr, now, false)
 		if err != nil {
@@ -429,9 +389,6 @@ func (cs *CronService) SetOnJob(handler JobHandler) {
 	cs.onJob = handler
 }
 
-// SetStore switches persistence to the given SQLite repository.
-// If the repository is empty and the legacy jobs.json exists, jobs are
-// migrated lazily on first load. Pass nil to revert to the JSON backend.
 func (cs *CronService) SetStore(repo *store.CronRepo) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -462,8 +419,6 @@ func (cs *CronService) loadStore() error {
 	return json.Unmarshal(data, cs.store)
 }
 
-// loadFromRepo loads jobs from the SQLite repository. If the repo is empty
-// and a legacy JSON file exists, it migrates the jobs lazily.
 func (cs *CronService) loadFromRepo() error {
 	cs.store = &CronStore{
 		Version: 1,
@@ -476,10 +431,9 @@ func (cs *CronService) loadFromRepo() error {
 	}
 
 	if len(rows) == 0 {
-		// Attempt lazy migration from legacy JSON.
 		data, readErr := os.ReadFile(cs.storePath)
 		if os.IsNotExist(readErr) {
-			return nil // no legacy file, empty store
+			return nil
 		}
 		if readErr != nil {
 			return readErr
@@ -501,7 +455,6 @@ func (cs *CronService) loadFromRepo() error {
 		return nil
 	}
 
-	// Load from SQLite.
 	for _, row := range rows {
 		job, convErr := rowToCronJob(&row)
 		if convErr != nil {
@@ -530,17 +483,12 @@ func (cs *CronService) saveStoreUnsafe() error {
 	return os.WriteFile(cs.storePath, data, 0600)
 }
 
-// saveToRepo persists the in-memory jobs to the SQLite repository.
-// Upserts run first, then stale rows are deleted. If a failure occurs
-// mid-operation the worst case is a leftover stale row that is cleaned
-// up on the next save.
 func (cs *CronService) saveToRepo() error {
 	existing, err := cs.repo.ListCronJobs()
 	if err != nil {
 		return fmt.Errorf("cron: list jobs before save: %w", err)
 	}
 
-	// Upsert all current jobs.
 	for i := range cs.store.Jobs {
 		row, convErr := cronJobToRow(&cs.store.Jobs[i])
 		if convErr != nil {
@@ -551,13 +499,11 @@ func (cs *CronService) saveToRepo() error {
 		}
 	}
 
-	// Build set of current IDs for delete sweep.
 	currentIDs := make(map[string]bool, len(cs.store.Jobs))
 	for i := range cs.store.Jobs {
 		currentIDs[cs.store.Jobs[i].ID] = true
 	}
 
-	// Delete stale rows.
 	for _, row := range existing {
 		if !currentIDs[row.ID] {
 			if delErr := cs.repo.DeleteCronJob(row.ID); delErr != nil {
@@ -573,16 +519,12 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 	return cs.AddJobWithOptions(name, schedule, message, deliver, channel, to, "", "")
 }
 
-// AddJobWithOptions adds a job with scope and sessionKey support.
-// scope can be "global" (default) or "session".
-// sessionKey is the originating session key for session-scoped jobs.
 func (cs *CronService) AddJobWithOptions(name string, schedule CronSchedule, message string, deliver bool, channel, to, scope, sessionKey string) (*CronJob, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
 	now := time.Now().UnixMilli()
 
-	// One-time tasks (at) should be deleted after execution
 	deleteAfterRun := (schedule.Kind == "at")
 
 	if scope == "" {
@@ -691,13 +633,6 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	defer cs.mu.RUnlock()
 
 	if includeDisabled {
-		// Return a copy: callers must never hold the live backing array
-		// (CHT-02) — AddJob appends and UpdateJob replaces elements under
-		// cs.mu, so handing out cs.store.Jobs directly is a data race.
-		// NOTE: shallow copy — pointer fields (Schedule.EveryMS/AtMS,
-		// State.*RunAtMS, Payload.Spawn) are still shared with the store.
-		// Readers must treat them as read-only and never mutate through the
-		// pointer (*job.State.NextRunAtMS = x would corrupt the store).
 		out := make([]CronJob, len(cs.store.Jobs))
 		copy(out, cs.store.Jobs)
 		return out
@@ -713,7 +648,6 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	return enabled
 }
 
-// GetJob returns a copy of the job with the given ID, or nil if not found.
 func (cs *CronService) GetJob(jobID string) *CronJob {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
@@ -727,12 +661,7 @@ func (cs *CronService) GetJob(jobID string) *CronJob {
 	return nil
 }
 
-// RunJobNow executes a job immediately without waiting for its schedule and
-// without altering its enabled state or next run time. It records the outcome
-// in the job's state (last run timestamp, status, and error). Returns an error
-// if the job is not found.
 func (cs *CronService) RunJobNow(jobID string) error {
-	// Prevent concurrent execution of the same job.
 	if _, loaded := cs.executing.LoadOrStore(jobID, true); loaded {
 		return fmt.Errorf("job %s is already executing", jobID)
 	}
@@ -800,7 +729,6 @@ func (cs *CronService) Status() map[string]interface{} {
 	}
 }
 
-// cronJobToRow converts a domain CronJob to a store CronJobRow.
 func cronJobToRow(job *CronJob) (*store.CronJobRow, error) {
 	schedJSON, err := json.Marshal(job.Schedule)
 	if err != nil {
@@ -831,7 +759,6 @@ func cronJobToRow(job *CronJob) (*store.CronJobRow, error) {
 	}, nil
 }
 
-// rowToCronJob converts a store CronJobRow to a domain CronJob.
 func rowToCronJob(row *store.CronJobRow) (*CronJob, error) {
 	job := &CronJob{
 		ID:          row.ID,
@@ -857,10 +784,8 @@ func rowToCronJob(row *store.CronJobRow) (*CronJob, error) {
 }
 
 func generateID() string {
-	// Use crypto/rand for better uniqueness under concurrent access
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to time-based if crypto/rand fails
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)

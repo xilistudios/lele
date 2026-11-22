@@ -6,12 +6,9 @@ import (
 	"testing"
 )
 
-// TestSkillInstaller_UninstallTraversal verifies that path traversal in
-// skillName is rejected instead of deleting arbitrary directories.
 func TestSkillInstaller_UninstallTraversal(t *testing.T) {
 	workspace := t.TempDir()
 
-	// Create a directory outside the workspace that must NOT be deleted.
 	victim := filepath.Join(workspace, "..", "victim")
 	if err := os.MkdirAll(victim, 0755); err != nil {
 		t.Fatal(err)
@@ -30,8 +27,6 @@ func TestSkillInstaller_UninstallTraversal(t *testing.T) {
 	}
 }
 
-// TestSkillInstaller_UninstallInvalidNames verifies various malformed names
-// are rejected with an "invalid skill name" error.
 func TestSkillInstaller_UninstallInvalidNames(t *testing.T) {
 	cases := []string{
 		"",
@@ -52,8 +47,6 @@ func TestSkillInstaller_UninstallInvalidNames(t *testing.T) {
 	}
 }
 
-// TestSkillInstaller_UninstallValidSkill verifies a legitimate skill is still
-// removed correctly.
 func TestSkillInstaller_UninstallValidSkill(t *testing.T) {
 	workspace := t.TempDir()
 	skillDir := filepath.Join(workspace, "skills", "my-skill")
@@ -73,8 +66,6 @@ func TestSkillInstaller_UninstallValidSkill(t *testing.T) {
 	}
 }
 
-// TestSkillInstaller_UninstallNotFound verifies a valid but nonexistent skill
-// still returns the "not found" error.
 func TestSkillInstaller_UninstallNotFound(t *testing.T) {
 	si := NewSkillInstaller(t.TempDir())
 	err := si.Uninstall("nonexistent")

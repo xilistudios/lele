@@ -8,7 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
-// detectRestartRequiredSections determines which sections require a restart.
 func detectRestartRequiredSections(doc *EditableDocument) []string {
 	_ = doc
 	return []string{
@@ -23,18 +22,14 @@ func detectRestartRequiredSections(doc *EditableDocument) []string {
 		"channels.line",
 		"channels.onebot",
 		"channels.native",
-		// The gateway decides whether to serve the Web UI SPA once at startup
-		// (shouldServeWebUI), so toggling channels.web needs a restart.
 		"channels.web",
 		"gateway",
 	}
 }
 
-// ValidateEditableDocument validates the editable document.
 func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 	var errors []ValidationError
 
-	// Validate agents.
 	if doc.Agents.Defaults.Workspace == "" {
 		errors = append(errors, ValidationError{
 			Path:    "agents.defaults.workspace",
@@ -75,10 +70,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		})
 	}
 
-	// Validate agents.defaults.thinking_level. nil = inherit (valid, nothing
-	// to check). A non-nil pointer holding "", "default" or "none" normalizes
-	// to inherit and is also valid; only values outside the whitelist fail.
-	// Env vars are not consulted here: the document is validated as-is.
 	if v := doc.Agents.Defaults.ThinkingLevel; v != nil {
 		if _, ok := NormalizeThinkingLevel(*v); !ok {
 			errors = append(errors, ValidationError{
@@ -89,7 +80,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate per-agent thinking_level (same semantics as defaults).
 	for i, agent := range doc.Agents.List {
 		if v := agent.ThinkingLevel; v != nil {
 			if _, ok := NormalizeThinkingLevel(*v); !ok {
@@ -102,7 +92,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate channels.telegram.verbose.
 	if doc.Channels.Telegram.Verbose != "" {
 		validVerbose := map[string]bool{"off": true, "basic": true, "full": true}
 		if !validVerbose[strings.ToLower(string(doc.Channels.Telegram.Verbose))] {
@@ -114,7 +103,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate logs.rotation.
 	if doc.Logs.Rotation != "" {
 		validRotations := map[string]bool{"daily": true, "weekly": true}
 		if !validRotations[strings.ToLower(doc.Logs.Rotation)] {
@@ -126,7 +114,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate heartbeat.interval.
 	if doc.Heartbeat.Enabled && doc.Heartbeat.Interval < 5 {
 		errors = append(errors, ValidationError{
 			Path:    "heartbeat.interval",
@@ -135,7 +122,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		})
 	}
 
-	// Validate native channel.
 	if doc.Channels.Native.Enabled {
 		if doc.Channels.Native.Port <= 0 || doc.Channels.Native.Port > 65535 {
 			errors = append(errors, ValidationError{
@@ -146,10 +132,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate native rate limits: negative values are always invalid.
-	// 0 is legal (means "use the built-in default"); validated regardless
-	// of whether rate limiting is enabled so bad values don't lie dormant
-	// until the user flips the flag.
 	type rateLimitCheck struct {
 		path string
 		val  int
@@ -170,7 +152,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate duplicate providers.
 	providerNames := make(map[string]bool)
 	for name := range doc.Providers {
 		lowerName := strings.ToLower(name)
@@ -184,18 +165,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		providerNames[lowerName] = true
 	}
 
-	// Validate per-provider custom headers, field by field like every other
-	// provider check here. ProvidersConfig.UnmarshalJSON keeps its own check as
-	// the load-time backstop (it is the single choke point shared by config load
-	// and both PUT/validate handlers), but it reports a global error: the
-	// handlers would answer {path:"config", code:"config_invalid"} and the WebUI
-	// could not highlight the culprit — or even tell the user which provider to
-	// fix. Here the Path carries "providers.<name>.headers" and the Message is
-	// the validator's own text, which names the offending header.
-	//
-	// Sorted because doc.Providers is a map and the error list is shown to
-	// users: iteration order would otherwise decide which provider is reported
-	// first (and break the assertions below).
 	sortedProviderNames := make([]string, 0, len(doc.Providers))
 	for name := range doc.Providers {
 		sortedProviderNames = append(sortedProviderNames, name)
@@ -212,7 +181,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
-	// Validate duplicate agent IDs.
 	agentIDs := make(map[string]bool)
 	for _, agent := range doc.Agents.List {
 		if agentIDs[agent.ID] {
@@ -225,7 +193,6 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		agentIDs[agent.ID] = true
 	}
 
-	// Validate groups.
 	if err := doc.Groups.ValidateGroups(); err != nil {
 		errors = append(errors, ValidationError{
 			Path:    "groups",

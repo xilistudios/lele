@@ -95,7 +95,6 @@ func TestBuildAgentPeerSessionKey_NilPeer(t *testing.T) {
 		Peer:    nil,
 		DMScope: DMScopePerPeer,
 	})
-	// nil peer defaults to direct with empty ID, falls to main
 	want := "agent:main:main"
 	if got != want {
 		t.Errorf("NilPeer = %q, want %q", got, want)
@@ -165,11 +164,6 @@ func TestIsSubagentSessionKey(t *testing.T) {
 	}
 }
 
-// ─── Cross-channel session unification tests (Phase 6) ────────────────────
-
-// TestCrossChannel_UnifiedSession_PerPeer verifies the core unification scenario:
-// same user on Telegram + WhatsApp + Discord with dm_scope=per-peer gets the
-// same session key, enabling shared conversation history.
 func TestCrossChannel_UnifiedSession_PerPeer(t *testing.T) {
 	links := map[string][]string{
 		"john": {"telegram:123456", "whatsapp:+1234567890", "discord:john#1234"},
@@ -188,7 +182,6 @@ func TestCrossChannel_UnifiedSession_PerPeer(t *testing.T) {
 	waKey := BuildAgentPeerSessionKey(params("whatsapp", "+1234567890"))
 	dcKey := BuildAgentPeerSessionKey(params("discord", "john#1234"))
 
-	// All three should resolve to the identity-linked canonical key
 	want := "agent:main:direct:john"
 	if tgKey != want {
 		t.Errorf("Telegram key = %q, want %q", tgKey, want)
@@ -201,9 +194,6 @@ func TestCrossChannel_UnifiedSession_PerPeer(t *testing.T) {
 	}
 }
 
-// TestCrossChannel_SeparateSession_PerChannelPeer verifies that with
-// dm_scope=per-channel-peer, the same linked user gets different sessions
-// per channel.
 func TestCrossChannel_SeparateSession_PerChannelPeer(t *testing.T) {
 	links := map[string][]string{
 		"john": {"telegram:123456", "whatsapp:+1234567890"},
@@ -233,12 +223,8 @@ func TestCrossChannel_SeparateSession_PerChannelPeer(t *testing.T) {
 	}
 }
 
-// TestCrossChannel_GroupSessionsRemainIsolated verifies that group sessions
-// always include the channel+group in the key and never unify cross-channel,
-// even with identity links.
 func TestCrossChannel_GroupSessionsRemainIsolated(t *testing.T) {
 	links := map[string][]string{
-		// Identity links should NOT affect group sessions
 		"team": {"telegram:group100", "discord:channel200"},
 	}
 
@@ -261,7 +247,6 @@ func TestCrossChannel_GroupSessionsRemainIsolated(t *testing.T) {
 		t.Errorf("group sessions should never unify cross-channel, both got %q", tgKey)
 	}
 
-	// Groups always include channel prefix
 	if tgKey != "agent:main:telegram:group:group100" {
 		t.Errorf("Telegram group key = %q, want %q", tgKey, "agent:main:telegram:group:group100")
 	}
@@ -270,8 +255,6 @@ func TestCrossChannel_GroupSessionsRemainIsolated(t *testing.T) {
 	}
 }
 
-// TestCrossChannel_IdentityLink_ResolveMultiple verifies that a single identity
-// can have many linked identifiers across channels and they all resolve to the same key.
 func TestCrossChannel_IdentityLink_ResolveMultiple(t *testing.T) {
 	links := map[string][]string{
 		"alice": {
@@ -317,9 +300,6 @@ func TestCrossChannel_IdentityLink_ResolveMultiple(t *testing.T) {
 	}
 }
 
-// TestCrossChannel_ResolveRoute_CrossChannelSameKey verifies the full pipeline:
-// RouteResolver.ResolveRoute() produces the same session key for a linked user
-// arriving from different channels with dm_scope=per-peer.
 func TestCrossChannel_ResolveRoute_CrossChannelSameKey(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -360,16 +340,12 @@ func TestCrossChannel_ResolveRoute_CrossChannelSameKey(t *testing.T) {
 		t.Errorf("Telegram=%q vs Discord=%q — should be same session", tgRoute.SessionKey, dcRoute.SessionKey)
 	}
 
-	// Verify the expected canonical key
 	want := "agent:main:direct:john"
 	if tgRoute.SessionKey != want {
 		t.Errorf("SessionKey = %q, want %q", tgRoute.SessionKey, want)
 	}
 }
 
-// TestCrossChannel_ResolveRoute_PerChannelPeer_ProducesDifferentKeys verifies
-// that the full pipeline with per-channel-peer scope produces distinct session
-// keys per channel even with identity links.
 func TestCrossChannel_ResolveRoute_PerChannelPeer_ProducesDifferentKeys(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -404,8 +380,6 @@ func TestCrossChannel_ResolveRoute_PerChannelPeer_ProducesDifferentKeys(t *testi
 	}
 }
 
-// TestCrossChannel_ResolveRoute_GroupRoutes correctly verifies that group
-// routes are always channel-scoped and never unified.
 func TestCrossChannel_ResolveRoute_GroupRoutes(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

@@ -6,12 +6,6 @@ import (
 	"sync"
 )
 
-// DefaultAPIBaseByType returns the default OpenAI-compatible base URL for a
-// known provider type. Empty string means the type has no built-in default.
-//
-// This table is intentionally hardcoded (not embedded catalog models) so
-// factory/onboard work offline before any catalog download. Disk index values
-// are preferred when present.
 func DefaultAPIBaseByType(providerType string) string {
 	t := normalizeType(providerType)
 	if base, ok := indexAPIBase(t); ok && base != "" {
@@ -112,29 +106,10 @@ func DefaultAPIBaseByType(providerType string) string {
 	return ""
 }
 
-// BaseLessProviderTypes returns the known provider ids that deliberately have
-// no built-in endpoint: the user supplies one, or the transport is not HTTP.
-//
-// It exists so the WebUI can pre-fill an api_base for every provider it offers
-// without hardcoding a second copy of the table, and so a test can assert the
-// complement (every other known id resolves to a non-empty
-// DefaultAPIBaseByType) instead of drifting silently.
-//
-//   - custom: the "OpenAI compatible" tile, by definition user-supplied.
-//   - claude-code / codex-cli: local CLI transports, no HTTP endpoint.
-//   - bedrock: the AWS SDK resolves the endpoint from the region.
-//   - azure_foundry: the endpoint embeds the deployment name.
 func BaseLessProviderTypes() []string {
 	return []string{"custom", "claude-code", "codex-cli", "bedrock", "azure_foundry"}
 }
 
-// IsBaseLessProviderType reports whether providerType is one of
-// BaseLessProviderTypes. Matching goes through normalizeType, so aliases
-// ("azure", "aws") are recognised too.
-//
-// "claude-code" is matched before normalizing on purpose: normalizeType maps
-// it to "anthropic" (the catalog id for the API provider), while the WebUI
-// type of that name is the local CLI transport, which has no endpoint.
 func IsBaseLessProviderType(providerType string) bool {
 	raw := strings.ToLower(strings.TrimSpace(providerType))
 	if raw == "claude-code" || raw == "claudecode" {
@@ -149,8 +124,6 @@ func IsBaseLessProviderType(providerType string) bool {
 	return false
 }
 
-// KnownProviderTypes returns catalog provider IDs sorted for UI pickers.
-// Prefers the disk index; falls back to hardcoded known IDs.
 func KnownProviderTypes() []string {
 	if idx := loadIndex(); idx != nil {
 		out := make([]string, 0, len(idx.Providers))
@@ -166,8 +139,6 @@ func KnownProviderTypes() []string {
 	return out
 }
 
-// ProviderByID returns a catalog provider by ID/alias.
-// Models are loaded lazily from the per-provider cache file.
 func ProviderByID(id string) (Provider, bool) {
 	key := normalizeType(id)
 	p, ok := providerMeta(key)
@@ -178,13 +149,6 @@ func ProviderByID(id string) (Provider, bool) {
 	return p, true
 }
 
-// Providers returns provider metadata (models omitted) keyed by normalized ID.
-//
-// The api_base is always populated when the type has a known endpoint: the
-// disk index wins (it is the fresher source), and the hardcoded
-// DefaultAPIBaseByType table fills the gaps. That makes the list directly
-// usable as a UI picker — a client can pre-fill the endpoint of every provider
-// it offers instead of shipping a second copy of the table (issue #404).
 func Providers() map[string]Provider {
 	if idx := loadIndex(); idx != nil {
 		out := make(map[string]Provider, len(idx.Providers))
@@ -211,8 +175,6 @@ func Providers() map[string]Provider {
 	return out
 }
 
-// ModelsForProvider returns catalog models for a provider ID/alias.
-// Loads only that provider's file from disk cache (or in-memory overlay).
 func ModelsForProvider(provider string) []Model {
 	key := normalizeType(provider)
 
@@ -225,7 +187,6 @@ func ModelsForProvider(provider string) []Model {
 
 	p := loadProviderFromDisk(key)
 	if p == nil {
-		// Kick a background download for this provider if nothing is cached.
 		if !offlineMode() {
 			EnsureProviderAsync(key)
 		}
@@ -239,7 +200,6 @@ func offlineMode() bool {
 		envOr("LELE_CATALOG_OFFLINE", "") == "true"
 }
 
-// FindModel looks up a model by provider + model ID (case-insensitive).
 func FindModel(provider, modelID string) (Model, bool) {
 	want := strings.ToLower(strings.TrimSpace(modelID))
 	for _, m := range ModelsForProvider(provider) {
@@ -254,7 +214,6 @@ func FindModel(provider, modelID string) (Model, bool) {
 	return Model{}, false
 }
 
-// SearchModels filters provider models by substring query (ID or name).
 func SearchModels(provider, query string) []Model {
 	models := ModelsForProvider(provider)
 	q := strings.ToLower(strings.TrimSpace(query))
@@ -271,7 +230,6 @@ func SearchModels(provider, query string) []Model {
 	return out
 }
 
-// ModelDefaults are prefill values when adding a model to config.
 type ModelDefaults struct {
 	ContextWindow  int
 	MaxTokens      int
@@ -280,7 +238,6 @@ type ModelDefaults struct {
 	Reasoning      bool
 }
 
-// DefaultsFor returns prefill defaults for adding a model to config.
 func DefaultsFor(provider, modelID string) (ModelDefaults, bool) {
 	m, ok := FindModel(provider, modelID)
 	if !ok {
@@ -372,7 +329,6 @@ func normalizeType(t string) string {
 	return t
 }
 
-// hardcodedProviderIDs is the offline-known provider set (no models).
 var hardcodedProviderIDs = []string{
 	"alibaba", "alibaba_coding_plan", "alibaba_token_plan", "alibaba_token_plan_cn", "anthropic", "arcee", "azure_foundry",
 	"bedrock", "cerebras", "chutes", "deepseek", "fireworks", "gemini", "gmi",
@@ -431,6 +387,5 @@ var (
 
 func init() {
 	liveProviders = map[string]Provider{}
-	// Best-effort: load index from disk if present. No network.
 	_ = LoadIndexFromCache()
 }

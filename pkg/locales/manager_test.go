@@ -107,9 +107,6 @@ func TestInstallAndUninstall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Point raw URL host at the test server by rewriting via custom transport
-	// is overkill — override raw URL by swapping repo path through a reverse
-	// proxy style client. We use a custom RoundTripper that redirects.
 	m.client = &http.Client{
 		Timeout:   5 * time.Second,
 		Transport: rewriteHost{base: srv.URL},
@@ -140,7 +137,6 @@ func TestInstallAndUninstall(t *testing.T) {
 		t.Fatalf("web JSON: %v", err)
 	}
 
-	// Catalog refresh should mark fr listed + installed.
 	list := m.List(ctx)
 	var fr *Status
 	for i := range list {
@@ -217,7 +213,6 @@ func TestSortLanguagesBuiltinsFirst(t *testing.T) {
 	}
 }
 
-// rewriteHost sends raw.githubusercontent.com requests to a local test server.
 type rewriteHost struct {
 	base string
 }
@@ -244,9 +239,7 @@ func TestInstalledCodesReadsDisk(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(m.cacheDir, "web"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Incomplete (tui only) — must not count.
 	_ = os.WriteFile(m.TUIPath("de"), []byte(`{"a":"b"}`), 0o644)
-	// Complete.
 	_ = os.WriteFile(m.TUIPath("fr"), []byte(`{"a":"b"}`), 0o644)
 	_ = os.WriteFile(m.WebPath("fr"), []byte(`{"a":{"b":"c"}}`), 0o644)
 

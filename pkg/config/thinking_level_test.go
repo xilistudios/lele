@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// TestNormalizeThinkingLevel pins the canonicalization contract for
-// agents(.defaults).thinking_level: sentinels mean "inherit" ("" + ok),
-// the whitelist passes through lowercased/trimmed, anything else is invalid.
 func TestNormalizeThinkingLevel(t *testing.T) {
 	tests := []struct {
 		name string
@@ -18,7 +15,6 @@ func TestNormalizeThinkingLevel(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		// Sentinels: valid, mean "no explicit level, inherit".
 		{"empty", "", "", true},
 		{"default", "default", "", true},
 		{"Default mixed case", "Default", "", true},
@@ -27,7 +23,6 @@ func TestNormalizeThinkingLevel(t *testing.T) {
 		{"spaces only", "   ", "", true},
 		{"default with padding", "  default  ", "", true},
 		{"none with padding", "\tnone\n", "", true},
-		// Whitelist: valid, canonical lowercase output.
 		{"off", "off", "off", true},
 		{"OFF", "OFF", "off", true},
 		{"  Off  ", "  Off ", "off", true},
@@ -38,7 +33,6 @@ func TestNormalizeThinkingLevel(t *testing.T) {
 		{"Medium", "Medium", "medium", true},
 		{"high", "high", "high", true},
 		{"HIGH padded", "  HIGH  ", "high", true},
-		// Invalid: ok=false and empty output.
 		{"ultra", "ultra", "", false},
 		{"minimal", "minimal", "", false},
 		{"max", "max", "", false},
@@ -63,9 +57,6 @@ func TestNormalizeThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestReasoningConfigValidateUnchangedByThinkingLevel documents that the
-// per-MODEL reasoning validation keeps its own semantics: "off" is NOT a
-// valid model reasoning effort even though it is a valid thinking_level.
 func TestReasoningConfigValidateUnchangedByThinkingLevel(t *testing.T) {
 	off := "off"
 	r := &ReasoningConfig{Effort: &off}
@@ -79,12 +70,6 @@ func TestReasoningConfigValidateUnchangedByThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_ThinkingLevelRoundTrip pins the WebUI save path for
-// agents.defaults.thinking_level and agents.list[i].thinking_level (review
-// R1): a value set anywhere in the editor must survive
-// editableDocumentFromConfig -> ToConfig AND must appear in toSerializable
-// (the map actually written to disk). Without the second assertion,
-// agents.defaults.thinking_level silently evaporates on gateway restart.
 func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 	high := "high"
 	low := "low"
@@ -92,8 +77,6 @@ func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 
 	cfg := &Config{}
 	cfg.Agents.Defaults.ThinkingLevel = &high
-	// Non-zero values for the two fields the old hand-written map dropped:
-	// they carry omitempty, so a zero value would legitimately be absent.
 	cfg.Agents.Defaults.MaxReadLines = 500
 	cfg.Agents.Defaults.SubagentMaxIterations = 40
 	cfg.Agents.List = []AgentConfig{
@@ -102,7 +85,6 @@ func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 
 	doc := editableDocumentFromConfig(cfg)
 
-	// editableDocumentFromConfig must carry the values into the document.
 	if doc.Agents.Defaults.ThinkingLevel == nil || *doc.Agents.Defaults.ThinkingLevel != "high" {
 		t.Fatalf("doc defaults thinking_level = %v, want \"high\"", doc.Agents.Defaults.ThinkingLevel)
 	}
@@ -113,7 +95,6 @@ func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 		t.Fatalf("doc agent thinking_level = %v, want \"low\"", doc.Agents.List[0].ThinkingLevel)
 	}
 
-	// ToConfig must copy both back out.
 	got, err := doc.ToConfig()
 	if err != nil {
 		t.Fatalf("ToConfig: %v", err)
@@ -127,14 +108,10 @@ func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 	if got.Agents.List[0].ThinkingLevel == nil || *got.Agents.List[0].ThinkingLevel != "low" {
 		t.Errorf("ToConfig agent thinking_level = %v, want \"low\"", got.Agents.List[0].ThinkingLevel)
 	}
-	// Side-fix: Temperature used to be dropped by the ToConfig agents loop.
 	if got.Agents.List[0].Temperature == nil || *got.Agents.List[0].Temperature != 0.3 {
 		t.Errorf("ToConfig agent temperature = %v, want 0.3 (preexisting drop must stay fixed)", got.Agents.List[0].Temperature)
 	}
 
-	// toSerializable (the map actually written to disk) must carry the fields.
-	// Serialize through JSON first: defaults and list are now emitted as whole
-	// structs, so the on-disk shape is what matters.
 	raw, err := json.Marshal(doc.toSerializable())
 	if err != nil {
 		t.Fatalf("marshal serializable: %v", err)
@@ -154,8 +131,6 @@ func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 	if defaults["thinking_level"] != "high" {
 		t.Errorf("serialized defaults thinking_level = %v, want \"high\"", defaults["thinking_level"])
 	}
-	// Regression guard for the structural fix: these two fields were silently
-	// dropped by the old hand-written defaults map on every WebUI save.
 	if _, ok := defaults["max_read_lines"]; !ok {
 		t.Error("max_read_lines missing from serialized agents.defaults (structural fix regressed)")
 	}
@@ -178,9 +153,6 @@ func TestEditableDocument_ThinkingLevelRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_ThinkingLevelNilStaysAbsent asserts the tri-state:
-// an unset thinking_level must not be materialized as "" or a code default
-// anywhere in the save path (nil = inherit).
 func TestEditableDocument_ThinkingLevelNilStaysAbsent(t *testing.T) {
 	doc := editableDocumentFromConfig(&Config{})
 	if doc.Agents.Defaults.ThinkingLevel != nil {
@@ -205,8 +177,6 @@ func TestEditableDocument_ThinkingLevelNilStaysAbsent(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_ThinkingLevelSaveLoadRoundTrip covers the full disk
-// path used by the WebUI: SaveEditableDocument -> LoadEditableDocument.
 func TestEditableDocument_ThinkingLevelSaveLoadRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
@@ -247,7 +217,6 @@ func TestEditableDocument_ThinkingLevelSaveLoadRoundTrip(t *testing.T) {
 		t.Errorf("loaded agent thinking_level = %v, want \"low\"", loaded.Agents.List[0].ThinkingLevel)
 	}
 
-	// Runtime path: LoadConfig (used by the gateway reload) must see it too.
 	runtime, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -260,13 +229,9 @@ func TestEditableDocument_ThinkingLevelSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-// TestValidateEditableDocument_ThinkingLevel covers the whitelist: invalid
-// values produce one issue with the right Path for defaults and for each
-// list entry; inherit sentinels and "off" are accepted.
 func TestValidateEditableDocument_ThinkingLevel(t *testing.T) {
 	ptr := func(s string) *string { return &s }
 
-	// findIssue returns the issue for path, or nil.
 	findIssue := func(issues []ValidationError, path string) *ValidationError {
 		for i := range issues {
 			if issues[i].Path == path {
@@ -294,8 +259,8 @@ func TestValidateEditableDocument_ThinkingLevel(t *testing.T) {
 		name        string
 		defaults    *string
 		agentLevels []*string
-		wantErrAt   []string // paths that must be reported
-		wantOKAt    []string // paths that must NOT be reported
+		wantErrAt   []string
+		wantOKAt    []string
 	}{
 		{
 			name:     "invalid ultra in defaults",

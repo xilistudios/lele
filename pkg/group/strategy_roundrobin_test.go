@@ -13,7 +13,6 @@ func TestRoundRobinStrategy_Name(t *testing.T) {
 }
 
 func TestRoundRobinStrategy_CycleOrder(t *testing.T) {
-	// 3 participants, Rounds=2 → expect A,B,C,A,B,C then done.
 	state := &GroupState{
 		ID:       "rr-test",
 		Status:   StatusRunning,
@@ -40,11 +39,9 @@ func TestRoundRobinStrategy_CycleOrder(t *testing.T) {
 		if len(speakers) != 1 || speakers[0] != want {
 			t.Fatalf("turn %d: speakers = %v, want [%s]", i, speakers, want)
 		}
-		// Simulate the runner appending the turn with unique content to avoid converged_repetition.
 		state.AddTurn(Turn{Index: i, Layer: 0, Speaker: speakers[0], Content: "response " + speakers[0] + " turn" + fmt.Sprint(i)})
 	}
 
-	// After 6 turns (2 rounds × 3 participants), should be done.
 	speakers, done, err := s.Next(state)
 	if err != nil {
 		t.Fatalf("after 6 turns: Next() error: %v", err)
@@ -58,7 +55,6 @@ func TestRoundRobinStrategy_CycleOrder(t *testing.T) {
 }
 
 func TestRoundRobinStrategy_MaxTurnsHardStop(t *testing.T) {
-	// MaxTurns=4 with 3 participants: should stop at turn 4 before completing 2 full rounds.
 	state := &GroupState{
 		ID:       "rr-max",
 		Status:   StatusRunning,
@@ -73,7 +69,6 @@ func TestRoundRobinStrategy_MaxTurnsHardStop(t *testing.T) {
 
 	s := &RoundRobinStrategy{}
 
-	// Turns 0-3 should proceed.
 	for i := 0; i < 4; i++ {
 		speakers, done, err := s.Next(state)
 		if err != nil {
@@ -85,7 +80,6 @@ func TestRoundRobinStrategy_MaxTurnsHardStop(t *testing.T) {
 		state.AddTurn(Turn{Index: i, Layer: 0, Speaker: speakers[0], Content: fmt.Sprintf("turn %d", i)})
 	}
 
-	// Turn 4: MaxTurns=4 and len(transcript)=4 → stop.
 	_, done, err := s.Next(state)
 	if err != nil {
 		t.Fatalf("turn 4: error: %v", err)
@@ -108,13 +102,12 @@ func TestRoundRobinStrategy_NoParticipants(t *testing.T) {
 }
 
 func TestRoundRobinStrategy_ZeroRounds(t *testing.T) {
-	// Rounds=0 means unlimited (only MaxTurns or StopReason can stop it).
 	state := &GroupState{
 		ID:       "rr-zero",
 		Status:   StatusRunning,
 		Strategy: "round_robin",
 		Rounds:   0,
-		MaxTurns: 0, // no limit
+		MaxTurns: 0,
 		Participants: []Participant{
 			{AgentID: "A"},
 			{AgentID: "B"},
@@ -122,7 +115,6 @@ func TestRoundRobinStrategy_ZeroRounds(t *testing.T) {
 	}
 
 	s := &RoundRobinStrategy{}
-	// Run 10 turns, should all succeed.
 	for i := 0; i < 10; i++ {
 		speakers, done, err := s.Next(state)
 		if err != nil {
@@ -150,7 +142,6 @@ func TestRoundRobinStrategy_LayerAlwaysZero(t *testing.T) {
 	speakers, _, _ := s.Next(state)
 	state.AddTurn(Turn{Index: 0, Layer: 0, Speaker: speakers[0], Content: "unique content"})
 
-	// Verify the runner set Layer=0 (as per spec, round_robin always uses layer 0).
 	if state.Transcript[0].Layer != 0 {
 		t.Errorf("Layer = %d, want 0", state.Transcript[0].Layer)
 	}

@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// toolCallExecutor is a TurnExecutor that invokes OnToolCall twice
-// (executing then completed) for a single tool call, then returns content.
 type toolCallExecutor struct {
 	toolID   string
 	toolName string
@@ -82,7 +80,6 @@ func TestToolCalls_PersistedOnTurn(t *testing.T) {
 		t.Errorf("Result = %q, want %q", tc.Result, "ok")
 	}
 
-	// Verify group.tool events were still published (bus side unchanged).
 	toolEvents := pub.byEvent("group.tool")
 	if len(toolEvents) != 2 {
 		t.Errorf("group.tool events = %d, want 2", len(toolEvents))
@@ -121,7 +118,6 @@ func TestToolCalls_NoToolCallsMeansNilSlice(t *testing.T) {
 	}
 }
 
-// errorToolCallExecutor invokes OnToolCall with status "executing" then "error".
 type errorToolCallExecutor struct {
 	toolID   string
 	toolName string
@@ -185,7 +181,6 @@ func TestToolCalls_ErrorStatus(t *testing.T) {
 	}
 }
 
-// multiToolCallExecutor invokes OnToolCall for two distinct tool calls.
 type multiToolCallExecutor struct{}
 
 func (e *multiToolCallExecutor) execute(_ context.Context, req TurnRequest) (string, int, error) {
@@ -229,7 +224,6 @@ func TestToolCalls_MultipleDistinctCalls(t *testing.T) {
 		t.Fatalf("ToolCalls length = %d, want 2", len(turn.ToolCalls))
 	}
 
-	// Verify both are present and completed.
 	byID := make(map[string]GroupToolCall)
 	for _, tc := range turn.ToolCalls {
 		byID[tc.ToolCallID] = tc
@@ -252,7 +246,6 @@ func TestToolCalls_MultipleDistinctCalls(t *testing.T) {
 	}
 }
 
-// completedOnlyExecutor sends a "completed" event without a prior "executing".
 type completedOnlyExecutor struct{}
 
 func (e *completedOnlyExecutor) execute(_ context.Context, req TurnRequest) (string, int, error) {
@@ -305,9 +298,8 @@ func TestToolCalls_CompletedWithoutExecuting(t *testing.T) {
 	}
 }
 
-// Verify that tool calls from one speaker don't leak into another speaker's turn.
 type speakerSpecificExecutor struct {
-	calls map[string]*toolCallExecutor // keyed by speaker
+	calls map[string]*toolCallExecutor
 }
 
 func (e *speakerSpecificExecutor) execute(_ context.Context, req TurnRequest) (string, int, error) {
@@ -324,7 +316,6 @@ func TestToolCalls_IsolatedPerSpeaker(t *testing.T) {
 	exec := &speakerSpecificExecutor{
 		calls: map[string]*toolCallExecutor{
 			"a": {toolID: "call-a", toolName: "tool_a", args: `{"a":1}`, result: "res-a"},
-			// "b" has no tool calls.
 		},
 	}
 	pub := &mockPublisher{}
@@ -355,12 +346,10 @@ func TestToolCalls_IsolatedPerSpeaker(t *testing.T) {
 		t.Fatalf("transcript length = %d, want 2", len(st.Transcript))
 	}
 
-	// Turn 0 (speaker "a") should have tool calls.
 	if len(st.Transcript[0].ToolCalls) != 1 {
 		t.Errorf("turn[0].ToolCalls length = %d, want 1", len(st.Transcript[0].ToolCalls))
 	}
 
-	// Turn 1 (speaker "b") should have no tool calls.
 	if st.Transcript[1].ToolCalls != nil {
 		t.Errorf("turn[1].ToolCalls = %v, want nil", st.Transcript[1].ToolCalls)
 	}

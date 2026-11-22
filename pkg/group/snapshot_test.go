@@ -9,8 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// --- BuildSnapshot tests ---
-
 func TestBuildSnapshot_MapsTurnsAndRoleMapping(t *testing.T) {
 	createdAt := time.Date(2025, 6, 15, 10, 30, 0, 0, time.UTC)
 	state := &GroupState{
@@ -63,7 +61,6 @@ func TestBuildSnapshot_MapsTurnsAndRoleMapping(t *testing.T) {
 		t.Errorf("OriginChatID = %s, want chat-1", snap.OriginChatID)
 	}
 
-	// Layers = max layer (1) + 1 = 2.
 	if snap.Layers != 2 {
 		t.Errorf("Layers = %d, want 2", snap.Layers)
 	}
@@ -72,7 +69,6 @@ func TestBuildSnapshot_MapsTurnsAndRoleMapping(t *testing.T) {
 		t.Fatalf("turns len = %d, want 3", len(snap.Turns))
 	}
 
-	// Role mapping: proposer -> "proposer", aggregator -> "aggregator", "" -> "proposer"
 	expectedRoles := []string{"proposer", "aggregator", "proposer"}
 	for i, want := range expectedRoles {
 		if snap.Turns[i].Role != want {
@@ -80,14 +76,12 @@ func TestBuildSnapshot_MapsTurnsAndRoleMapping(t *testing.T) {
 		}
 	}
 
-	// Turn index mapping.
 	for i, turn := range snap.Turns {
 		if turn.TurnIndex != i {
 			t.Errorf("turn[%d].TurnIndex = %d, want %d", i, turn.TurnIndex, i)
 		}
 	}
 
-	// Layer mapping.
 	if snap.Turns[0].Layer != 0 || snap.Turns[2].Layer != 1 {
 		t.Errorf("layers not mapped correctly")
 	}
@@ -150,7 +144,6 @@ func TestBuildSnapshot_ToolCallsCopied(t *testing.T) {
 		t.Errorf("tool_call_id = %s, want tc1", snap.Turns[0].ToolCalls[0].ToolCallID)
 	}
 
-	// Mutating the original should not affect the snapshot.
 	tc[0].ToolCallID = "mutated"
 	if snap.Turns[0].ToolCalls[0].ToolCallID != "tc1" {
 		t.Error("snapshot shares backing array with original tool calls")
@@ -158,7 +151,6 @@ func TestBuildSnapshot_ToolCallsCopied(t *testing.T) {
 }
 
 func TestBuildSnapshot_SliceCopied(t *testing.T) {
-	// Verify snapshot doesn't share backing arrays with state.
 	state := &GroupState{
 		ID:       "g5",
 		Status:   StatusRunning,
@@ -174,7 +166,6 @@ func TestBuildSnapshot_SliceCopied(t *testing.T) {
 
 	snap := BuildSnapshot(state, "")
 
-	// Mutate original.
 	state.Participants[0].AgentID = "mutated"
 	state.Transcript[0].Content = "mutated"
 
@@ -206,9 +197,6 @@ func TestBuildSnapshot_RoleMappingAll(t *testing.T) {
 	}
 }
 
-// --- AllSnapshots tests ---
-
-// snapshotMockResolve returns agents "a" and "b".
 func snapshotMockResolve(agentID string) (AgentContext, bool) {
 	known := map[string]string{"a": "A", "b": "B"}
 	name, ok := known[agentID]
@@ -218,7 +206,6 @@ func snapshotMockResolve(agentID string) (AgentContext, bool) {
 	return AgentContext{AgentID: agentID, Name: name, SystemPrompt: "p"}, true
 }
 
-// snapshotMockExecutor returns deterministic content and 10 tokens.
 type snapshotMockExecutor struct {
 	mu        sync.Mutex
 	callCount int
@@ -231,7 +218,6 @@ func (e *snapshotMockExecutor) execute(_ context.Context, req TurnRequest) (stri
 	return "turn-" + req.Speaker, 10, nil
 }
 
-// snapshotMockPublisher captures published messages.
 type snapshotMockPublisher struct {
 	mu       sync.Mutex
 	messages []bus.OutboundMessage
@@ -255,7 +241,6 @@ func TestAllSnapshots_ReturnsManagedGroups(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Start two groups.
 	_, err := gm.Start(ctx, "snap-1", "p1", "task1", "round_robin",
 		participants, GroupOptions{Rounds: 1}, "ch", "chat1")
 	if err != nil {
@@ -267,7 +252,6 @@ func TestAllSnapshots_ReturnsManagedGroups(t *testing.T) {
 		t.Fatalf("Start snap-2: %v", err)
 	}
 
-	// Wait for both to finish.
 	gm.Wait("snap-1")
 	gm.Wait("snap-2")
 
@@ -276,7 +260,6 @@ func TestAllSnapshots_ReturnsManagedGroups(t *testing.T) {
 		t.Fatalf("AllSnapshots returned %d, want 2", len(snaps))
 	}
 
-	// Verify each snapshot has expected fields.
 	ids := map[string]bool{}
 	for _, s := range snaps {
 		ids[s.GroupID] = true
@@ -347,7 +330,6 @@ func TestAllSnapshots_ConcurrentSafety(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Concurrent AllSnapshots while group is running.
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -355,7 +337,6 @@ func TestAllSnapshots_ConcurrentSafety(t *testing.T) {
 			defer wg.Done()
 			snaps := gm.AllSnapshots()
 			if len(snaps) == 0 {
-				// Might be empty if called before group is registered.
 			}
 		}()
 	}
@@ -388,7 +369,6 @@ func TestAllSnapshots_StoppedGroup(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	gm.Stop("stopped-1")
 
-	// Wait for it to finish.
 	done := make(chan struct{})
 	go func() { gm.Wait("stopped-1"); close(done) }()
 	select {
@@ -407,7 +387,6 @@ func TestAllSnapshots_StoppedGroup(t *testing.T) {
 	}
 }
 
-// blockingSnapshotExecutor blocks until unblockCh is closed.
 type blockingSnapshotExecutor struct {
 	unblockCh chan struct{}
 }

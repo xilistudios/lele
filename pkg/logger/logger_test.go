@@ -145,28 +145,23 @@ func TestLoggerHelperFunctions(t *testing.T) {
 }
 
 func TestEnableMultiFileLogging(t *testing.T) {
-	// Create temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "logger-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Disable file logging first
 	DisableFileLogging()
 
-	// Enable multi-file logging
 	err = EnableMultiFileLogging(tempDir)
 	if err != nil {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Verify directory was created
 	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
 		t.Errorf("Logs directory was not created")
 	}
 
-	// Check that log files were created with correct date format
 	currentDate := time.Now().Format("2006-01-02")
 	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
 	errorPath := filepath.Join(tempDir, fmt.Sprintf("errors-%s.log", currentDate))
@@ -179,16 +174,13 @@ func TestEnableMultiFileLogging(t *testing.T) {
 		t.Errorf("Error log file was not created at %s", errorPath)
 	}
 
-	// Test logging to files
 	SetLevel(INFO)
 	Info("Test info message for file")
 	Warn("Test warn message for file")
 	Error("Test error message for file")
 
-	// Give files time to flush
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify info log contains INFO message
 	infoContent, err := os.ReadFile(infoPath)
 	if err != nil {
 		t.Fatalf("Failed to read info log: %v", err)
@@ -197,7 +189,6 @@ func TestEnableMultiFileLogging(t *testing.T) {
 		t.Errorf("Info log does not contain expected message. Content: %s", string(infoContent))
 	}
 
-	// Verify error log contains WARN and ERROR messages
 	errorContent, err := os.ReadFile(errorPath)
 	if err != nil {
 		t.Fatalf("Failed to read error log: %v", err)
@@ -209,12 +200,10 @@ func TestEnableMultiFileLogging(t *testing.T) {
 		t.Errorf("Error log does not contain error message. Content: %s", string(errorContent))
 	}
 
-	// Cleanup
 	DisableFileLogging()
 }
 
 func TestGetLogsPath(t *testing.T) {
-	// Test default path calculation
 	defaultPath := getDefaultLogsPath()
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -226,7 +215,6 @@ func TestGetLogsPath(t *testing.T) {
 		t.Errorf("getDefaultLogsPath() = %s, want %s", defaultPath, expectedPath)
 	}
 
-	// Test that SetLogsPath/GetLogsPath work correctly
 	initialPath := GetLogsPath()
 	customPath := "/custom/logs/path"
 	SetLogsPath(customPath)
@@ -235,22 +223,18 @@ func TestGetLogsPath(t *testing.T) {
 		t.Errorf("GetLogsPath() = %s, want %s", GetLogsPath(), customPath)
 	}
 
-	// Restore initial path
 	SetLogsPath(initialPath)
 }
 
 func TestInitDefaultLogging(t *testing.T) {
-	// Create temp directory for testing
 	tempDir, err := os.MkdirTemp("", "logger-default-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Store current state
 	currentPath := GetLogsPath()
 
-	// Disable and test with custom path using EnableMultiFileLogging
 	DisableFileLogging()
 
 	err = EnableMultiFileLogging(tempDir)
@@ -258,7 +242,6 @@ func TestInitDefaultLogging(t *testing.T) {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Verify log files exist in the temp directory
 	currentDate := time.Now().Format("2006-01-02")
 	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
 	errorPath := filepath.Join(tempDir, fmt.Sprintf("errors-%s.log", currentDate))
@@ -271,20 +254,17 @@ func TestInitDefaultLogging(t *testing.T) {
 		t.Errorf("Error log file was not created at %s", errorPath)
 	}
 
-	// Cleanup
 	DisableFileLogging()
 	SetLogsPath(currentPath)
 }
 
 func TestCleanupOldLogs(t *testing.T) {
-	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "logger-cleanup-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Create old log files
 	oldDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
 	recentDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 
@@ -292,22 +272,18 @@ func TestCleanupOldLogs(t *testing.T) {
 	oldErrorLog := filepath.Join(tempDir, fmt.Sprintf("errors-%s.log", oldDate))
 	recentInfoLog := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", recentDate))
 
-	// Create files
 	os.WriteFile(oldInfoLog, []byte("old info"), 0644)
 	os.WriteFile(oldErrorLog, []byte("old error"), 0644)
 	os.WriteFile(recentInfoLog, []byte("recent info"), 0644)
 
-	// Set up logger with temp path
 	SetLogsPath(tempDir)
 	defer SetLogsPath(getDefaultLogsPath())
 
-	// Run cleanup with maxDays=5
 	err = CleanupOldLogs(5)
 	if err != nil {
 		t.Fatalf("CleanupOldLogs failed: %v", err)
 	}
 
-	// Verify old files were deleted
 	if _, err := os.Stat(oldInfoLog); !os.IsNotExist(err) {
 		t.Errorf("Old info log should have been deleted")
 	}
@@ -315,40 +291,33 @@ func TestCleanupOldLogs(t *testing.T) {
 		t.Errorf("Old error log should have been deleted")
 	}
 
-	// Verify recent file still exists
 	if _, err := os.Stat(recentInfoLog); os.IsNotExist(err) {
 		t.Errorf("Recent info log should not have been deleted")
 	}
 }
 
 func TestCheckDateRotation(t *testing.T) {
-	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "logger-rotation-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Disable and set up initial logging
 	DisableFileLogging()
 	SetLogsPath(tempDir)
 	defer SetLogsPath(getDefaultLogsPath())
 
-	// Enable logging
 	err = EnableMultiFileLogging(tempDir)
 	if err != nil {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Get current log files
 	currentDate := time.Now().Format("2006-01-02")
 	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
 
-	// Write a message to verify it's working
 	Info("Test before rotation")
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify message was written
 	content, _ := os.ReadFile(infoPath)
 	if !strings.Contains(string(content), "Test before rotation") {
 		t.Errorf("Message was not written to log file")
@@ -358,14 +327,12 @@ func TestCheckDateRotation(t *testing.T) {
 }
 
 func TestDebugOnlyConsole(t *testing.T) {
-	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "logger-debug-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Set up logging
 	DisableFileLogging()
 	SetLevel(DEBUG)
 	defer SetLevel(INFO)
@@ -375,19 +342,15 @@ func TestDebugOnlyConsole(t *testing.T) {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Capture the date before writing anything (readLogContent contract).
 	date := time.Now().Format("2006-01-02")
 
-	// Write debug message (should NOT go to file)
 	Debug("This debug message should not be in file")
 	DebugC("test", "This debug with component should not be in file")
 
-	// Write info message (should go to file)
 	Info("This info message should be in file")
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Check info log
 	content := readLogContent(t, tempDir, "info", date)
 
 	if strings.Contains(content, "debug message") {
@@ -401,10 +364,6 @@ func TestDebugOnlyConsole(t *testing.T) {
 	DisableFileLogging()
 }
 
-// readLogContent returns the content of the log file for level. date must be
-// captured BEFORE the writes it validates: if the calendar date changed while
-// the test ran (midnight race), every matching file is read via globbing
-// instead of the hardcoded name, so a run crossing midnight does not flake.
 func readLogContent(t *testing.T, dir, level, date string) string {
 	t.Helper()
 	if time.Now().Format("2006-01-02") == date {
@@ -418,7 +377,6 @@ func readLogContent(t *testing.T, dir, level, date string) string {
 		}
 		return string(data)
 	}
-	// The date rolled over during the test: collect every matching file.
 	pattern, err := LogFileName(level, "*")
 	if err != nil {
 		t.Fatalf("LogFileName(%q, \"*\"): %v", level, err)
@@ -438,9 +396,6 @@ func readLogContent(t *testing.T, dir, level, date string) string {
 	return sb.String()
 }
 
-// TestLogRoutingByLevel is the regression test for the bug where WARN/ERROR
-// entries were dual-written to both the info and the errors log: INFO must
-// land ONLY in info-{date}.log and WARN/ERROR ONLY in errors-{date}.log.
 func TestLogRoutingByLevel(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -452,8 +407,6 @@ func TestLogRoutingByLevel(t *testing.T) {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Capture the date before writing anything: expected filenames derive
-	// from it (and fall back to globbing if midnight passes mid-test).
 	date := time.Now().Format("2006-01-02")
 
 	SetLevel(INFO)
@@ -544,16 +497,9 @@ func TestLogPathFor(t *testing.T) {
 	}
 }
 
-// TestEnableMultiFileLoggingTwice ensures a second init closes the previous
-// handles (no stale fds kept), swaps in brand-new handles (the close/nil/
-// reassign block) and that subsequent writes land only in the newly configured
-// files. The handle assertions are what discriminate the fix: they fail if the
-// close/nil/reassign logic is removed, which routing alone would not catch.
 func TestEnableMultiFileLoggingTwice(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
-	// Capture the date before any write so expected filenames cannot race
-	// midnight (falls back to globbing if the date changes mid-test).
 	date := time.Now().Format("2006-01-02")
 
 	origPath := GetLogsPath()
@@ -566,9 +512,6 @@ func TestEnableMultiFileLoggingTwice(t *testing.T) {
 	}
 	Info("before re-init marker")
 
-	// Snapshot the live handles: the second init must close them and assign
-	// brand-new ones (a removed close/nil/reassign block keeps these very
-	// pointers and leaves them writable).
 	mu.Lock()
 	oldInfo, oldError := logger.infoFile, logger.errorFile
 	mu.Unlock()
@@ -592,8 +535,6 @@ func TestEnableMultiFileLoggingTwice(t *testing.T) {
 	if newError == oldError {
 		t.Errorf("Error handle was not replaced by the second init (stale handle kept)")
 	}
-	// The previous handles must really be closed: an unclosed handle leaks
-	// its fd and keeps writing to the old files.
 	if _, err := oldInfo.WriteString("stale"); !errors.Is(err, os.ErrClosed) {
 		t.Errorf("Old info handle write error = %v, want os.ErrClosed (fd leak)", err)
 	}
@@ -617,9 +558,6 @@ func TestEnableMultiFileLoggingTwice(t *testing.T) {
 	}
 }
 
-// TestLogDateFromFileName pins the exported reverse of the filename contract:
-// the single date-from-filename helper shared with pkg/channels (see M2 — the
-// old copy-pasted twins drifted in validation policy).
 func TestLogDateFromFileName(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -628,13 +566,13 @@ func TestLogDateFromFileName(t *testing.T) {
 	}{
 		{"info-2026-10-10.log", "2026-10-10", true},
 		{"errors-2026-10-10.log", "2026-10-10", true},
-		{"info-2026-13-45.log", "", false},  // impossible date rejected
-		{"info-2026-1-02.log", "", false},   // not zero-padded
-		{"error-2026-10-10.log", "", false}, // singular prefix is not canonical
-		{"info-.log", "", false},            // missing date
-		{"other-2026-10-10.log", "", false}, // unknown prefix
-		{"info-2026-10-10.txt", "", false},  // not a .log file
-		{"2026-10-10.log", "", false},       // no level prefix
+		{"info-2026-13-45.log", "", false},
+		{"info-2026-1-02.log", "", false},
+		{"error-2026-10-10.log", "", false},
+		{"info-.log", "", false},
+		{"other-2026-10-10.log", "", false},
+		{"info-2026-10-10.txt", "", false},
+		{"2026-10-10.log", "", false},
 		{"", "", false},
 	}
 
@@ -646,10 +584,6 @@ func TestLogDateFromFileName(t *testing.T) {
 	}
 }
 
-// TestWriteToFileReopensAfterWriteFailure proves the reopen-on-failed-write
-// path (deep-review probe E / M1): a stale handle — closed behind the
-// logger's back but still non-nil — must be reopened once and the entry must
-// land in the errors file.
 func TestWriteToFileReopensAfterWriteFailure(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -664,8 +598,6 @@ func TestWriteToFileReopensAfterWriteFailure(t *testing.T) {
 
 	Error("reopen entry one")
 
-	// Close the underlying file while keeping the field non-nil: the next
-	// write fails and must trigger exactly one reopen.
 	mu.Lock()
 	stale := logger.errorFile
 	mu.Unlock()
@@ -687,9 +619,6 @@ func TestWriteToFileReopensAfterWriteFailure(t *testing.T) {
 	}
 }
 
-// TestWriteToFileLazilyOpensNilHandle covers the H1 fix: a handle left nil by
-// a failed open (failed startup open or failed rotation) must be lazily
-// reopened by the next write, not only by the next date change.
 func TestWriteToFileLazilyOpensNilHandle(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -702,8 +631,6 @@ func TestWriteToFileLazilyOpensNilHandle(t *testing.T) {
 	}
 	date := time.Now().Format("2006-01-02")
 
-	// Simulate what a failed open leaves behind: handle nil while basePath
-	// and logDate stay pinned (so no rotation will ever retry it).
 	mu.Lock()
 	if logger.errorFile != nil {
 		logger.errorFile.Close()
@@ -726,10 +653,6 @@ func TestWriteToFileLazilyOpensNilHandle(t *testing.T) {
 	}
 }
 
-// TestWriteToFileRetriesLazyOpenOnNextWrite covers the other half of H1: if
-// the lazy open itself fails, the entry is dropped for that write, the handle
-// stays nil, and the NEXT write retries — succeeding once the path is
-// writable again.
 func TestWriteToFileRetriesLazyOpenOnNextWrite(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -742,8 +665,6 @@ func TestWriteToFileRetriesLazyOpenOnNextWrite(t *testing.T) {
 	}
 	date := time.Now().Format("2006-01-02")
 
-	// Make the base path unopenable: a regular file where a directory is
-	// required makes the open fail deterministically.
 	blocked := filepath.Join(tempDir, "blocked")
 	if err := os.WriteFile(blocked, []byte("not a directory"), 0644); err != nil {
 		t.Fatalf("Failed to create blocking file: %v", err)
@@ -774,13 +695,6 @@ func TestWriteToFileRetriesLazyOpenOnNextWrite(t *testing.T) {
 	}
 }
 
-// TestDisableFileLoggingStopsWriting is the regression test for the re-review
-// finding on 0c22ba8: DisableFileLogging closed/nil'd the handles but left
-// basePath/logDate set, so the new lazy open in writeToFile recreated the log
-// files on the next write — Disable no longer disabled. After Disable, no
-// write may create a file or append to an existing one, while basePath must be
-// preserved (LogPathFor/GetLogsPath are the read-side contract for the REST
-// API / WebUI and must keep resolving).
 func TestDisableFileLoggingStopsWriting(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -792,7 +706,6 @@ func TestDisableFileLoggingStopsWriting(t *testing.T) {
 	if err := EnableMultiFileLogging(tempDir); err != nil {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
-	// Sanity: Enable creates both canonical files (empty until first write).
 	infoPath, err := LogPathFor("info", time.Now().Format("2006-01-02"))
 	if err != nil {
 		t.Fatalf("LogPathFor(info): %v", err)
@@ -809,13 +722,10 @@ func TestDisableFileLoggingStopsWriting(t *testing.T) {
 	Warn("after disable warn marker")
 	Error("after disable error marker")
 
-	// basePath must survive Disable: it is the read-side contract.
 	if got := GetLogsPath(); got != tempDir {
 		t.Errorf("GetLogsPath() = %q, want %q (basePath must be kept after Disable)", got, tempDir)
 	}
 
-	// No entry may have reached the files (they were created empty by
-	// Enable; the lazy open must not have appended anything after Disable).
 	for _, p := range []string{infoPath, errorPath} {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -826,7 +736,6 @@ func TestDisableFileLoggingStopsWriting(t *testing.T) {
 		}
 	}
 
-	// And no NEW file may have appeared in the directory.
 	entries, err := os.ReadDir(tempDir)
 	if err != nil {
 		t.Fatalf("ReadDir(%s): %v", tempDir, err)

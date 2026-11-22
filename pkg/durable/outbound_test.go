@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package durable
 
 import (
@@ -21,14 +15,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers. openSpool / spoolFixture / statsOf / peekRow / claimedBy come from
-// inbound_test.go: same package, same throwaway database, no reinvention.
-// ──────────────────────────────────────────────────────────────────────────────
-
-// outbox records what the replay deliverer was asked to send. It is the
-// outbound twin of fakeBus: the deliverer is the last point before the wire,
-// so "delivered exactly once" is counted here.
 type outbox struct {
 	mu     sync.Mutex
 	sent   []bus.OutboundMessage
@@ -36,7 +22,6 @@ type outbox struct {
 	script func(msg bus.OutboundMessage) Delivery
 }
 
-// deliverer returns the DeliverFunc under test.
 func (o *outbox) deliverer() DeliverFunc {
 	return func(_ context.Context, msg bus.OutboundMessage) Delivery {
 		o.mu.Lock()
@@ -64,12 +49,10 @@ func (o *outbox) callCount() int {
 	return o.calls
 }
 
-// alwaysDelivered is the happy deliverer: every message goes out whole.
 func alwaysDelivered() DeliverFunc {
 	return func(context.Context, bus.OutboundMessage) Delivery { return Delivery{Delivered: true} }
 }
 
-// outMsg builds a minimal eligible outbound message.
 func outMsg(content string) bus.OutboundMessage {
 	return bus.OutboundMessage{
 		Channel: "telegram",
@@ -78,7 +61,6 @@ func outMsg(content string) bus.OutboundMessage {
 	}
 }
 
-// outPayload is the JSON shape Enqueue writes for msg.
 func outPayload(t *testing.T, m bus.OutboundMessage) string {
 	t.Helper()
 
@@ -89,9 +71,6 @@ func outPayload(t *testing.T, m bus.OutboundMessage) string {
 	return string(data)
 }
 
-// rawOutEnqueue writes a pending outbound row directly, bypassing Enqueue, so
-// tests can stage payloads the live path never produces (corrupt JSON) and
-// rows the live path would have already claimed.
 func rawOutEnqueue(t *testing.T, repo *store.SpoolRepo, payload string) int64 {
 	t.Helper()
 
@@ -102,7 +81,6 @@ func rawOutEnqueue(t *testing.T, repo *store.SpoolRepo, payload string) int64 {
 	return id
 }
 
-// agedOutEnqueue writes a pending outbound row whose created_at is age old.
 func agedOutEnqueue(t *testing.T, fixture *spoolFixture, payload string, age time.Duration) int64 {
 	t.Helper()
 
@@ -114,8 +92,6 @@ func agedOutEnqueue(t *testing.T, fixture *spoolFixture, payload string, age tim
 	return id
 }
 
-// staleClaim marks a row as claimed by owner since the given age, so
-// ReclaimStale sees it as an orphan left by a dead process.
 func staleClaim(t *testing.T, fixture *spoolFixture, id int64, owner string, age time.Duration) {
 	t.Helper()
 
@@ -127,7 +103,6 @@ func staleClaim(t *testing.T, fixture *spoolFixture, id int64, owner string, age
 	}
 }
 
-// ledgerCount reads processed_messages straight from the table.
 func ledgerCount(t *testing.T, fixture *spoolFixture) int {
 	t.Helper()
 
@@ -138,9 +113,6 @@ func ledgerCount(t *testing.T, fixture *spoolFixture) int {
 	return n
 }
 
-// waitFor polls cond until it holds or the deadline passes. Fixed sleeps would
-// make the timing tests flaky in both directions; a deadline makes them fast
-// and honest.
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string, args ...interface{}) {
 	t.Helper()
 
@@ -153,10 +125,6 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string, 
 	}
 	t.Fatalf("timed out after %v: %s", timeout, fmt.Sprintf(msg, args...))
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// O1/O2: Enqueue writes a born-claimed row and the payload survives the trip
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestOutboundEnqueueClaimsRowAndTagsSpoolID(t *testing.T) {
 	fixture := openSpool(t)
@@ -219,7 +187,6 @@ func TestOutboundPayloadRoundTripsFields(t *testing.T) {
 		t.Fatal("Enqueue() = false, want the row written")
 	}
 
-	// The row, not the in-memory copy, is what a replay sees after a restart.
 	row := peekRow(t, fixture, got.SpoolID)
 	var back bus.OutboundMessage
 	if err := json.Unmarshal([]byte(row.Payload), &back); err != nil {
@@ -244,16 +211,10 @@ func TestOutboundPayloadRoundTripsFields(t *testing.T) {
 	if back.Metadata["k"] != "v" {
 		t.Errorf("Metadata = %v, want k=v", back.Metadata)
 	}
-	// SpoolID is json:"-", so the payload cannot bake in a row id: the replay
-	// re-attaches it from the row it claimed.
 	if back.SpoolID != 0 {
 		t.Errorf("payload SpoolID = %d, want 0", back.SpoolID)
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// O3: eligibility
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestShouldSpoolOutbound(t *testing.T) {
 	withAttachment := outMsg("")
@@ -305,10 +266,6 @@ func TestShouldSpoolOutbound(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// O4/O14: nil safety
-// ──────────────────────────────────────────────────────────────────────────────
-
 func TestOutboundNilSafe(t *testing.T) {
 	var d *Outbound
 
@@ -343,7 +300,6 @@ func TestOutboundNilSafe(t *testing.T) {
 		t.Errorf("InstanceID() = %q, want empty on a nil service", id)
 	}
 
-	// StartPump must return immediately when cancelled, not spin.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { d.StartPump(ctx); close(done) }()
@@ -355,8 +311,6 @@ func TestOutboundNilSafe(t *testing.T) {
 	}
 }
 
-// A non-nil service with a nil repo is the durability-off wiring: every method
-// declines and nothing touches a database.
 func TestOutboundNilRepoDisablesEverything(t *testing.T) {
 	d := NewOutbound(nil, alwaysDelivered())
 
@@ -383,7 +337,6 @@ func TestOutboundNilRepoDisablesEverything(t *testing.T) {
 		t.Error("Enqueue(nil) = true, want false")
 	}
 
-	// StartPump returns without touching a ticker, so a nil repo cannot panic.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { d.StartPump(ctx); close(done) }()
@@ -394,10 +347,6 @@ func TestOutboundNilRepoDisablesEverything(t *testing.T) {
 		t.Fatal("StartPump() did not return after cancellation with no repo")
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Lifecycle helpers: Release, Complete, Forget
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestOutboundReleaseHandsRowBackToPump(t *testing.T) {
 	fixture := openSpool(t)
@@ -419,11 +368,9 @@ func TestOutboundReleaseHandsRowBackToPump(t *testing.T) {
 		t.Errorf("spool = %+v, want the row back in the pending set", st)
 	}
 
-	// Releasing twice is harmless: the second call matches no row.
 	if d.Release(&got) {
 		t.Error("second Release() = true, want false: the row is no longer ours")
 	}
-	// And a message with no row is a no-op.
 	if d.Release(&bus.OutboundMessage{}) {
 		t.Error("Release(SpoolID 0) = true, want false")
 	}
@@ -445,7 +392,6 @@ func TestOutboundCompleteDeletesRow(t *testing.T) {
 	if st.PendingOutbound+st.ClaimedOutbound != 0 {
 		t.Errorf("spool = %+v, want the delivered row gone", st)
 	}
-	// Idempotent: completing a row that is already gone is not an error.
 	got.SpoolID = 9999
 	if !d.Complete(&got) {
 		t.Error("Complete(unknown id) = false, want true: the delete simply matched nothing")
@@ -467,8 +413,6 @@ func TestOutboundForgetDeletesWithoutRetry(t *testing.T) {
 		t.Error("Forget() = false, want the row deleted")
 	}
 
-	// The dead letter is gone, NOT pending: Forget must never hand a row to the
-	// pump, because the pump would re-send the chunks already on the wire.
 	st := statsOf(t, fixture.repo)
 	if st.PendingOutbound+st.ClaimedOutbound != 0 {
 		t.Errorf("spool = %+v, want the dead-lettered row deleted", st)
@@ -477,10 +421,6 @@ func TestOutboundForgetDeletesWithoutRetry(t *testing.T) {
 		t.Error("Forget(SpoolID 0) = true, want false")
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// O5/O6: Drain replays pending rows
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestOutboundDrainDeliversPending(t *testing.T) {
 	fixture := openSpool(t)
@@ -503,8 +443,6 @@ func TestOutboundDrainDeliversPending(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("deliverer called %d times, want 3", len(got))
 	}
-	// FIFO by id, and every message arrives with its row identity attached:
-	// the payload never carries SpoolID, so deliverOne must set it.
 	for i, want := range []string{"first", "second", "third"} {
 		if got[i].Content != want {
 			t.Errorf("delivered[%d] = %q, want %q (FIFO)", i, got[i].Content, want)
@@ -524,8 +462,6 @@ func TestOutboundDrainReclaimsStaleFirst(t *testing.T) {
 	id := rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("orphan")))
 	staleClaim(t, fixture, id, "other-instance", StaleClaimTimeout+time.Minute)
 
-	// A fresh foreign claim must be left alone: that row is being sent by
-	// someone else right now.
 	keep := rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("someone else's")))
 	staleClaim(t, fixture, keep, "other-instance", time.Second)
 
@@ -543,7 +479,6 @@ func TestOutboundDrainReclaimsStaleFirst(t *testing.T) {
 		t.Errorf("delivered %+v, want just the stale row", got)
 	}
 
-	// The fresh foreign claim is untouched and still held by its owner.
 	if row := peekRow(t, fixture, keep); row.Attempts != 0 {
 		t.Errorf("fresh foreign claim attempts = %d, want 0: it must not be touched", row.Attempts)
 	}
@@ -552,10 +487,6 @@ func TestOutboundDrainReclaimsStaleFirst(t *testing.T) {
 		t.Errorf("claimed_by = %v, want only the untouched foreign owner", owners)
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// O7/O8/O9: what a failed delivery does to the row
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestOutboundDeliverFailureReleases(t *testing.T) {
 	fixture := openSpool(t)
@@ -574,8 +505,6 @@ func TestOutboundDeliverFailureReleases(t *testing.T) {
 		t.Errorf("Drain() = %d, want 0 delivered", n)
 	}
 
-	// The row is back in the pending set with one attempt counted, so the pump
-	// - and only the pump - retries it.
 	st := statsOf(t, fixture.repo)
 	if st.PendingOutbound != 1 || st.ClaimedOutbound != 0 {
 		t.Fatalf("spool = %+v, want the failed row released", st)
@@ -588,7 +517,6 @@ func TestOutboundDeliverFailureReleases(t *testing.T) {
 		t.Errorf("pending by session = %v, want chat-1:1", items)
 	}
 
-	// attempts climbed by exactly one.
 	var attempts int
 	if err := fixture.s.DB().QueryRow(`SELECT attempts FROM spool WHERE direction = 'outbound'`).Scan(&attempts); err != nil {
 		t.Fatalf("reading attempts failed: %v", err)
@@ -602,7 +530,6 @@ func TestOutboundPartialChunkForgets(t *testing.T) {
 	fixture := openSpool(t)
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("long answer")))
 
-	// SentAnyChunk is the signal that a retry would duplicate what went out.
 	box := &outbox{script: func(bus.OutboundMessage) Delivery {
 		return Delivery{SentAnyChunk: true, Err: errors.New("chunk 2 of 3 failed")}
 	}}
@@ -630,7 +557,6 @@ func TestOutboundAttemptsCapDeadLetters(t *testing.T) {
 	}}
 	d := NewOutbound(fixture.repo, box.deliverer())
 
-	// Each pass is one attempt. The ceiling must stop it: no infinite retry.
 	for pass := 1; pass <= MaxOutboundAttempts; pass++ {
 		if _, err := d.Drain(context.Background()); err != nil {
 			t.Fatalf("Drain() pass %d failed: %v", pass, err)
@@ -648,10 +574,6 @@ func TestOutboundAttemptsCapDeadLetters(t *testing.T) {
 		t.Errorf("deliverer called %d times, want exactly %d", box.callCount(), MaxOutboundAttempts)
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// O10/O11/O17: rows that must never be sent
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestOutboundAgeCapDropsStaleRows(t *testing.T) {
 	fixture := openSpool(t)
@@ -683,7 +605,6 @@ func TestOutboundAgeCapDropsStaleRows(t *testing.T) {
 	if st := statsOf(t, fixture.repo); st.PendingOutbound+st.ClaimedOutbound != 0 {
 		t.Errorf("spool = %+v, want the expired row deleted too", st)
 	}
-	// The aged row is gone for good; only the fresh one remains.
 	if got := rowPayload(t, fixture, agedID); got != "" {
 		t.Errorf("expired row %d survived with payload %q, want it deleted", agedID, got)
 	}
@@ -696,8 +617,6 @@ func TestOutboundPoisonPayloadDies(t *testing.T) {
 	box := &outbox{}
 	d := NewOutbound(fixture.repo, box.deliverer())
 
-	// Only the pump runs: each tick must be able to claim the row again, so the
-	// attempt counter climbs to the poison ceiling.
 	for pass := 1; pass <= poisonLimit; pass++ {
 		d.pumpOnce(context.Background())
 		st := statsOf(t, fixture.repo)
@@ -714,8 +633,6 @@ func TestOutboundPoisonPayloadDies(t *testing.T) {
 	}
 }
 
-// O17: a service built without a deliverer must not panic and must not lose
-// the row - it is the only copy of the reply.
 func TestOutboundNilDeliverDefers(t *testing.T) {
 	fixture := openSpool(t)
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("hello")))
@@ -730,8 +647,6 @@ func TestOutboundNilDeliverDefers(t *testing.T) {
 		t.Errorf("deliverOne() = %v, want %v", res, outcomeDeferred)
 	}
 
-	// Deferred means: still in the spool, still pending (released immediately),
-	// with one attempt counted.
 	st := statsOf(t, fixture.repo)
 	if st.PendingOutbound != 1 || st.ClaimedOutbound != 0 {
 		t.Errorf("spool = %+v, want the row released back to pending", st)
@@ -745,7 +660,6 @@ func TestOutboundNilDeliverDefers(t *testing.T) {
 	}
 }
 
-// rowPayload reads the payload column of one spool row.
 func rowPayload(t *testing.T, fixture *spoolFixture, id int64) string {
 	t.Helper()
 
@@ -760,7 +674,6 @@ func rowPayload(t *testing.T, fixture *spoolFixture, id int64) string {
 	return payload
 }
 
-// mustFirstID returns the id of the oldest outbound row in the fixture.
 func mustFirstID(t *testing.T, fixture *spoolFixture) int64 {
 	t.Helper()
 
@@ -771,13 +684,6 @@ func mustFirstID(t *testing.T, fixture *spoolFixture) int64 {
 	return id
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// O12/O13: the pump and its kick
-// ──────────────────────────────────────────────────────────────────────────────
-
-// O12: an idle gateway must do no outbound replay work at all. The gate is
-// Stats().PendingOutbound, so a claimed row (live traffic) or pending inbound
-// work must not wake the outbound pass either.
 func TestOutboundPumpSkipsWhenNothingPending(t *testing.T) {
 	t.Run("empty spool", func(t *testing.T) {
 		fixture := openSpool(t)
@@ -836,7 +742,6 @@ func TestOutboundStartPumpDrainsInBackground(t *testing.T) {
 	done := make(chan struct{})
 	go func() { d.StartPump(ctx); close(done) }()
 
-	// The pump ticks every OutboundPumpInterval; give it a few ticks of slack.
 	waitFor(t, 5*time.Second, func() bool { return box.callCount() == 1 },
 		"the pump never delivered the pending row")
 	if st := statsOf(t, fixture.repo); st.PendingOutbound != 0 {
@@ -851,12 +756,6 @@ func TestOutboundStartPumpDrainsInBackground(t *testing.T) {
 	}
 }
 
-// O13: FlushPeer must make a reconnecting peer's backlog go out now, not on
-// the next tick. The measurement is phase-synchronised instead of guessed:
-// row A is delivered by a plain ticker tick, which tells us a tick just
-// happened, so row B - enqueued right after - cannot be delivered by a tick for
-// another almost-full OutboundPumpInterval. If B lands in milliseconds, the
-// kick is the only thing that can have run.
 func TestOutboundFlushPeerKicksPump(t *testing.T) {
 	fixture := openSpool(t)
 	box := &outbox{}
@@ -867,12 +766,10 @@ func TestOutboundFlushPeerKicksPump(t *testing.T) {
 	done := make(chan struct{})
 	go func() { d.StartPump(ctx); close(done) }()
 
-	// Phase sync: the pump's first tick delivers A.
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("A")))
 	waitFor(t, 3*time.Second, func() bool { return box.callCount() == 1 },
 		"the pump tick never delivered row A")
 
-	// A tick just fired, so the next one is ~OutboundPumpInterval away.
 	start := time.Now()
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("B")))
 	d.FlushPeer("native", "peer-1")
@@ -892,9 +789,6 @@ func TestOutboundFlushPeerKicksPump(t *testing.T) {
 	}
 }
 
-// A kick that arrives before the pump starts is buffered, not lost: the very
-// first thing the pump does is honour it, so a peer that reconnects during
-// startup is served without waiting for the ticker.
 func TestOutboundKickBeforeStartIsNotLost(t *testing.T) {
 	fixture := openSpool(t)
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("backlog")))
@@ -923,8 +817,6 @@ func TestOutboundKickBeforeStartIsNotLost(t *testing.T) {
 	}
 }
 
-// The kick is non-blocking and coalesced: a burst of wake-up requests costs
-// one pass, and FlushPeer never waits on a busy pump.
 func TestOutboundFlushPeerCoalescesAndNeverBlocks(t *testing.T) {
 	fixture := openSpool(t)
 	d := NewOutbound(fixture.repo, alwaysDelivered())
@@ -936,7 +828,6 @@ func TestOutboundFlushPeerCoalescesAndNeverBlocks(t *testing.T) {
 		t.Errorf("kick queue length = %d, want %d: extra wakes must be dropped", n, kickBuffer)
 	}
 
-	// A full kick buffer must not block the caller (websocket goroutine).
 	blocked := make(chan struct{})
 	go func() { d.FlushPeer("native", "peer-late"); close(blocked) }()
 	select {
@@ -946,8 +837,6 @@ func TestOutboundFlushPeerCoalescesAndNeverBlocks(t *testing.T) {
 	}
 }
 
-// O14 is covered by TestOutboundNilSafe; this pins the durability-off wiring
-// too: FlushPeer on a nil-repo service must not panic on the channel.
 func TestOutboundFlushPeerNilSafe(t *testing.T) {
 	var d *Outbound
 	d.FlushPeer("native", "peer-1")
@@ -959,10 +848,6 @@ func TestOutboundFlushPeerNilSafe(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// O15: shutdown hands the work back
-// ──────────────────────────────────────────────────────────────────────────────
-
 func TestOutboundReleaseClaimsOnShutdown(t *testing.T) {
 	fixture := openSpool(t)
 	d := NewOutbound(fixture.repo, alwaysDelivered())
@@ -973,7 +858,6 @@ func TestOutboundReleaseClaimsOnShutdown(t *testing.T) {
 			t.Fatalf("Enqueue(%q) = false, want the row written", content)
 		}
 	}
-	// A foreign claim belongs to another process and must survive.
 	foreign := rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("foreign")))
 	staleClaim(t, fixture, foreign, "other-instance", time.Second)
 
@@ -994,14 +878,6 @@ func TestOutboundReleaseClaimsOnShutdown(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// O16: pump and live traffic on one instance, concurrently
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestOutboundConcurrentEnqueueAndPump runs the two writers of the lifecycle
-// against each other: 50 publishers spooling live rows while the pump replays
-// everything the bus refused. Every row must be delivered exactly once - not
-// twice (the claim protocol) and not zero times (the scoped release).
 func TestOutboundConcurrentEnqueueAndPump(t *testing.T) {
 	fixture := openSpool(t)
 
@@ -1036,9 +912,6 @@ func TestOutboundConcurrentEnqueueAndPump(t *testing.T) {
 				t.Errorf("Enqueue(%q) = false, want the row written", content)
 				return
 			}
-			// Half the rows are refused by the bus and handed back to the pump;
-			// the rest are "delivered live" and deleted here. Both paths must
-			// leave the pump with nothing to redo.
 			if n%2 == 0 {
 				d.Release(&m)
 				return
@@ -1053,7 +926,6 @@ func TestOutboundConcurrentEnqueueAndPump(t *testing.T) {
 		return err == nil && st.PendingOutbound == 0 && st.ClaimedOutbound == 0
 	}, "rows left in the spool after the pump caught up")
 
-	// The 25 released rows are the pump's; the 25 completed ones are gone.
 	if got := answers.Load(); got != total/2 {
 		t.Errorf("deliverer called %d times, want %d (the released rows only)", got, total/2)
 	}
@@ -1076,13 +948,6 @@ func TestOutboundConcurrentEnqueueAndPump(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Invariants shared with the inbound pass
-// ──────────────────────────────────────────────────────────────────────────────
-
-// The claim release must be scoped to the ids this pass claimed: live traffic
-// spooled by Enqueue is claimed by THIS instance and is being sent right now,
-// so a blanket ReleaseClaims would hand it back and double-send it.
 func TestOutboundClaimPassDoesNotReleaseLiveRows(t *testing.T) {
 	fixture := openSpool(t)
 	d := NewOutbound(fixture.repo, alwaysDelivered())
@@ -1111,16 +976,12 @@ func TestOutboundClaimPassDoesNotReleaseLiveRows(t *testing.T) {
 	}
 }
 
-// A database failure mid-pass must not strand the rows the pass claimed: the
-// scoped release in the defer is what lets the next tick see them again.
 func TestOutboundPassErrorDoesNotStrandClaims(t *testing.T) {
 	fixture := openSpool(t)
 	for _, content := range []string{"m-1", "m-2", "m-3"} {
 		rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg(content)))
 	}
 
-	// Every delete fails, so the first delivered row aborts the pass while the
-	// other two are still claimed and unprocessed.
 	blockSpoolDeletes(t, fixture.s)
 
 	box := &outbox{}
@@ -1137,7 +998,6 @@ func TestOutboundPassErrorDoesNotStrandClaims(t *testing.T) {
 		t.Errorf("PendingOutbound = %d, want 3 (all rows back in the queue)", st.PendingOutbound)
 	}
 
-	// And the pump recovers them once the store works again.
 	allowSpoolDeletes(t, fixture.s)
 	recovered := &outbox{}
 	NewOutbound(fixture.repo, recovered.deliverer()).pumpOnce(context.Background())
@@ -1148,18 +1008,10 @@ func TestOutboundPassErrorDoesNotStrandClaims(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// O18: the ledger is not ours to touch
-// ──────────────────────────────────────────────────────────────────────────────
-
-// Outbound durability must never write processed_messages: that ledger exists
-// to make inbound replay idempotent, and an outbound row is deleted the moment
-// it is sent. If this ever changes, restarts start swallowing replies.
 func TestOutboundDoesNotWriteProcessedLedger(t *testing.T) {
 	fixture := openSpool(t)
 	d := NewOutbound(fixture.repo, alwaysDelivered())
 
-	// Live path: spool, hand back (bus full), then deliver and complete.
 	live := outMsg("hello")
 	if !d.Enqueue(&live) {
 		t.Fatal("Enqueue() = false, want the row written")
@@ -1167,8 +1019,6 @@ func TestOutboundDoesNotWriteProcessedLedger(t *testing.T) {
 	d.Release(&live)
 	d.Complete(&live)
 
-	// Replay paths: a delivered row, a partial one, an expired one, and one
-	// that runs out of attempts.
 	box := &outbox{script: func(m bus.OutboundMessage) Delivery {
 		switch m.Content {
 		case "partial":
@@ -1190,7 +1040,6 @@ func TestOutboundDoesNotWriteProcessedLedger(t *testing.T) {
 			t.Fatalf("Drain() pass %d failed: %v", pass, err)
 		}
 	}
-	// A poison row, replayed to its ceiling by the pump.
 	rawOutEnqueue(t, fixture.repo, "{not json")
 	for pass := 0; pass < poisonLimit; pass++ {
 		replay.pumpOnce(context.Background())

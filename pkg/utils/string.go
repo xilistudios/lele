@@ -7,49 +7,32 @@ import (
 	"unicode/utf8"
 )
 
-// Truncate returns a truncated version of s with at most maxLen runes.
-// Handles multi-byte Unicode characters properly.
-// If the string is truncated, "..." is appended to indicate truncation.
 func Truncate(s string, maxLen int) string {
 	runes := []rune(s)
 	if len(runes) <= maxLen {
 		return s
 	}
-	// Reserve 3 chars for "..."
 	if maxLen <= 3 {
 		return string(runes[:maxLen])
 	}
 	return string(runes[:maxLen-3]) + "..."
 }
 
-// TruncateOutput performs head+tail truncation on a string that may exceed
-// maxTotal bytes. It preserves the first headBytes and the last tailBytes,
-// inserting a human-readable marker between them. The result is guaranteed to
-// be <= maxTotal bytes (plus the marker length, which is small and bounded).
-//
-// This is designed for tool output where the beginning (headers, setup) and
-// end (exit status, final lines) are most diagnostically useful.
-//
-// The function respects UTF-8 rune boundaries to avoid splitting multi-byte
-// characters.
 func TruncateOutput(s string, headBytes, tailBytes int) string {
 	if len(s) <= headBytes+tailBytes {
 		return s
 	}
 
-	// Find a valid rune boundary for the head cut.
 	headCut := headBytes
 	for headCut > 0 && !utf8.RuneStart(s[headCut]) {
 		headCut--
 	}
 
-	// Find a valid rune boundary for the tail start.
 	tailStart := len(s) - tailBytes
 	for tailStart < len(s) && !utf8.RuneStart(s[tailStart]) {
 		tailStart++
 	}
 
-	// Safety: if the boundaries collapsed, just return the simple head truncation.
 	if headCut >= tailStart {
 		return s[:headCut] + fmt.Sprintf("\n[... %d bytes truncated ...]", len(s)-headCut)
 	}
@@ -59,7 +42,6 @@ func TruncateOutput(s string, headBytes, tailBytes int) string {
 	return s[:headCut] + marker + s[tailStart:]
 }
 
-// adjectives and nouns for generating random process names
 var (
 	adjectives = []string{
 		"brave", "calm", "eager", "fancy", "gentle", "happy", "jolly", "kind",
@@ -84,8 +66,6 @@ var (
 	}
 )
 
-// RandomProcessName generates a random process name in the format "adjective-noun"
-// Example: "grand-claw", "swift-fox", "cosmic-dragon"
 func RandomProcessName() string {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	adj := adjectives[rng.Intn(len(adjectives))]
@@ -93,8 +73,6 @@ func RandomProcessName() string {
 	return adj + "-" + noun
 }
 
-// RandomProcessNameWithEmoji generates a random process name with an emoji prefix
-// Example: "🧰 grand-claw", "⚡ swift-fox"
 func RandomProcessNameWithEmoji() string {
 	emojis := []string{"🧰", "⚡", "🔧", "⚙️", "🛠️", "🔨", "📦", "🚀", "💡", "🔍"}
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))

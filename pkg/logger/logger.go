@@ -42,10 +42,10 @@ var (
 type Logger struct {
 	infoFile  *os.File
 	errorFile *os.File
-	logDate   string // Current date for rotation (format: "2006-01-02")
-	basePath  string // Base path for logs directory
-	quiet     bool   // Suppress stdout/stderr messages (for TUI mode)
-	enabled   bool   // File logging enabled: gates lazy opens and writes (see DisableFileLogging)
+	logDate   string
+	basePath  string
+	quiet     bool
+	enabled   bool
 }
 
 type LogEntry struct {
@@ -69,59 +69,41 @@ func getDefaultLogsPath() string {
 	return filepath.Join(config.GetLeleDir(), "logs")
 }
 
-// SetLevel sets the minimum log level to output
 func SetLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()
 	currentLevel = level
 }
 
-// SetQuiet suppresses stdout/stderr startup messages (for TUI mode).
-// Must be called before InitDefaultLogging or EnableMultiFileLogging.
 func SetQuiet(q bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	logger.quiet = q
 }
 
-// GetLevel returns the current log level
 func GetLevel() LogLevel {
 	mu.RLock()
 	defer mu.RUnlock()
 	return currentLevel
 }
 
-// GetLogsPath returns the base path for logs.
-//
-// Locking: it takes mu.RLock. Callers that already hold the logger write lock
-// (mu.Lock — the write path, EnableMultiFileLogging, checkDateRotation) must
-// NOT call it or LogPathFor: they must use the internal basePath-based
-// builder (logFilePath/openLogFile) instead, otherwise mu self-deadlocks.
 func GetLogsPath() string {
 	mu.RLock()
 	defer mu.RUnlock()
 	return logger.basePath
 }
 
-// SetLogsPath sets a custom base path for logs
 func SetLogsPath(basePath string) {
 	mu.Lock()
 	defer mu.Unlock()
 	logger.basePath = basePath
 }
 
-// logFilePrefixes maps the public API level strings to the canonical log file
-// prefixes. The error log uses the historical "errors-" (plural) spelling so
-// existing files on disk stay valid.
 var logFilePrefixes = map[string]string{
 	"info":  "info-",
 	"error": "errors-",
 }
 
-// LogFileName returns the canonical log file name for the given API level
-// ("info" or "error") and date (YYYY-MM-DD). It is the single source of truth
-// for the log filename contract shared by the writer and log readers (REST
-// API / WebUI).
 func LogFileName(level string, date string) (string, error) {
 	prefix, ok := logFilePrefixes[level]
 	if !ok {
@@ -130,13 +112,6 @@ func LogFileName(level string, date string) (string, error) {
 	return prefix + date + ".log", nil
 }
 
-// LogPathFor returns the full path of the log file for the given API level and
-// date under the configured logs directory (see GetLogsPath).
-//
-// It resolves the base path through GetLogsPath (mu.RLock), so callers that
-// already hold mu (the write path, EnableMultiFileLogging, checkDateRotation)
-// must use the lock-free logFilePath(basePath, ...) builder instead: calling
-// LogPathFor while holding mu would self-deadlock.
 func LogPathFor(level string, date string) (string, error) {
 	name, err := LogFileName(level, date)
 	if err != nil {
@@ -145,9 +120,6 @@ func LogPathFor(level string, date string) (string, error) {
 	return filepath.Join(GetLogsPath(), name), nil
 }
 
-// logFilePath builds the path of the canonical log file for apiLevel and date
-// under basePath without taking any lock. It is the lock-free counterpart of
-// LogPathFor for code that already holds mu (see the LogPathFor doc comment).
 func logFilePath(basePath, apiLevel, date string) (string, error) {
 	name, err := LogFileName(apiLevel, date)
 	if err != nil {
@@ -156,9 +128,6 @@ func logFilePath(basePath, apiLevel, date string) (string, error) {
 	return filepath.Join(basePath, name), nil
 }
 
-// openLogFile creates basePath if needed and opens the canonical log file for
-// apiLevel/date in append mode. It takes no lock: callers must hold mu (or
-// otherwise have exclusive access to the logger state).
 func openLogFile(basePath, apiLevel, date string) (*os.File, error) {
 	path, err := logFilePath(basePath, apiLevel, date)
 	if err != nil {
@@ -174,11 +143,6 @@ func openLogFile(basePath, apiLevel, date string) (*os.File, error) {
 	return f, nil
 }
 
-// LogDateFromFileName returns the date encoded in a canonical log file name
-// produced by LogFileName (e.g. "info-2026-10-10.log" → "2026-10-10"), or
-// ok=false if name is not a canonical log file with a valid YYYY-MM-DD date.
-// It is the single source of truth for the reverse of the filename contract,
-// shared by the writer (log cleanup) and log readers (REST API / WebUI).
 func LogDateFromFileName(name string) (string, bool) {
 	if !strings.HasSuffix(name, ".log") {
 		return "", false
@@ -200,38 +164,23 @@ func LogDateFromFileName(name string) (string, bool) {
 	return "", false
 }
 
-// InitDefaultLogging initializes logging with default path (~/.lele/logs)
 func InitDefaultLogging() error {
 	return EnableMultiFileLogging(getDefaultLogsPath())
 }
 
-// EnableMultiFileLogging configures multi-file logging with daily rotation.
-// Routing is strictly by level, with no duplication:
-//   - INFO logs go to info-{date}.log only
-//   - WARN, ERROR, FATAL logs go to errors-{date}.log only
-//
-// The filename contract lives in LogFileName/LogPathFor, shared with log
-// readers (REST API / WebUI).
 func EnableMultiFileLogging(basePath string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
 	logger.basePath = basePath
 
-	// Create logs directory if it doesn't exist
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		log.Printf("Warning: could not create logs directory: %v\n", err)
 		return fmt.Errorf("failed to create logs directory: %w", err)
 	}
 
-	// File logging is now on: this must be set before (and even when) the
-	// opens below fail, because a failed open is retried lazily by the next
-	// write (H1 fix), and that lazy open is gated on enabled. All of this
-	// runs under mu, so no write can observe a half-enabled state.
 	logger.enabled = true
 
-	// Close existing files and clear the handles so the struct never keeps
-	// stale (closed) fds around.
 	if logger.infoFile != nil {
 		logger.infoFile.Close()
 		logger.infoFile = nil
@@ -241,21 +190,15 @@ func EnableMultiFileLogging(basePath string) error {
 		logger.errorFile = nil
 	}
 
-	// Get current date
 	currentDate := time.Now().Format("2006-01-02")
 	logger.logDate = currentDate
 
-	// Open info log file (INFO level)
 	infoFile, err := openLogFile(basePath, "info", currentDate)
 	if err != nil {
 		log.Printf("Warning: could not open info log file: %v\n", err)
 		return fmt.Errorf("failed to open info log file: %w", err)
 	}
 
-	// Open error log file (WARN, ERROR, FATAL levels). On failure, drop the
-	// freshly opened info handle too so we don't leak an fd. The handles stay
-	// nil afterwards and the next write lazily retries the open (see
-	// writeToFile), so a failed startup open is no longer permanent.
 	errorFile, err := openLogFile(basePath, "error", currentDate)
 	if err != nil {
 		infoFile.Close()
@@ -272,19 +215,10 @@ func EnableMultiFileLogging(basePath string) error {
 	return nil
 }
 
-// DisableFileLogging disables file logging.
-//
-// It closes the handles and flips the enabled flag, but deliberately keeps
-// basePath (and logDate) set: basePath is the read-side contract used by
-// LogPathFor/GetLogsPath (REST API / WebUI log readers) and must keep
-// resolving after a Disable. The enabled flag is what stops the lazy open in
-// the write path from recreating the log files on the next write.
 func DisableFileLogging() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Flip the flag first, under the same lock as the write path: no write
-	// can slip through between closing the handles and disabling logging.
 	logger.enabled = false
 
 	if logger.infoFile != nil {
@@ -298,13 +232,10 @@ func DisableFileLogging() {
 	log.Println("File logging disabled")
 }
 
-// checkDateRotation checks if the day has changed and rotates files if needed
 func checkDateRotation() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// When file logging is disabled, rotation must be a no-op: reopening
-	// files here would resurrect the very files DisableFileLogging closed.
 	if !logger.enabled {
 		return
 	}
@@ -314,13 +245,8 @@ func checkDateRotation() {
 		return
 	}
 
-	// Day has changed, rotate files
 	logger.logDate = currentDate
 
-	// Close existing files and clear the handles; a failed reopen below must
-	// not leave closed fds behind (writeToFile would then error on every
-	// entry). A handle left nil by a failed reopen is retried by the next
-	// write (lazy open in writeToFile), not only on the next rotation.
 	if logger.infoFile != nil {
 		logger.infoFile.Close()
 		logger.infoFile = nil
@@ -330,8 +256,6 @@ func checkDateRotation() {
 		logger.errorFile = nil
 	}
 
-	// Open new files with current date. openLogFile creates the directory if
-	// needed; a failed open leaves the handle nil so the next write retries.
 	if logger.basePath != "" {
 		if f, err := openLogFile(logger.basePath, "info", currentDate); err == nil {
 			logger.infoFile = f
@@ -347,32 +271,16 @@ func checkDateRotation() {
 	}
 }
 
-// writeToFile writes the log entry to the appropriate file based on level:
-// INFO goes to the info file only; WARN/ERROR/FATAL go to the errors file
-// only (no duplication).
-//
-// Retry semantics: a nil handle (left by a failed open at startup or during
-// rotation) is lazily opened as part of the write itself. If that open fails,
-// the entry is dropped and the handle stays nil, so the NEXT write retries.
-// A non-nil handle whose write fails gets ONE best-effort reopen via
-// writeWithReopen before the entry is dropped.
-//
-// Locking: holds mu for the whole call, so it must not call GetLogsPath or
-// LogPathFor (mu.RLock → self-deadlock); the lazy open and the reopen go
-// through openLogFile, which is lock-free and uses logger.basePath directly.
 func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
-	// Full lock (not RLock): a failed write may reopen handles in place.
 	mu.Lock()
 	defer mu.Unlock()
 
-	// File logging disabled: drop the entry, create no file, write nothing.
 	if !logger.enabled {
 		return
 	}
 
 	data := string(jsonData) + "\n"
 
-	// Only write to file for INFO and above (DEBUG only goes to console)
 	switch level {
 	case INFO:
 		writeToLogFile(&logger.infoFile, "info", data)
@@ -381,12 +289,7 @@ func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
 	}
 }
 
-// writeToLogFile writes data to *f. If *f is nil (a previous open failed) it
-// attempts ONE lazy open first; on failure the entry is dropped and *f stays
-// nil so the next write retries. On a write failure it delegates the single
-// reopen to writeWithReopen. Callers must hold mu.
 func writeToLogFile(f **os.File, apiLevel, data string) {
-	// Disabled logger: no lazy open, no write — Disable must stay disabled.
 	if !logger.enabled {
 		return
 	}
@@ -401,15 +304,7 @@ func writeToLogFile(f **os.File, apiLevel, data string) {
 	writeWithReopen(f, apiLevel, data)
 }
 
-// writeWithReopen writes data to *f. On write failure it closes and nils the
-// handle, then tries ONE reopen (via openLogFile, using the canonical filename
-// contract) and a single retry. Failures are logged to stderr; entries may be
-// dropped but the logger never panics and never keeps a closed fd around.
-// Callers must hold mu.
 func writeWithReopen(f **os.File, apiLevel, data string) {
-	// Belt and braces: a reopen while disabled would recreate the files
-	// DisableFileLogging closed (normally unreachable — writeToFile and
-	// writeToLogFile are already gated on enabled).
 	if !logger.enabled {
 		return
 	}
@@ -435,7 +330,6 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		return
 	}
 
-	// Check for date rotation before logging
 	checkDateRotation()
 
 	entry := LogEntry{
@@ -453,10 +347,8 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		}
 	}
 
-	// Write to file (for INFO and above)
 	jsonData, err := json.Marshal(entry)
 	if err != nil {
-		// Log error to stderr in non-quiet mode
 		if !logger.quiet {
 			log.Printf("Failed to marshal log entry: %v", err)
 		}
@@ -471,7 +363,6 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		fieldStr = " " + formatFields(fields)
 	}
 
-	// In quiet mode (TUI), only write to file, don't output to stderr
 	if logger.quiet {
 		return
 	}
@@ -506,7 +397,6 @@ func formatFields(fields map[string]interface{}) string {
 	return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 }
 
-// CleanupOldLogs removes log files older than maxDays
 func CleanupOldLogs(maxDays int) error {
 	mu.RLock()
 	basePath := logger.basePath
@@ -529,7 +419,6 @@ func CleanupOldLogs(maxDays int) error {
 		}
 
 		name := entry.Name()
-		// Check if it's a canonical log file (info-{date}.log / errors-{date}.log)
 		dateStr, ok := LogDateFromFileName(name)
 		if !ok {
 			continue
@@ -548,7 +437,6 @@ func CleanupOldLogs(maxDays int) error {
 	return nil
 }
 
-// Debug logs a debug message (console only, not written to file)
 func Debug(message string) {
 	logMessage(DEBUG, "", message, nil)
 }

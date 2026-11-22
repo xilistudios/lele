@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package config
 
 import (
@@ -12,10 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 )
-
-// durable_inbound is tri-state (nil = "not configured"), so it has to survive
-// the whole editable-document cycle without being flattened to false, and must
-// stay out of the file while unset so the code default keeps owning it.
 
 func TestDurableInboundDefaultIsOff(t *testing.T) {
 	cfg := DefaultConfig()
@@ -71,7 +61,6 @@ func TestDurableInboundRoundTrip(t *testing.T) {
 					formatTri(back.Session.DurableInbound), formatTri(tc.in))
 			}
 
-			// Full save/reload cycle, the path a user's edit actually takes.
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := SaveEditableDocument(path, doc); err != nil {
 				t.Fatalf("SaveEditableDocument: %v", err)
@@ -88,9 +77,6 @@ func TestDurableInboundRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDurableInboundKeyAbsentWhenUnset pins the "unset means inherit" rule: an
-// untouched config must not gain a durable_inbound: false that would pin the
-// feature off for every future release.
 func TestDurableInboundKeyAbsentWhenUnset(t *testing.T) {
 	doc := editableDocumentFromConfig(DefaultConfig())
 
@@ -103,16 +89,11 @@ func TestDurableInboundKeyAbsentWhenUnset(t *testing.T) {
 	}
 }
 
-// TestDurableInboundEmittedAlone guards the emission gate: the session block is
-// only written when something in it is set, so a config whose ONLY non-default
-// session value is durable_inbound must still be persisted. Otherwise enabling
-// durability silently evaporates on the next save.
 func TestDurableInboundEmittedAlone(t *testing.T) {
 	for name, want := range map[string]bool{"on": true, "off": false} {
 		t.Run(name, func(t *testing.T) {
 			value := want
 			src := DefaultConfig()
-			// Strip every other session override so durable_inbound is alone.
 			src.Session = SessionConfig{DurableInbound: &value}
 
 			doc := editableDocumentFromConfig(src)
@@ -143,7 +124,6 @@ func TestDurableInboundEmittedAlone(t *testing.T) {
 	}
 }
 
-// sessionKey digs session.<key> out of a serialised document.
 func sessionKey(t *testing.T, data []byte, key string) (any, bool) {
 	t.Helper()
 
@@ -159,8 +139,6 @@ func sessionKey(t *testing.T, data []byte, key string) (any, bool) {
 	return value, ok
 }
 
-// ptrBoolEqual compares two *bool by value, treating nil as distinct from any
-// non-nil pointer: the tri-state must not collapse.
 func ptrBoolEqual(a, b *bool) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil

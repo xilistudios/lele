@@ -15,19 +15,15 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// FlexibleStringSlice is a []string that also accepts JSON numbers,
-// so allow_from can contain both "123" and 123.
 type FlexibleStringSlice []string
 
 func (f *FlexibleStringSlice) UnmarshalJSON(data []byte) error {
-	// Try []string first
 	var ss []string
 	if err := json.Unmarshal(data, &ss); err == nil {
 		*f = ss
 		return nil
 	}
 
-	// Try []interface{} to handle mixed types
 	var raw []interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -48,7 +44,6 @@ func (f *FlexibleStringSlice) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Valid strategy constants for GroupProfile.Strategy.
 const (
 	StrategyRoundRobin = "round_robin"
 	StrategyMoA        = "moa"
@@ -56,7 +51,6 @@ const (
 	StrategyPipeline   = "pipeline"
 )
 
-// validStrategies is the set of accepted GroupProfile.Strategy values.
 var validStrategies = map[string]bool{
 	StrategyRoundRobin: true,
 	StrategyMoA:        true,
@@ -64,35 +58,28 @@ var validStrategies = map[string]bool{
 	StrategyPipeline:   true,
 }
 
-// ValidStrategy reports whether s is a valid group strategy name.
 func ValidStrategy(s string) bool {
 	return validStrategies[s]
 }
 
-// GroupsConfig holds the list of multi-agent group profiles.
 type GroupsConfig struct {
 	Enabled bool           `json:"enabled"`
 	List    []GroupProfile `json:"list,omitempty"`
 }
 
-// GroupProfile describes a collaborative multi-agent group (MoA, round-robin,
-// moderator, or pipeline). Each profile declares participants, a strategy, and
-// optional resource/stop constraints.
 type GroupProfile struct {
 	ID               string   `json:"id"`
-	Participants     []string `json:"participants"`        // agent IDs
-	Strategy         string   `json:"strategy"`            // round_robin|moa|moderator|pipeline
-	Rounds           int      `json:"rounds,omitempty"`    // capas MoA / vueltas round_robin
-	Moderator        string   `json:"moderator,omitempty"` // agente moderador/agregador
+	Participants     []string `json:"participants"`
+	Strategy         string   `json:"strategy"`
+	Rounds           int      `json:"rounds,omitempty"`
+	Moderator        string   `json:"moderator,omitempty"`
 	MaxTurns         int      `json:"max_turns,omitempty"`
 	MaxTokensPerTurn int      `json:"max_tokens_per_turn,omitempty"`
 	TotalTokenBudget int      `json:"total_token_budget,omitempty"`
-	StopKeywords     []string `json:"stop_keywords,omitempty"` // ej. ["CONSENSUS","FINAL"]
-	Parallel         bool     `json:"parallel,omitempty"`      // turnos paralelos dentro de una capa
+	StopKeywords     []string `json:"stop_keywords,omitempty"`
+	Parallel         bool     `json:"parallel,omitempty"`
 }
 
-// Validate checks the GroupProfile for basic consistency. It returns an error
-// that includes the group ID for easier debugging.
 func (g *GroupProfile) Validate() error {
 	if g.ID == "" {
 		return fmt.Errorf("groups: group ID is required")
@@ -119,8 +106,6 @@ func (g *GroupProfile) Validate() error {
 	return nil
 }
 
-// ValidateGroups checks every GroupProfile in the list and returns the first
-// validation error encountered, or nil if all profiles are valid.
 func (gc *GroupsConfig) ValidateGroups() error {
 	for i := range gc.List {
 		if err := gc.List[i].Validate(); err != nil {
@@ -130,11 +115,6 @@ func (gc *GroupsConfig) ValidateGroups() error {
 	return nil
 }
 
-// GroupsFeatureEnabled is the single source of truth for whether the groups
-// feature is active. Every gating decision (tool registration, /group command,
-// GroupManager.Start, WS welcome payload) must consult this helper instead of
-// reading Groups.Enabled ad hoc, so the feature cannot be enabled on one path
-// and disabled on another (B10). Nil-safe: a nil config means disabled.
 func (c *Config) GroupsFeatureEnabled() bool {
 	return c != nil && c.Groups.Enabled
 }
@@ -155,65 +135,35 @@ type Config struct {
 	Keyring   KeyringConfig    `json:"keyring"`
 	Updates   UpdatesConfig    `json:"updates"`
 	Goal      GoalConfig       `json:"goal"`
-	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code (builtin: "es","en","pt"; downloaded packs allowed). Default: "es"
-	TUI       TUIConfig        `json:"tui,omitempty"`                      // TUI settings (mouse/rendering/stream)
+	Language  string           `json:"language,omitempty" env:"LELE_LANG"`
+	TUI       TUIConfig        `json:"tui,omitempty"`
 
-	// Commands declares custom slash commands inline (lowest precedence: file
-	// levels global/workspace/directory override same-name entries here).
-	// Keyed by command name without the leading slash; see pkg/harness.
 	Commands map[string]CommandDefinition `json:"commands,omitempty"`
-	// Harness tunes how custom commands behave at runtime.
-	Harness HarnessConfig `json:"harness,omitempty"`
+	Harness  HarnessConfig                `json:"harness,omitempty"`
 
 	mu sync.RWMutex
 }
 
-// CommandDefinition mirrors harness.CommandDef. pkg/config deliberately does
-// NOT import pkg/harness: keeping the dependency one-way (harness is a leaf
-// package, config must stay importable everywhere) avoids any future cycle and
-// keeps the JSON schema in one place. The fields and tags must stay in sync
-// with harness.CommandDef; callers convert between them when building the
-// harness ManagerConfig.
 type CommandDefinition struct {
-	Description string `json:"description,omitempty"`
-	Agent       string `json:"agent,omitempty"`
-	Model       string `json:"model,omitempty"`
-	Template    string `json:"template"`
-	AllowShell  bool   `json:"allow_shell,omitempty"`
-	// AllowAbsoluteFiles is tri-state (see harness.CommandDef): nil inherits
-	// harness.allow_absolute_files, an explicit value overrides it.
-	AllowAbsoluteFiles *bool `json:"allow_absolute_files,omitempty"`
+	Description        string `json:"description,omitempty"`
+	Agent              string `json:"agent,omitempty"`
+	Model              string `json:"model,omitempty"`
+	Template           string `json:"template"`
+	AllowShell         bool   `json:"allow_shell,omitempty"`
+	AllowAbsoluteFiles *bool  `json:"allow_absolute_files,omitempty"`
 }
 
-// HarnessConfig holds global settings for custom slash commands.
 type HarnessConfig struct {
-	// AllowShell is the default permission for !`cmd` expansion in commands
-	// that do not set allow_shell themselves. Off by default: executing shell
-	// snippets found in config/markdown is opt-in.
-	AllowShell bool `json:"allow_shell,omitempty"`
-	// AllowAbsoluteFiles gates @/abs/path file inlining in custom commands.
-	// Off by default: command files can come from untrusted repos (directory
-	// scope), and absolute references would exfiltrate any readable file into
-	// the prompt. Individual commands may override this with the tri-state
-	// allow_absolute_files frontmatter flag.
+	AllowShell         bool `json:"allow_shell,omitempty"`
 	AllowAbsoluteFiles bool `json:"allow_absolute_files,omitempty"`
 }
 
-// TUIConfig holds tunable settings for the TUI rendered through the
-// /settings > Interface menu. A plain bool zero-value is "false", so the
-// semantic default for MouseEnabled (true) is applied in the TUI itself;
-// the config field is only written once the user toggles it.
 type TUIConfig struct {
 	MouseEnabled        bool `json:"mouse_enabled"`
 	MaxRenderedMessages int  `json:"max_rendered_messages"`
 	StreamThrottleMS    int  `json:"stream_throttle_ms"`
-	// KeepAwake asks the TUI to inhibit host sleep while it runs. Opt-in (the
-	// zero value is off) and only an intent: on a platform with no working
-	// mechanism it stays true while the inhibition is off. It is deliberately
-	// the only bool with `omitempty` in this struct: "off" is written as an
-	// ABSENT key, not as `false`.
 	KeepAwake           bool `json:"keep_awake,omitempty"`
-	OnboardingCompleted bool `json:"onboarding_completed,omitempty"` // true once the user has completed or skipped the onboarding wizard
+	OnboardingCompleted bool `json:"onboarding_completed,omitempty"`
 }
 
 func (c *Config) clone() *Config {
@@ -236,9 +186,6 @@ type AgentsConfig struct {
 	List     []AgentConfig `json:"list,omitempty"`
 }
 
-// AgentModelConfig supports both string and structured model config.
-// String format: "gpt-4" (just primary, no fallbacks)
-// Object format: {"primary": "gpt-4", "fallbacks": ["claude-haiku"]}
 type AgentModelConfig struct {
 	Primary   string   `json:"primary,omitempty"`
 	Fallbacks []string `json:"fallbacks,omitempty"`
@@ -265,8 +212,6 @@ func (m *AgentModelConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
-	// Always serialize as object to maintain consistent structure in UI
-	// This ensures the frontend always receives {primary, fallbacks} format
 	type raw struct {
 		Primary   string   `json:"primary,omitempty"`
 		Fallbacks []string `json:"fallbacks,omitempty"`
@@ -275,33 +220,25 @@ func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
 }
 
 type AgentConfig struct {
-	ID          string            `json:"id"`
-	Default     bool              `json:"default,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Workspace   string            `json:"workspace,omitempty"`
-	Model       *AgentModelConfig `json:"model,omitempty"`
-	Skills      []string          `json:"skills,omitempty"`
-	Subagents   *SubagentsConfig  `json:"subagents,omitempty"`
-	Temperature *float64          `json:"temperature,omitempty"`
-	// ThinkingLevel is the per-agent default reasoning effort ("off", "low",
-	// "medium", "high"). nil/absent = inherit: agents.defaults.thinking_level
-	// first, then the provider-model ReasoningConfig. See NormalizeThinkingLevel.
-	ThinkingLevel *string `json:"thinking_level,omitempty"`
-	// Tools is the per-agent allowlist of tool names (e.g. "read_file",
-	// "exec"). nil/empty = all registered tools are available to the agent
-	// (default behavior). Unknown names are ignored with a warning at
-	// instance-build time; a non-empty list restricts the agent to exactly
-	// the known names it contains.
-	Tools []string `json:"tools,omitempty"`
+	ID            string            `json:"id"`
+	Default       bool              `json:"default,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Workspace     string            `json:"workspace,omitempty"`
+	Model         *AgentModelConfig `json:"model,omitempty"`
+	Skills        []string          `json:"skills,omitempty"`
+	Subagents     *SubagentsConfig  `json:"subagents,omitempty"`
+	Temperature   *float64          `json:"temperature,omitempty"`
+	ThinkingLevel *string           `json:"thinking_level,omitempty"`
+	Tools         []string          `json:"tools,omitempty"`
 }
 
 type SubagentsConfig struct {
 	AllowAgents   []string          `json:"allow_agents,omitempty"`
 	Model         *AgentModelConfig `json:"model,omitempty"`
-	TimeoutMin    int               `json:"timeout_minutes,omitempty"` // 0 means no timeout
-	MaxConcurrent int               `json:"max_concurrent,omitempty"`  // max concurrent subagent tasks (0 = unlimited)
-	MaxIterations int               `json:"max_iterations,omitempty"`  // max tool iterations for subagent tasks (0 = unlimited)
+	TimeoutMin    int               `json:"timeout_minutes,omitempty"`
+	MaxConcurrent int               `json:"max_concurrent,omitempty"`
+	MaxIterations int               `json:"max_iterations,omitempty"`
 }
 
 type PeerMatch struct {
@@ -330,117 +267,59 @@ type SessionConfig struct {
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
 	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
-	// DurableInbound persists every external inbound message to the spool
-	// table before publishing it to the bus, and replays whatever is still
-	// unprocessed after a restart. It is tri-state like
-	// CommandDefinition.AllowAbsoluteFiles: nil means "not configured", which
-	// DurableInboundEnabled resolves to false. Off by default until the path
-	// has been hardened in production.
-	DurableInbound *bool `json:"durable_inbound,omitempty"`
-	// DurableOutbound persiste cada respuesta del agente al spool antes de
-	// publicarla en el bus y reenvía lo no entregado tras un restart. Tri-state
-	// como DurableInbound: nil = "no configurado" = false.
-	DurableOutbound *bool `json:"durable_outbound,omitempty"`
-	// Resume checkpoints every in-flight inbound turn so a gateway restart
-	// mid-turn can resume it (see pkg/agent/turn_state.go) instead of
-	// re-running it from scratch. It is tri-state like DurableInbound: nil
-	// means "not configured", which ResumeEnabled resolves to false. Off by
-	// default. Prerequisite: the resume trigger is the durable inbound
-	// replay, so resuming inbound turns only works with DurableInbound on.
-	Resume *bool `json:"resume_enabled,omitempty"`
+	DurableInbound             *bool               `json:"durable_inbound,omitempty"`
+	DurableOutbound            *bool               `json:"durable_outbound,omitempty"`
+	Resume                     *bool               `json:"resume_enabled,omitempty"`
 }
 
-// DurableInboundEnabled reports whether durable inbound replay is on.
-// An unset flag is false: durability is opt-in.
 func (s SessionConfig) DurableInboundEnabled() bool {
 	return s.DurableInbound != nil && *s.DurableInbound
 }
 
-// DurableOutboundEnabled reports whether durable outbound replay is on.
-// An unset flag is false: durability is opt-in.
 func (s SessionConfig) DurableOutboundEnabled() bool {
 	return s.DurableOutbound != nil && *s.DurableOutbound
 }
 
-// ResumeEnabled reports whether active-turn resume is on. An unset flag is
-// false: resume is opt-in. Even when on, resuming inbound turns requires
-// DurableInboundEnabled, because the replay of the spooled message is what
-// triggers the resume.
 func (s SessionConfig) ResumeEnabled() bool {
 	return s.Resume != nil && *s.Resume
 }
 
 const DefaultEphemeralThresholdSeconds = 560
 
-// DefaultCompactionThresholdPercent is the default percentage of the model
-// context window at which session history is summarized/compacted.
 const DefaultCompactionThresholdPercent = 75
 
-// DefaultMaxRequestBytes is the outbound request-size budget that keeps the payload
-// under the transport layer's body cap (the configured router rejects bodies over
-// 10 MiB with HTTP 400). 8 MiB leaves margin for the JSON envelope, the system
-// prompt and the tool definitions.
-const DefaultMaxRequestBytes = 8 << 20 // 8 MiB
+const DefaultMaxRequestBytes = 8 << 20
 
-// SessionEphemeralFileDefault is the value used when a config file omits
-// session.ephemeral. It intentionally differs from DefaultConfig()'s
-// Ephemeral=true (the no-file first-run privacy default) so that a missing
-// key in an existing config file always resolves to false — matching
-// LoadConfig's absent-key override. Every path that interprets or writes the
-// file-default for session.ephemeral must use this constant instead of a
-// bare literal so the two defaults stay in sync.
 const SessionEphemeralFileDefault = false
 
 type AgentDefaults struct {
-	Workspace           string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	Provider            string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
-	Model               string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
-	ModelFallbacks      []string `json:"model_fallbacks,omitempty"`
-	ImageModel          string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens           int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature         *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
-	// ThinkingLevel is the global default reasoning effort ("off", "low",
-	// "medium", "high"). nil/absent = inherit the provider-model
-	// ReasoningConfig; per-agent AgentConfig.ThinkingLevel overrides it.
-	// See NormalizeThinkingLevel.
-	ThinkingLevel     *string `json:"thinking_level,omitempty" env:"LELE_AGENTS_DEFAULTS_THINKING_LEVEL"`
-	MaxToolIterations int     `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	MaxReadLines      int     `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
-	// MemoryMaxLines caps the lines of the workspace MEMORY.md written by the
-	// update_memory tool; <= 0 is resolved to the 500-line default by
-	// NewAgentInstance. 0/absent in the file inherits DefaultConfig (through
-	// the editable document, applyDefaults applies the same inherit rule).
-	MemoryMaxLines         int `json:"memory_max_lines" env:"LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES"`
-	SubagentTimeoutMinutes int `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
-	SubagentMaxConcurrent  int `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
-	// SubagentMaxRetries bounds re-runs of a subagent whose LLM call failed
-	// transiently. 0 disables retries, but only when reached through config.json:
-	// LoadConfig unmarshals over DefaultConfig, so an explicit 0 in the file wins.
-	// Through the editable document (applyDefaults) 0 cannot be told apart from
-	// unset and inherits the default instead.
-	SubagentMaxRetries    int `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`
-	SubagentMaxIterations int `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"` // max tool iterations for subagent tasks (0 = unlimited)
-	// SubagentRetentionMinutes is how long a finished (terminal) subagent task
-	// stays tracked in memory — with its session resident — before the periodic
-	// retention sweeper reaps it. 0 keeps the manager's built-in default (5m);
-	// it does NOT disable the sweep, because an accidental zero must never make
-	// the task map grow forever again.
+	Workspace                string            `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace      bool              `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	Provider                 string            `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
+	Model                    string            `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
+	ModelFallbacks           []string          `json:"model_fallbacks,omitempty"`
+	ImageModel               string            `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks      []string          `json:"image_model_fallbacks,omitempty"`
+	MaxTokens                int               `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature              *float64          `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
+	ThinkingLevel            *string           `json:"thinking_level,omitempty" env:"LELE_AGENTS_DEFAULTS_THINKING_LEVEL"`
+	MaxToolIterations        int               `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines             int               `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	MemoryMaxLines           int               `json:"memory_max_lines" env:"LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES"`
+	SubagentTimeoutMinutes   int               `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"`
+	SubagentMaxConcurrent    int               `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`
+	SubagentMaxRetries       int               `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`
+	SubagentMaxIterations    int               `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`
 	SubagentRetentionMinutes int               `json:"subagent_retention_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_RETENTION_MINUTES"`
-	LLMLoopTimeoutMinutes    int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
-	PromptCache              PromptCacheConfig `json:"prompt_cache,omitempty"`                                                       // explicit prompt-cache breakpoints for providers that support them
+	LLMLoopTimeoutMinutes    int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"`
+	PromptCache              PromptCacheConfig `json:"prompt_cache,omitempty"`
 }
 
-// PromptCacheConfig controls explicit prompt caching (Anthropic-style
-// cache_control breakpoints). Providers that cache automatically (OpenAI,
-// OpenRouter) ignore the setting but still report cached-token usage.
 type PromptCacheConfig struct {
-	Enabled bool   `json:"enabled,omitempty" env:"LELE_AGENTS_DEFAULTS_PROMPT_CACHE_ENABLED"` // master switch (default: off)
-	TTL     string `json:"ttl,omitempty" env:"LELE_AGENTS_DEFAULTS_PROMPT_CACHE_TTL"`         // "5m" (default) or "1h"
+	Enabled bool   `json:"enabled,omitempty" env:"LELE_AGENTS_DEFAULTS_PROMPT_CACHE_ENABLED"`
+	TTL     string `json:"ttl,omitempty" env:"LELE_AGENTS_DEFAULTS_PROMPT_CACHE_TTL"`
 }
 
-// NormalizedTTL returns "5m" or "1h".
 func (p PromptCacheConfig) NormalizedTTL() string {
 	if strings.EqualFold(strings.TrimSpace(p.TTL), "1h") {
 		return "1h"
@@ -463,14 +342,6 @@ type ChannelsConfig struct {
 	Web      WebConfig      `json:"web"`
 }
 
-// NativeRateLimitConfig tunes the throttling of the native channel's routes.
-// It is disabled by default: on ordinary local use, throttling managed to make
-// a browser with several tabs sign itself out (the #326 story). The server
-// binds all interfaces unless server.host or gateway.host says otherwise, so
-// on a shared network the pairing endpoint is reachable and unthrottled;
-// setting enabled to true is recommended for non-loopback installs, and the
-// server logs a warning when the combination is detected. A zero rate means
-// "use the built-in default" (see applyDefaults).
 type NativeRateLimitConfig struct {
 	Enabled             bool `json:"enabled" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED"`
 	PinPerMinute        int  `json:"pin_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE"`
@@ -513,16 +384,12 @@ type WhatsAppConfig struct {
 	AllowFrom FlexibleStringSlice `json:"allow_from" env:"LELE_CHANNELS_WHATSAPP_ALLOW_FROM"`
 }
 
-// VerboseLevel represents the verbosity level for tool execution notifications
 type VerboseLevel string
 
 const (
-	// VerboseOff disables all tool execution notifications
-	VerboseOff VerboseLevel = "off"
-	// VerboseBasic shows simplified action descriptions only
+	VerboseOff   VerboseLevel = "off"
 	VerboseBasic VerboseLevel = "basic"
-	// VerboseFull shows detailed tool calls and results
-	VerboseFull VerboseLevel = "full"
+	VerboseFull  VerboseLevel = "full"
 )
 
 type TelegramConfig struct {
@@ -597,7 +464,7 @@ type OneBotConfig struct {
 
 type HeartbeatConfig struct {
 	Enabled  bool `json:"enabled" env:"LELE_HEARTBEAT_ENABLED"`
-	Interval int  `json:"interval" env:"LELE_HEARTBEAT_INTERVAL"` // minutes, min 5
+	Interval int  `json:"interval" env:"LELE_HEARTBEAT_INTERVAL"`
 }
 
 type DevicesConfig struct {
@@ -605,49 +472,34 @@ type DevicesConfig struct {
 	MonitorUSB bool `json:"monitor_usb" env:"LELE_DEVICES_MONITOR_USB"`
 }
 
-// UpdatesConfig controls self-update behavior.
 type UpdatesConfig struct {
-	// Enabled allows checking for and applying updates (CLI and API).
-	Enabled bool `json:"enabled" env:"LELE_UPDATES_ENABLED"`
-	// Channel selects the release channel. Currently only "stable" is supported.
+	Enabled bool   `json:"enabled" env:"LELE_UPDATES_ENABLED"`
 	Channel string `json:"channel,omitempty" env:"LELE_UPDATES_CHANNEL"`
-	// Repo overrides the GitHub repository used for releases (owner/name).
-	// Empty means the default xilistudios/lele.
-	Repo string `json:"repo,omitempty" env:"LELE_UPDATES_REPO"`
+	Repo    string `json:"repo,omitempty" env:"LELE_UPDATES_REPO"`
 }
 
-// LogsConfig holds logging-related configuration
 type LogsConfig struct {
-	Enabled  bool   `json:"enabled" env:"LELE_LOGS_ENABLED"`             // Enable/disable file logging
-	Path     string `json:"path,omitempty" env:"LELE_LOGS_PATH"`         // Custom path (default: ~/.lele/logs)
-	MaxDays  int    `json:"max_days,omitempty" env:"LELE_LOGS_MAX_DAYS"` // Max days to keep logs (default: 7)
-	Rotation string `json:"rotation,omitempty" env:"LELE_LOGS_ROTATION"` // "daily" or "weekly" (default: daily). NOTE: currently ignored by the logger; rotation is always daily.
+	Enabled  bool   `json:"enabled" env:"LELE_LOGS_ENABLED"`
+	Path     string `json:"path,omitempty" env:"LELE_LOGS_PATH"`
+	MaxDays  int    `json:"max_days,omitempty" env:"LELE_LOGS_MAX_DAYS"`
+	Rotation string `json:"rotation,omitempty" env:"LELE_LOGS_ROTATION"`
 }
 
-// KeyringConfig holds configuration for the encrypted secret store.
 type KeyringConfig struct {
 	Enabled          bool   `json:"enabled" env:"LELE_KEYRING_ENABLED"`
-	Path             string `json:"path,omitempty" env:"LELE_KEYRING_PATH"`       // Vault file (default: ~/.lele/keyring.enc)
-	Backend          string `json:"backend,omitempty" env:"LELE_KEYRING_BACKEND"` // "auto", "keychain", or "file"
+	Path             string `json:"path,omitempty" env:"LELE_KEYRING_PATH"`
+	Backend          string `json:"backend,omitempty" env:"LELE_KEYRING_BACKEND"`
 	AuditLogSize     int    `json:"audit_log_size,omitempty" env:"LELE_KEYRING_AUDIT_LOG_SIZE"`
 	AllowAgentSet    bool   `json:"allow_agent_set" env:"LELE_KEYRING_ALLOW_AGENT_SET"`
 	AllowAgentDelete bool   `json:"allow_agent_delete" env:"LELE_KEYRING_ALLOW_AGENT_DELETE"`
 }
 
-// GoalConfig configures the /goal system.
 type GoalConfig struct {
-	// Judge controls how goal completion is evaluated.
-	// "inline" (default) uses a lightweight LLM judge call.
-	// "subagent" runs a separate subagent evaluator.
 	Judge GoalJudgeConfig `json:"judge"`
 }
 
-// GoalJudgeConfig configures the goal completion judge.
 type GoalJudgeConfig struct {
-	// Mode is "inline" (default) or "subagent".
-	Mode string `json:"mode" env:"LELE_GOAL_JUDGE_MODE"`
-	// Agent is the agent ID used when Mode is "subagent". Empty means the
-	// default agent.
+	Mode  string `json:"mode" env:"LELE_GOAL_JUDGE_MODE"`
 	Agent string `json:"agent,omitempty" env:"LELE_GOAL_JUDGE_AGENT"`
 }
 
@@ -675,24 +527,12 @@ type ProvidersConfig struct {
 }
 
 type ProviderConfig struct {
-	APIKey      string `json:"api_key" env:"LELE_PROVIDERS_{{.Name}}_API_KEY"`
-	APIBase     string `json:"api_base" env:"LELE_PROVIDERS_{{.Name}}_API_BASE"`
-	Proxy       string `json:"proxy,omitempty" env:"LELE_PROVIDERS_{{.Name}}_PROXY"`
-	AuthMethod  string `json:"auth_method,omitempty" env:"LELE_PROVIDERS_{{.Name}}_AUTH_METHOD"`
-	ConnectMode string `json:"connect_mode,omitempty" env:"LELE_PROVIDERS_{{.Name}}_CONNECT_MODE"` //only for Github Copilot, `stdio` or `grpc`
-	// Headers are extra HTTP headers sent on this provider's inference requests
-	// (both transports, OpenAI-compatible chat/completions and Anthropic
-	// messages, streaming and non-streaming). The only template token is
-	// {{session}} (protocoltypes.SessionHeaderPlaceholder), expanded per
-	// conversation to the same 64-hex wire session id lele already sends as
-	// x-opencode-session, so a transparent proxy/gateway keeps per-conversation
-	// affinity — the rationale: a unified proxy in front of upstreams that
-	// require custom headers (e.g. OpenCode Go's x-opencode-session). Custom
-	// headers are applied last, so they win over transport defaults (explicit
-	// user intent may override Authorization, e.g. a gateway with a non-Bearer
-	// scheme); transport-owned headers (Host, Content-Type, Content-Length,
-	// Transfer-Encoding, Connection, …) are rejected by validation.
-	Headers map[string]string `json:"headers,omitempty"`
+	APIKey      string            `json:"api_key" env:"LELE_PROVIDERS_{{.Name}}_API_KEY"`
+	APIBase     string            `json:"api_base" env:"LELE_PROVIDERS_{{.Name}}_API_BASE"`
+	Proxy       string            `json:"proxy,omitempty" env:"LELE_PROVIDERS_{{.Name}}_PROXY"`
+	AuthMethod  string            `json:"auth_method,omitempty" env:"LELE_PROVIDERS_{{.Name}}_AUTH_METHOD"`
+	ConnectMode string            `json:"connect_mode,omitempty" env:"LELE_PROVIDERS_{{.Name}}_CONNECT_MODE"`
+	Headers     map[string]string `json:"headers,omitempty"`
 }
 
 type OpenAIProviderConfig struct {
@@ -700,25 +540,14 @@ type OpenAIProviderConfig struct {
 	WebSearch bool `json:"web_search" env:"LELE_PROVIDERS_OPENAI_WEB_SEARCH"`
 }
 
-// ReasoningConfig holds reasoning-related configuration for models that support it.
-// Compatible with OpenAI reasoning API and OpenRouter reasoning parameters.
 type ReasoningConfig struct {
-	Effort    *string `json:"effort,omitempty"`     // "low", "medium", "high"
-	MaxTokens *int    `json:"max_tokens,omitempty"` // max reasoning tokens (OpenRouter)
-	Exclude   *bool   `json:"exclude,omitempty"`    // exclude reasoning tokens from response (OpenRouter)
-	Summary   *string `json:"summary,omitempty"`    // "auto", "detailed", "concise" (OpenAI o-series)
-	Enable    bool    `json:"enable,omitempty"`     // enables thinking/reasoning mode (e.g. DeepSeek v4)
+	Effort    *string `json:"effort,omitempty"`
+	MaxTokens *int    `json:"max_tokens,omitempty"`
+	Exclude   *bool   `json:"exclude,omitempty"`
+	Summary   *string `json:"summary,omitempty"`
+	Enable    bool    `json:"enable,omitempty"`
 }
 
-// NormalizeThinkingLevel canonicalizes a thinking level string.
-// Returns ("", true) for empty/"default"/"none" (meaning: no explicit level, inherit).
-// Returns the lowercase level and true for "off","low","medium","high".
-// Returns ("", false) for anything else (invalid).
-//
-// Note: this is the semantics of agents.thinking_level / agents.defaults.thinking_level
-// (session- and agent-level reasoning effort, where "off" is a valid explicit value).
-// It is intentionally NOT shared with ReasoningConfig.Validate(), which validates the
-// per-MODEL reasoning config where "off" is not a valid effort — different semantics.
 func NormalizeThinkingLevel(v string) (string, bool) {
 	v = strings.ToLower(strings.TrimSpace(v))
 	switch v {
@@ -733,7 +562,6 @@ func NormalizeThinkingLevel(v string) (string, bool) {
 	}
 }
 
-// Validate checks if the reasoning config has valid values.
 func (r *ReasoningConfig) Validate() error {
 	if r == nil {
 		return nil
@@ -769,23 +597,9 @@ type ProviderModelConfig struct {
 	Vision        bool             `json:"vision,omitempty"`
 	Video         bool             `json:"video,omitempty"`
 	Reasoning     *ReasoningConfig `json:"reasoning,omitempty"`
-	// ThinkingType names the wire-level "think system" the model's endpoint
-	// uses to turn reasoning on/off. Optional; empty/"auto" keeps the legacy
-	// heuristics. See NormalizeThinkingType for accepted values.
-	ThinkingType string `json:"thinking_type,omitempty"`
+	ThinkingType  string           `json:"thinking_type,omitempty"`
 }
 
-// ThinkingType values accepted in providers.<name>.models.<alias>.thinking_type.
-// Each names the wire dialect a model's endpoint understands for enabling and
-// disabling reasoning:
-//
-//   - "auto"      : legacy behavior, decided by heuristics (endpoint/model name)
-//   - "deepseek"  : thinking: {"type": "enabled"|"disabled"} — DeepSeek V3.2+,
-//     Xiaomi MiMo, Zhipu GLM-4.5+
-//   - "openai"    : top-level reasoning_effort ("none" disables) — OpenAI o-series/gpt-5
-//   - "openrouter": reasoning: {effort, enabled, ...} object — OpenRouter
-//   - "qwen"      : enable_thinking: true|false — Alibaba DashScope / Qwen3
-//   - "none"      : never send thinking parameters (the model has no switch)
 const (
 	ThinkingTypeAuto       = "auto"
 	ThinkingTypeDeepSeek   = "deepseek"
@@ -795,9 +609,6 @@ const (
 	ThinkingTypeNone       = "none"
 )
 
-// NormalizeThinkingType canonicalizes a thinking_type value.
-// Returns ("auto", true) for empty, the lowercase value and true for a valid
-// type, ("", false) for anything else (invalid).
 func NormalizeThinkingType(v string) (string, bool) {
 	v = strings.ToLower(strings.TrimSpace(v))
 	switch v {
@@ -810,7 +621,6 @@ func NormalizeThinkingType(v string) (string, bool) {
 	}
 }
 
-// Validate checks if the provider model config is valid.
 func (p *ProviderModelConfig) Validate() error {
 	if p.Reasoning != nil {
 		if err := p.Reasoning.Validate(); err != nil {
@@ -857,17 +667,11 @@ func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
 		if named.Type == "" {
 			named.Type = name
 		}
-		// Validate model configs
 		for modelName, modelCfg := range named.Models {
 			if err := modelCfg.Validate(); err != nil {
 				return fmt.Errorf("provider %q, model %q: %w", name, modelName, err)
 			}
 		}
-		// Custom headers are validated here because this UnmarshalJSON is the
-		// single choke point shared by config load, PUT /api/v1/config and
-		// POST /api/v1/config/validate: all three unmarshal into this type, so
-		// one check guards every entry door. (name, not key: it matches the
-		// provider errors above and is the id the rest of the code uses.)
 		if err := protocoltypes.ValidateCustomHeaders(named.Headers); err != nil {
 			return fmt.Errorf("provider %q: %w", name, err)
 		}
@@ -892,9 +696,6 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if v.Type == "" {
 			v.Type = key
 		}
-		// Any user-defined named entry is persisted. Checking only API key,
-		// models, or auth method silently discarded keyless local endpoints
-		// (APIBase/Proxy) and OAuth-completed entries (ConnectMode).
 		if !v.IsEmpty() {
 			out[key] = v
 			hasData = true
@@ -906,7 +707,6 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if _, exists := out[key]; exists {
 			return
 		}
-		// Typed fields are optional and only persisted once configured.
 		if cfg.IsEmpty() {
 			return
 		}
@@ -938,7 +738,6 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	put("zai_coding_plan", NamedProviderConfig{Type: "zai_coding_plan", ProviderConfig: p.ZAICodingPlan})
 	put("modelark_coding_plan", NamedProviderConfig{Type: "modelark_coding_plan", ProviderConfig: p.ModelArkCodingPlan})
 
-	// If no providers have any data, return null so the parent omitempty works
 	if !hasData {
 		return []byte("null"), nil
 	}
@@ -946,31 +745,6 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// IsEmpty reports whether a provider carries NO user configuration: it is
-// either the empty placeholder ensureNamedDefaults() pre-creates for every
-// known provider, or an entry with nothing worth persisting.
-//
-// It gates two coupled decisions, which is why it is exported and shared
-// rather than duplicated: what gets written to config.json (MarshalJSON skips
-// empty entries) and what /connect may overwrite wholesale (pkg/tui treats an
-// empty entry as disposable instead of reporting "already exists").
-//
-// "No user data" means every field that can only come from a user edit is
-// empty — including APIBase and Proxy, because a keyless local provider (the
-// supported "API key is optional for local providers" case) and an
-// OAuth-completed session (AuthMethod/ConnectMode) carry their configuration
-// exactly there; and including Headers, because a provider pointed at a
-// gateway that only needs extra request headers (api_key set elsewhere, e.g.
-// OAuth) would otherwise be silently dropped at save time.
-//
-// Two fields must STAY out of the predicate even though they look like
-// configuration:
-//
-//   - Type: ensureNamedDefaults() assigns it to every known provider, so
-//     counting it would persist every empty placeholder.
-//   - WebSearch (the OpenAIProviderConfig field, not part of this struct's
-//     JSON): ensureNamedDefaults() puts a non-nil copy for "openai", so
-//     counting it would make the openai placeholder look configured.
 func (p NamedProviderConfig) IsEmpty() bool {
 	return p.APIKey == "" &&
 		p.APIBase == "" &&
@@ -1046,15 +820,13 @@ func (p *ProvidersConfig) ListNamed() map[string]NamedProviderConfig {
 	return result
 }
 
-// HasUsableProvider returns true if the config has at least one named provider
-// with an API key (or is a local type like ollama) AND at least one model configured.
 func (c *Config) HasUsableProvider() bool {
 	if c.Providers == nil || len(c.Providers.Named) == 0 {
 		return false
 	}
 	for _, p := range c.Providers.Named {
 		hasKey := p.APIKey != ""
-		isLocal := p.Type == "ollama" // local providers don't need API keys
+		isLocal := p.Type == "ollama"
 		if (hasKey || isLocal) && len(p.Models) > 0 {
 			return true
 		}
@@ -1075,7 +847,6 @@ func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, pr
 		return "", false
 	}
 
-	// Always try exact match first, regardless of preferExact
 	if aliasCfg, found := named.Models[model]; found {
 		resolved := strings.TrimSpace(aliasCfg.Model)
 		if resolved != "" {
@@ -1120,9 +891,6 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	provider := normalizeProviderKey(defaultProvider)
 	pattern := provider + ":"
 	if provider != "" && strings.HasPrefix(rawModel, pattern) {
-		// Strip the provider prefix before looking up the alias in the provider.
-		// The models map uses bare model names as keys (e.g., "minimax"),
-		// not prefixed ones (e.g., "chutes:minimax").
 		modelName := strings.TrimSpace(rawModel[len(pattern):])
 		if modelName != "" {
 			if resolved, found := p.resolveModelAliasInProvider(provider, modelName, true); found {
@@ -1131,7 +899,6 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		}
 	}
 
-	// Handle "provider:model" format - extract provider and model
 	var model string
 	idx := strings.Index(rawModel, ":")
 	if idx > 0 {
@@ -1141,7 +908,6 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 			return rawModel
 		}
 	} else {
-		// No colon present - use the raw model as-is with the default provider
 		model = rawModel
 	}
 
@@ -1149,27 +915,20 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		return rawModel
 	}
 
-	// Try to find model in the specified provider first.
 	if resolved, found := p.resolveModelAliasInProvider(provider, model, false); found {
 		return provider + ":" + resolved
 	}
 
-	// If not found in specified provider (or provider doesn't exist),
-	// search across all providers for the model alias.
-	// Reuse resolveModelAliasInProvider which handles exact match (original
-	// name with dots), normalized match (dots→hyphens), and entries where
-	// the "model" field is empty (the map key IS the model name).
 	p.ensureNamedDefaults()
 	for provName := range p.Named {
 		if provName == provider {
-			continue // Already searched above
+			continue
 		}
 		if resolved, found := p.resolveModelAliasInProvider(provName, model, false); found {
 			return provName + ":" + resolved
 		}
 	}
 
-	// Model not found anywhere, return original
 	return rawModel
 }
 
@@ -1237,14 +996,11 @@ type GatewayConfig struct {
 	Port int    `json:"port" env:"LELE_GATEWAY_PORT"`
 }
 
-// ServerConfig is the unified server configuration (single host:port for all HTTP services).
 type ServerConfig struct {
 	Host string `json:"host" env:"LELE_SERVER_HOST"`
 	Port int    `json:"port" env:"LELE_SERVER_PORT"`
 }
 
-// EffectiveServerHost returns the effective server host, falling back to
-// legacy gateway/native config if ServerConfig is not set.
 func (c *Config) EffectiveServerHost() string {
 	if c.Server.Host != "" {
 		return c.Server.Host
@@ -1258,8 +1014,6 @@ func (c *Config) EffectiveServerHost() string {
 	return "0.0.0.0"
 }
 
-// EffectiveServerPort returns the effective server port, falling back to
-// legacy gateway/native config if ServerConfig is not set.
 func (c *Config) EffectiveServerPort() int {
 	if c.Server.Port != 0 {
 		return c.Server.Port
@@ -1307,18 +1061,14 @@ type WebToolsConfig struct {
 }
 
 type CronToolsConfig struct {
-	ExecTimeoutMinutes int `json:"exec_timeout_minutes" env:"LELE_TOOLS_CRON_EXEC_TIMEOUT_MINUTES"` // 0 means no timeout
+	ExecTimeoutMinutes int `json:"exec_timeout_minutes" env:"LELE_TOOLS_CRON_EXEC_TIMEOUT_MINUTES"`
 }
 
 type ExecConfig struct {
 	EnableDenyPatterns bool     `json:"enable_deny_patterns" env:"LELE_TOOLS_EXEC_ENABLE_DENY_PATTERNS"`
 	CustomDenyPatterns []string `json:"custom_deny_patterns" env:"LELE_TOOLS_EXEC_CUSTOM_DENY_PATTERNS"`
-	TimeoutSeconds     int      `json:"timeout_seconds" env:"LELE_TOOLS_EXEC_TIMEOUT_SECONDS"` // 0 means no timeout
-	// WhitelistCommands are exact command strings the user approved permanently
-	// ("always allow" from the approval prompt). They bypass deny patterns
-	// without switching on the strict allowlist mode (allowPatterns), which
-	// would block every command not listed there.
-	WhitelistCommands []string `json:"whitelist_commands" env:"LELE_TOOLS_EXEC_WHITELIST_COMMANDS"`
+	TimeoutSeconds     int      `json:"timeout_seconds" env:"LELE_TOOLS_EXEC_TIMEOUT_SECONDS"`
+	WhitelistCommands  []string `json:"whitelist_commands" env:"LELE_TOOLS_EXEC_WHITELIST_COMMANDS"`
 }
 
 type ToolsConfig struct {
@@ -1331,30 +1081,19 @@ func DefaultConfig() *Config {
 	return &Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Workspace:              "",
-				RestrictToWorkspace:    true,
-				Provider:               "openrouter",
-				Model:                  "deepseek-v4-pro",
-				MaxTokens:              0, // 0 = use provider/model fallback (instance resolves to 8192 when unset)
-				MaxToolIterations:      0, // 0 = unlimited (timeout is the real safety guard)
-				MaxReadLines:           500,
-				MemoryMaxLines:         500,
-				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
-				SubagentMaxIterations:  0,  // default unlimited for subagent tasks
-				// SubagentMaxRetries bounds how many times a subagent whose LLM
-				// call failed transiently is re-run. It was 0 by default, which
-				// silently disabled runTask's retry entirely: with no value here,
-				// tool_coordinator's `if > 0` guard never called the setter, so a
-				// single flaky provider response killed the subagent for good.
-				// 2 outer retries is ~3 rounds of full fallback-chain effort (each
-				// attempt already retries internally); SubagentTimeoutMinutes caps
-				// the total wall clock.
-				SubagentMaxRetries: 2,
-				// Terminal subagent tasks are reaped by a periodic sweeper
-				// (SubagentManager.StartRetentionCleanup): 5m is the same
-				// window the manager used as its built-in default.
+				Workspace:                "",
+				RestrictToWorkspace:      true,
+				Provider:                 "openrouter",
+				Model:                    "deepseek-v4-pro",
+				MaxTokens:                0,
+				MaxToolIterations:        0,
+				MaxReadLines:             500,
+				MemoryMaxLines:           500,
+				SubagentTimeoutMinutes:   30,
+				SubagentMaxIterations:    0,
+				SubagentMaxRetries:       2,
 				SubagentRetentionMinutes: 5,
-				LLMLoopTimeoutMinutes:    0, // default: no LLM loop timeout (0 = disabled; set >0 to opt in)
+				LLMLoopTimeoutMinutes:    0,
 			},
 		},
 		Session: SessionConfig{
@@ -1440,23 +1179,7 @@ func DefaultConfig() *Config {
 				SessionExpiryDays: 30,
 				MaxUploadSizeMB:   50,
 				UploadTTLHours:    24,
-				// LeleDir is deliberately left empty rather than defaulted to a
-				// path. Unlike every other field here it names a location that
-				// depends on the environment of the process that builds the
-				// default, and defaults ARE persisted: SaveConfig marshals the
-				// whole struct, and lele_dir is only omitempty, so a non-empty
-				// default is written to config.json by `lele auth`/onboarding.
-				// Defaulting it to GetLeleDir() would therefore freeze whatever
-				// LELE_CONFIG_DIR happened to be set in that one run: a single
-				// sandboxed CLI invocation would pin the auth store, uploads,
-				// attachment staging and the skills dirs to a scratch path,
-				// and the next ordinary run would honour it (a value in the
-				// file beats the code default). Empty + omitempty keeps the
-				// field unpersisted, so it is resolved per run by
-				// NewNativeChannel, which is also where the explicit config
-				// value still wins. Same lazy-resolution idiom as
-				// WorkspacePath, LogsPath and KeyringVaultPath.
-				LeleDir: "",
+				LeleDir:           "",
 				RateLimit: NativeRateLimitConfig{
 					Enabled:             false,
 					PinPerMinute:        DefaultNativeRateLimitPinPerMinute,
@@ -1493,7 +1216,7 @@ func DefaultConfig() *Config {
 		},
 		Server: ServerConfig{
 			Host: "",
-			Port: 0, // 0 means not set; falls back to Gateway/Native port
+			Port: 0,
 		},
 		Tools: ToolsConfig{
 			Web: WebToolsConfig{
@@ -1521,16 +1244,16 @@ func DefaultConfig() *Config {
 				},
 			},
 			Cron: CronToolsConfig{
-				ExecTimeoutMinutes: 5, // default 5 minutes for LLM operations
+				ExecTimeoutMinutes: 5,
 			},
 			Exec: ExecConfig{
 				EnableDenyPatterns: true,
-				TimeoutSeconds:     60, // default 60 seconds for shell commands
+				TimeoutSeconds:     60,
 			},
 		},
 		Heartbeat: HeartbeatConfig{
 			Enabled:  true,
-			Interval: 30, // default 30 minutes
+			Interval: 30,
 		},
 		Devices: DevicesConfig{
 			Enabled:    false,
@@ -1557,7 +1280,7 @@ func DefaultConfig() *Config {
 		},
 		Goal: GoalConfig{
 			Judge: GoalJudgeConfig{
-				Mode: "inline", // default: lightweight inline LLM judge
+				Mode: "inline",
 			},
 		},
 	}
@@ -1610,8 +1333,7 @@ func LoadConfig(path string) (*Config, error) {
 				_, sessionEphemeralConfigured = rawSession["ephemeral"]
 			}
 		}
-		// Check if providers key exists and has actual data
-		if providersRaw, ok := raw["providers"]; ok && len(providersRaw) > 2 { // > 2 to ignore "{}"
+		if providersRaw, ok := raw["providers"]; ok && len(providersRaw) > 2 {
 			providersConfigured = true
 		}
 	}
@@ -1629,7 +1351,6 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Session.CompactionThresholdPercent = DefaultCompactionThresholdPercent
 	}
 
-	// If providers were not in the JSON, set to nil so it gets omitted on save
 	if !providersConfigured {
 		cfg.Providers = nil
 	}
@@ -1678,15 +1399,6 @@ func DefaultConfigPath() string {
 	return filepath.Join(GetLeleDir(), "config.json")
 }
 
-// SaveConfig writes cfg to path as pretty-printed JSON.
-//
-// The write is atomic: data is written to a temporary file in the same
-// directory as path (so os.Rename stays on one filesystem), fsync'd, then
-// renamed into place. Readers — including the config watcher backed by
-// fsnotify — and crash recovery therefore never observe a truncated or
-// partially written config.json; they see either the old file or the new one.
-// The final file mode is 0600. On any failure after the temp file is created,
-// the temp file is removed so no leftovers remain.
 func SaveConfig(path string, cfg *Config) error {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
@@ -1721,8 +1433,6 @@ func SaveConfig(path string, cfg *Config) error {
 		tmp.Close()
 		return err
 	}
-	// CreateTemp already uses 0600 on Unix; be explicit for portability.
-	// Must happen before Close: fchmod on a closed fd fails on Linux.
 	if err := tmp.Chmod(0600); err != nil {
 		tmp.Close()
 		return err
@@ -1773,9 +1483,6 @@ func (c *Config) SessionEphemeralThresholdSeconds() int {
 	return c.Session.EphemeralThreshold
 }
 
-// SessionCompactionThresholdPercent returns the configured percentage of the
-// context window at which compaction is triggered, falling back to the default
-// if unset or out of the (0,100] range.
 func (c *Config) SessionCompactionThresholdPercent() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1785,18 +1492,12 @@ func (c *Config) SessionCompactionThresholdPercent() int {
 	return c.Session.CompactionThresholdPercent
 }
 
-// CompactionModel returns the configured model for context compaction.
-// Empty string means "use the session's current model" (default behavior).
 func (c *Config) CompactionModel() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Session.CompactionModel
 }
 
-// EvictExcludedFromMemory reports whether excluded (out-of-context) messages
-// should be evicted from memory after compaction and lazy-loaded on demand.
-// Defaults to true; env override LELE_EVICT_EXCLUDED (set to "true"/"1" to
-// force on, "false"/"0" to force off).
 func (c *Config) EvictExcludedFromMemory() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1844,8 +1545,6 @@ func (c *Config) LogsPath() string {
 	return expandHome(c.Logs.Path)
 }
 
-// KeyringVaultPath returns the path to the encrypted keyring vault file,
-// defaulting to <lele-dir>/keyring.enc when unset.
 func (c *Config) KeyringVaultPath() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1903,13 +1602,11 @@ func (c *Config) GetAPIBase() string {
 	return ""
 }
 
-// ModelConfig holds primary model and fallback list.
 type ModelConfig struct {
 	Primary   string
 	Fallbacks []string
 }
 
-// GetModelConfig returns the text model configuration with fallbacks.
 func (c *Config) GetModelConfig() ModelConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1919,7 +1616,6 @@ func (c *Config) GetModelConfig() ModelConfig {
 	}
 }
 
-// GetImageModelConfig returns the image model configuration with fallbacks.
 func (c *Config) GetImageModelConfig() ModelConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1929,8 +1625,6 @@ func (c *Config) GetImageModelConfig() ModelConfig {
 	}
 }
 
-// GetLanguage returns the configured language code.
-// Returns "es" (Spanish) as default if not set.
 func (c *Config) GetLanguage() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1940,14 +1634,12 @@ func (c *Config) GetLanguage() string {
 	return c.Language
 }
 
-// SetLanguage sets the language configuration.
 func (c *Config) SetLanguage(lang string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Language = lang
 }
 
-// GetAvailableLanguages returns the list of supported language codes.
 func (c *Config) GetAvailableLanguages() []string {
 	return i18n.AvailableLanguages()
 }

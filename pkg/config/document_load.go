@@ -5,7 +5,6 @@ import (
 	"os"
 )
 
-// LoadEditableDocument loads the config file without expanding ENV vars.
 func LoadEditableDocument(path string) (*EditableDocument, *DocumentMetadata, error) {
 	runtimeCfg, err := LoadConfig(path)
 	if err != nil {
@@ -27,10 +26,8 @@ func LoadEditableDocument(path string) (*EditableDocument, *DocumentMetadata, er
 		return nil, nil, readErr
 	}
 
-	// Apply defaults where values are missing.
 	doc = applyDefaults(doc)
 
-	// Determine sections that require a restart.
 	restartSections := detectRestartRequiredSections(doc)
 
 	meta := &DocumentMetadata{

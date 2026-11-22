@@ -6,7 +6,6 @@ import (
 )
 
 func TestConstants(t *testing.T) {
-	// Status constants
 	if StatusRunning != "running" {
 		t.Errorf("StatusRunning = %q, want %q", StatusRunning, "running")
 	}
@@ -20,7 +19,6 @@ func TestConstants(t *testing.T) {
 		t.Errorf("StatusError = %q, want %q", StatusError, "error")
 	}
 
-	// Role constants
 	if RoleProposer != "proposer" {
 		t.Errorf("RoleProposer = %q, want %q", RoleProposer, "proposer")
 	}
@@ -60,9 +58,8 @@ func TestAddTurn(t *testing.T) {
 		t.Errorf("UpdatedAt was not updated (is before AddTurn call)")
 	}
 
-	// Add a second turn — tokens should accumulate
 	updatedAtAfterFirst := g.UpdatedAt
-	time.Sleep(time.Millisecond) // ensure time advances
+	time.Sleep(time.Millisecond)
 
 	t2 := Turn{Index: 1, Layer: 0, Speaker: "bob", Label: "Bob", Content: "world", Tokens: 20}
 	g.AddTurn(t2)
@@ -154,7 +151,6 @@ func TestGroupStateString(t *testing.T) {
 	if s == "" {
 		t.Error("String() returned empty")
 	}
-	// Just verify it doesn't panic and contains the ID
 	if len(s) < 5 {
 		t.Errorf("String() = %q, seems too short", s)
 	}
@@ -192,7 +188,6 @@ func TestGroupState_Snapshot_IsDeepCopy(t *testing.T) {
 		t.Fatal("Snapshot() returned nil")
 	}
 
-	// Verify values match.
 	if snap.ID != original.ID {
 		t.Errorf("ID mismatch: %s vs %s", snap.ID, original.ID)
 	}
@@ -209,7 +204,6 @@ func TestGroupState_Snapshot_IsDeepCopy(t *testing.T) {
 		t.Errorf("TotalTokens = %d, want 10", snap.TotalTokens)
 	}
 
-	// Mutate original slices — snapshot must NOT change.
 	original.Transcript = append(original.Transcript, Turn{Index: 1, Speaker: "b", Content: "world", Tokens: 20})
 	original.Participants = append(original.Participants, Participant{AgentID: "c", Role: RoleCritic, Label: "C"})
 	original.StopKeywords = append(original.StopKeywords, "quit")
@@ -232,7 +226,6 @@ func TestGroupState_Snapshot_IsDeepCopy(t *testing.T) {
 		t.Errorf("snapshot Status changed: %s, want running", snap.Status)
 	}
 
-	// Mutate snapshot slices — original must NOT change.
 	snap.Transcript[0].Content = "MUTATED"
 	if original.Transcript[0].Content == "MUTATED" {
 		t.Error("mutating snapshot Transcript entry changed original")
@@ -249,11 +242,6 @@ func TestGroupState_Snapshot_IsDeepCopy(t *testing.T) {
 	}
 }
 
-// TestGroupState_Snapshot_CopiesTurnToolCalls guards the ToolCalls leg of the
-// "deep copy" contract: a Turn's ToolCalls slice must not alias the live
-// transcript's backing array. Without the copy, a snapshot taken while a turn
-// is still appending tool calls could observe (or be observed through) the
-// original slice, and mutating a snapshot entry would corrupt live state.
 func TestGroupState_Snapshot_CopiesTurnToolCalls(t *testing.T) {
 	original := &GroupState{
 		ID:       "g1",
@@ -277,7 +265,6 @@ func TestGroupState_Snapshot_CopiesTurnToolCalls(t *testing.T) {
 		t.Fatalf("snapshot ToolCalls len = %d, want 2", len(snap.Transcript[0].ToolCalls))
 	}
 
-	// Mutating a snapshot tool call must not touch the original.
 	snap.Transcript[0].ToolCalls[0].Status = "done"
 	snap.Transcript[0].ToolCalls[0].Result = "MUTATED"
 	if original.Transcript[0].ToolCalls[0].Status == "done" ||
@@ -285,15 +272,12 @@ func TestGroupState_Snapshot_CopiesTurnToolCalls(t *testing.T) {
 		t.Error("mutating snapshot ToolCalls changed original (aliased backing array)")
 	}
 
-	// Appending to the live turn's tool calls must not be visible in the
-	// snapshot (no shared backing array).
 	original.Transcript[0].ToolCalls = append(original.Transcript[0].ToolCalls,
 		GroupToolCall{ToolCallID: "tc3", Tool: "web_search", Status: "running"})
 	if len(snap.Transcript[0].ToolCalls) != 2 {
 		t.Errorf("snapshot ToolCalls grew with original: len=%d, want 2", len(snap.Transcript[0].ToolCalls))
 	}
 
-	// A turn with no tool calls must stay nil (don't invent empty slices).
 	original.Transcript = append(original.Transcript, Turn{Index: 1, Speaker: "b"})
 	snap2 := original.Snapshot()
 	if snap2.Transcript[1].ToolCalls != nil {

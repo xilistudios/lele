@@ -7,25 +7,12 @@ import (
 	"testing"
 )
 
-// agents.defaults.memory_max_lines is the cap passed to the update_memory tool
-// (pkg/tools/memory_tool.go) when NewAgentInstance registers it. Like
-// subagent_retention_minutes it must survive every copy path, because this
-// package lost fields of exactly this shape before (max_read_lines,
-// subagent_max_iterations — silent drops in the hand-written copy blocks):
-//
-//	doc -> ToConfig (editable -> runtime)             : hand-written copy  <-- risk
-//	cfg -> editableDocumentFromConfig (runtime->doc)  : hand-written copy  <-- risk
-//	doc -> toSerializable -> disk (WebUI save)        : whole-struct emit
-//	file -> LoadConfig (runtime Config)               : struct tag + env tag
 func TestMemoryMaxLinesDefaultConfig(t *testing.T) {
 	if got := DefaultConfig().Agents.Defaults.MemoryMaxLines; got != 500 {
 		t.Fatalf("DefaultConfig memory_max_lines = %d, want 500", got)
 	}
 }
 
-// TestMemoryMaxLinesRoundTrip pins both hand-written copy blocks with a
-// non-default value: runtime -> document and document -> runtime must each
-// carry it, or a WebUI/TUI save silently reverts the knob to the default.
 func TestMemoryMaxLinesRoundTrip(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Agents.Defaults.MemoryMaxLines = 120
@@ -42,10 +29,6 @@ func TestMemoryMaxLinesRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMemoryMaxLinesSerializedDefaults guards the whole-struct emit of
-// toSerializable: the key must be present in what a WebUI/TUI save writes to
-// disk, otherwise the value is dropped on every save cycle even though the
-// in-memory conversion above passes.
 func TestMemoryMaxLinesSerializedDefaults(t *testing.T) {
 	doc := editableDocumentFromConfig(DefaultConfig())
 	raw, err := json.Marshal(doc.toSerializable())
@@ -62,8 +45,6 @@ func TestMemoryMaxLinesSerializedDefaults(t *testing.T) {
 	}
 }
 
-// TestMemoryMaxLinesLoadFromFile: an explicit value in config.json wins over
-// the code default (LoadConfig unmarshals over DefaultConfig).
 func TestMemoryMaxLinesLoadFromFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	data := `{"agents":{"defaults":{"provider":"openai","model":"gpt-4o","memory_max_lines":42}}}`
@@ -79,10 +60,6 @@ func TestMemoryMaxLinesLoadFromFile(t *testing.T) {
 	}
 }
 
-// TestMemoryMaxLinesAbsentInheritsDefault pins the inherit rule on both load
-// paths: a config.json without the key falls back to the code default (500),
-// and the editable document — where an explicit 0 cannot be told apart from
-// unset — inherits the default too instead of disabling the cap.
 func TestMemoryMaxLinesAbsentInheritsDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	data := `{"agents":{"defaults":{"provider":"openai","model":"gpt-4o"}}}`
@@ -105,9 +82,6 @@ func TestMemoryMaxLinesAbsentInheritsDefault(t *testing.T) {
 	}
 }
 
-// TestMemoryMaxLinesEnvOverride covers the env tag: LoadConfig runs
-// env.Parse(cfg), so LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES must reach the
-// nested AgentDefaults field.
 func TestMemoryMaxLinesEnvOverride(t *testing.T) {
 	t.Setenv("LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES", "7")
 
@@ -124,12 +98,6 @@ func TestMemoryMaxLinesEnvOverride(t *testing.T) {
 	}
 }
 
-// TestMemoryMaxLinesToConfigDirect exercises ToConfig() on a directly
-// constructed document (MemoryMaxLines: 120) and asserts the resulting cfg
-// value. Unlike the round-trip above — which builds the document from a
-// config — this pins the doc -> cfg conversion itself (review finding L2: the
-// hand-written field copy in ToConfig and the rebuild from toSerializable both
-// claim to carry the knob; this asserts the observable outcome of ToConfig).
 func TestMemoryMaxLinesToConfigDirect(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Agents.Defaults.MemoryMaxLines = 120

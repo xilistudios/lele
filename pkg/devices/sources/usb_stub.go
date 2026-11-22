@@ -20,7 +20,7 @@ func (m *USBMonitor) Kind() events.Kind {
 
 func (m *USBMonitor) Start(ctx context.Context) (<-chan *events.DeviceEvent, error) {
 	ch := make(chan *events.DeviceEvent)
-	close(ch) // Immediately close, no events
+	close(ch)
 	return ch, nil
 }
 

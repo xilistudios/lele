@@ -7,15 +7,10 @@ import (
 	"time"
 )
 
-// GoalRepo provides CRUD operations on the goals table. The goal column
-// stores an opaque JSON string serialised by the domain layer (pkg/agent);
-// this package never interprets its contents.
 type GoalRepo struct {
 	db *sql.DB
 }
 
-// GetGoal returns the goal JSON for the given session key. If no row
-// exists the found return is false with a nil error.
 func (r *GoalRepo) GetGoal(sessionKey string) (string, bool, error) {
 	var goal string
 	err := r.db.QueryRow(
@@ -30,7 +25,6 @@ func (r *GoalRepo) GetGoal(sessionKey string) (string, bool, error) {
 	return goal, true, nil
 }
 
-// SetGoal inserts or updates the goal for the given session key.
 func (r *GoalRepo) SetGoal(sessionKey, goalJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := r.db.Exec(
@@ -44,7 +38,6 @@ func (r *GoalRepo) SetGoal(sessionKey, goalJSON string) error {
 	return nil
 }
 
-// DeleteGoal removes the goal for the given session key.
 func (r *GoalRepo) DeleteGoal(sessionKey string) error {
 	if _, err := r.db.Exec(`DELETE FROM goals WHERE session_key = ?`, sessionKey); err != nil {
 		return fmt.Errorf("store: delete goal %q: %w", sessionKey, err)
@@ -52,8 +45,6 @@ func (r *GoalRepo) DeleteGoal(sessionKey string) error {
 	return nil
 }
 
-// ListGoals returns all goals keyed by session key. The returned map is
-// never nil.
 func (r *GoalRepo) ListGoals() (map[string]string, error) {
 	rows, err := r.db.Query(`SELECT session_key, goal FROM goals`)
 	if err != nil {

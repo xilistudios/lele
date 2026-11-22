@@ -11,7 +11,6 @@ func TestCronRepo_CRUD(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Cron()
 
-	// List on empty table returns empty slice (not nil).
 	jobs, err := repo.ListCronJobs()
 	if err != nil {
 		t.Fatalf("ListCronJobs() on empty table failed: %v", err)
@@ -23,12 +22,10 @@ func TestCronRepo_CRUD(t *testing.T) {
 		t.Fatalf("ListCronJobs() returned %d jobs, want 0", len(jobs))
 	}
 
-	// Get missing returns not found.
 	if _, ok, err := repo.GetCronJob("missing"); err != nil || ok {
 		t.Fatalf("GetCronJob(missing) = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// Upsert a realistic row.
 	row := &CronJobRow{
 		ID:          "job-1",
 		Name:        "daily heartbeat",
@@ -45,7 +42,6 @@ func TestCronRepo_CRUD(t *testing.T) {
 		t.Fatalf("UpsertCronJob(job-1) failed: %v", err)
 	}
 
-	// Get and compare all fields.
 	got, ok, err := repo.GetCronJob("job-1")
 	if err != nil || !ok {
 		t.Fatalf("GetCronJob(job-1) = (_, %v, %v), want (_, true, nil)", ok, err)
@@ -54,7 +50,6 @@ func TestCronRepo_CRUD(t *testing.T) {
 		t.Errorf("GetCronJob(job-1) mismatch:\n got: %+v\nwant: %+v", got, row)
 	}
 
-	// Upsert again with changes.
 	row.Enabled = false
 	row.UpdatedAtMS = 1754600000000
 	row.Payload = `{"type":"spawn","spawn":{"task":"Updated task","label":"updated","agent_id":"coder"}}`
@@ -75,7 +70,6 @@ func TestCronRepo_CRUD(t *testing.T) {
 		t.Errorf("Payload after update = %q, want %q", got.Payload, row.Payload)
 	}
 
-	// Insert a second row.
 	row2 := &CronJobRow{
 		ID: "job-2", Name: "weekly report", Enabled: true,
 		Schedule: `{"kind":"cron","expr":"0 10 * * 1"}`,
@@ -94,7 +88,6 @@ func TestCronRepo_CRUD(t *testing.T) {
 		t.Fatalf("ListCronJobs() returned %d jobs, want 2", len(jobs))
 	}
 
-	// Delete one.
 	if err := repo.DeleteCronJob("job-1"); err != nil {
 		t.Fatalf("DeleteCronJob(job-1) failed: %v", err)
 	}
@@ -109,12 +102,10 @@ func TestCronRepo_CRUD(t *testing.T) {
 		t.Fatalf("ListCronJobs() returned %d jobs, want 1", len(jobs))
 	}
 
-	// Delete non-existing is not an error.
 	if err := repo.DeleteCronJob("job-1"); err != nil {
 		t.Fatalf("DeleteCronJob(job-1) second time failed: %v", err)
 	}
 
-	// Delete all.
 	if err := repo.DeleteAllCronJobs(); err != nil {
 		t.Fatalf("DeleteAllCronJobs() failed: %v", err)
 	}
@@ -131,12 +122,10 @@ func TestGoalRepo_CRUD(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Goals()
 
-	// Get missing.
 	if _, ok, err := repo.GetGoal("missing"); err != nil || ok {
 		t.Fatalf("GetGoal(missing) = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// Set and get round-trip.
 	goalJSON := `{"objective":"ship sqlite storage","status":"in_progress","progress":0.6,"updated_by":"agent"}`
 	if err := repo.SetGoal("telegram:main", goalJSON); err != nil {
 		t.Fatalf("SetGoal(telegram:main) failed: %v", err)
@@ -149,7 +138,6 @@ func TestGoalRepo_CRUD(t *testing.T) {
 		t.Errorf("GetGoal(telegram:main) = %q, want %q", got, goalJSON)
 	}
 
-	// Upsert overwrites.
 	goalJSON2 := `{"objective":"ship sqlite storage","status":"done","progress":1.0,"updated_by":"agent"}`
 	if err := repo.SetGoal("telegram:main", goalJSON2); err != nil {
 		t.Fatalf("SetGoal(telegram:main) upsert failed: %v", err)
@@ -162,7 +150,6 @@ func TestGoalRepo_CRUD(t *testing.T) {
 		t.Errorf("GetGoal(telegram:main) after upsert = %q, want %q", got, goalJSON2)
 	}
 
-	// Second session key.
 	if err := repo.SetGoal("discord:dev", `{"objective":"test"}`); err != nil {
 		t.Fatalf("SetGoal(discord:dev) failed: %v", err)
 	}
@@ -180,14 +167,12 @@ func TestGoalRepo_CRUD(t *testing.T) {
 		t.Errorf("ListGoals()[discord:dev] = %q, want %q", goals["discord:dev"], `{"objective":"test"}`)
 	}
 
-	// Delete.
 	if err := repo.DeleteGoal("telegram:main"); err != nil {
 		t.Fatalf("DeleteGoal(telegram:main) failed: %v", err)
 	}
 	if _, ok, err := repo.GetGoal("telegram:main"); err != nil || ok {
 		t.Fatalf("GetGoal(telegram:main) after delete = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
-	// Delete non-existing is not an error.
 	if err := repo.DeleteGoal("telegram:main"); err != nil {
 		t.Fatalf("DeleteGoal(telegram:main) second time failed: %v", err)
 	}
@@ -197,12 +182,10 @@ func TestGroupRepo_CRUD(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Groups()
 
-	// Get missing.
 	if _, ok, err := repo.GetGroupState("missing"); err != nil || ok {
 		t.Fatalf("GetGroupState(missing) = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// Set and get round-trip.
 	stateJSON := `{"mode":"round_robin","participants":["coder","writer"],"turn":3}`
 	if err := repo.SetGroupState("group-1", stateJSON); err != nil {
 		t.Fatalf("SetGroupState(group-1) failed: %v", err)
@@ -215,7 +198,6 @@ func TestGroupRepo_CRUD(t *testing.T) {
 		t.Errorf("GetGroupState(group-1) = %q, want %q", got, stateJSON)
 	}
 
-	// Upsert overwrites.
 	stateJSON2 := `{"mode":"moderator","participants":["coder"],"turn":4}`
 	if err := repo.SetGroupState("group-1", stateJSON2); err != nil {
 		t.Fatalf("SetGroupState(group-1) upsert failed: %v", err)
@@ -228,7 +210,6 @@ func TestGroupRepo_CRUD(t *testing.T) {
 		t.Errorf("GetGroupState(group-1) after upsert = %q, want %q", got, stateJSON2)
 	}
 
-	// Second group.
 	stateJSON3 := `{"mode":"pipeline","participants":["a","b"],"turn":1}`
 	if err := repo.SetGroupState("group-2", stateJSON3); err != nil {
 		t.Fatalf("SetGroupState(group-2) failed: %v", err)
@@ -247,7 +228,6 @@ func TestGroupRepo_CRUD(t *testing.T) {
 		t.Errorf("ListGroupStates()[group-2] = %q, want %q", states["group-2"], stateJSON3)
 	}
 
-	// Delete.
 	if err := repo.DeleteGroupState("group-1"); err != nil {
 		t.Fatalf("DeleteGroupState(group-1) failed: %v", err)
 	}
@@ -260,12 +240,10 @@ func TestAuthRepo_CRUD(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Auth()
 
-	// Get missing.
 	if _, ok, err := repo.GetCredential("missing"); err != nil || ok {
 		t.Fatalf("GetCredential(missing) = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// Set and get round-trip.
 	credJSON := `{"provider":"telegram","token":"REDACTED","expires_at":"2026-08-01T00:00:00Z"}`
 	if err := repo.SetCredential("telegram:bot", credJSON); err != nil {
 		t.Fatalf("SetCredential(telegram:bot) failed: %v", err)
@@ -278,7 +256,6 @@ func TestAuthRepo_CRUD(t *testing.T) {
 		t.Errorf("GetCredential(telegram:bot) = %q, want %q", got, credJSON)
 	}
 
-	// Upsert overwrites.
 	credJSON2 := `{"provider":"telegram","token":"NEW_TOKEN","expires_at":"2027-01-01T00:00:00Z"}`
 	if err := repo.SetCredential("telegram:bot", credJSON2); err != nil {
 		t.Fatalf("SetCredential(telegram:bot) upsert failed: %v", err)
@@ -291,7 +268,6 @@ func TestAuthRepo_CRUD(t *testing.T) {
 		t.Errorf("GetCredential(telegram:bot) after upsert = %q, want %q", got, credJSON2)
 	}
 
-	// List.
 	if err := repo.SetCredential("github:app", `{"provider":"github","token":"gh_token"}`); err != nil {
 		t.Fatalf("SetCredential(github:app) failed: %v", err)
 	}
@@ -303,7 +279,6 @@ func TestAuthRepo_CRUD(t *testing.T) {
 		t.Fatalf("ListCredentials() returned %d entries, want 2", len(creds))
 	}
 
-	// Delete one.
 	if err := repo.DeleteCredential("telegram:bot"); err != nil {
 		t.Fatalf("DeleteCredential(telegram:bot) failed: %v", err)
 	}
@@ -311,7 +286,6 @@ func TestAuthRepo_CRUD(t *testing.T) {
 		t.Fatalf("GetCredential(telegram:bot) after delete = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// DeleteAll.
 	if err := repo.DeleteAllCredentials(); err != nil {
 		t.Fatalf("DeleteAllCredentials() failed: %v", err)
 	}
@@ -328,12 +302,10 @@ func TestNativeClientRepo_CRUD(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.NativeClients()
 
-	// Get missing.
 	if _, ok, err := repo.GetClient("missing"); err != nil || ok {
 		t.Fatalf("GetClient(missing) = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// Set and get round-trip.
 	clientJSON := `{"id":"cli-abc","secret_hash":"$2a$10$xyz","allowed_scopes":["read","write"]}`
 	if err := repo.SetClient("cli-abc", clientJSON); err != nil {
 		t.Fatalf("SetClient(cli-abc) failed: %v", err)
@@ -346,7 +318,6 @@ func TestNativeClientRepo_CRUD(t *testing.T) {
 		t.Errorf("GetClient(cli-abc) = %q, want %q", got, clientJSON)
 	}
 
-	// Upsert overwrites client (created_at preserved).
 	clientJSON2 := `{"id":"cli-abc","secret_hash":"$2a$10$new","allowed_scopes":["read","write","admin"]}`
 	if err := repo.SetClient("cli-abc", clientJSON2); err != nil {
 		t.Fatalf("SetClient(cli-abc) upsert failed: %v", err)
@@ -359,7 +330,6 @@ func TestNativeClientRepo_CRUD(t *testing.T) {
 		t.Errorf("GetClient(cli-abc) after upsert = %q, want %q", got, clientJSON2)
 	}
 
-	// List.
 	if err := repo.SetClient("cli-xyz", `{"id":"cli-xyz","secret_hash":"$2a$10$abc"}`); err != nil {
 		t.Fatalf("SetClient(cli-xyz) failed: %v", err)
 	}
@@ -374,7 +344,6 @@ func TestNativeClientRepo_CRUD(t *testing.T) {
 		t.Errorf("ListClients()[cli-abc] = %q, want %q", clients["cli-abc"], clientJSON2)
 	}
 
-	// Delete one.
 	if err := repo.DeleteClient("cli-abc"); err != nil {
 		t.Fatalf("DeleteClient(cli-abc) failed: %v", err)
 	}
@@ -382,7 +351,6 @@ func TestNativeClientRepo_CRUD(t *testing.T) {
 		t.Fatalf("GetClient(cli-abc) after delete = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// DeleteAll.
 	if err := repo.DeleteAllClients(); err != nil {
 		t.Fatalf("DeleteAllClients() failed: %v", err)
 	}
@@ -399,7 +367,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
 
-	// List on empty table returns empty slice.
 	metas, err := repo.ListSessionMeta()
 	if err != nil {
 		t.Fatalf("ListSessionMeta() on empty table failed: %v", err)
@@ -411,7 +378,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Fatalf("ListSessionMeta() returned %d entries, want 0", len(metas))
 	}
 
-	// Get missing returns nil.
 	meta, err := repo.GetSessionMeta("missing")
 	if err != nil {
 		t.Fatalf("GetSessionMeta(missing) error: %v", err)
@@ -420,7 +386,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Fatalf("GetSessionMeta(missing) = %v, want nil", meta)
 	}
 
-	// Upsert a session.
 	now := time.Now().Truncate(time.Microsecond)
 	if err := repo.UpsertSession(SessionMeta{
 		Key:           "test:session-1",
@@ -438,7 +403,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Fatalf("UpsertSession() failed: %v", err)
 	}
 
-	// Get and compare.
 	got, err := repo.GetSessionMeta("test:session-1")
 	if err != nil {
 		t.Fatalf("GetSessionMeta(test:session-1) error: %v", err)
@@ -474,7 +438,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, 50)
 	}
 
-	// Update metadata.
 	if err := repo.UpsertSession(SessionMeta{
 		Key:          "test:session-1",
 		Name:         "Updated Name",
@@ -498,13 +461,11 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("InputTokens after update = %d, want %d", got.InputTokens, 200)
 	}
 
-	// List sessions.
 	metas, _ = repo.ListSessionMeta()
 	if len(metas) != 1 {
 		t.Fatalf("ListSessionMeta() returned %d entries, want 1", len(metas))
 	}
 
-	// Insert messages.
 	msg1 := `{"role":"user","content":"Hello"}`
 	if err := repo.InsertMessage("test:session-1", 0, "user", msg1, false); err != nil {
 		t.Fatalf("InsertMessage(0) failed: %v", err)
@@ -514,7 +475,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Fatalf("InsertMessage(1) failed: %v", err)
 	}
 
-	// Load messages.
 	msgs, err := repo.LoadMessages("test:session-1")
 	if err != nil {
 		t.Fatalf("LoadMessages() failed: %v", err)
@@ -529,7 +489,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("Message[1] = %q, want %q", msgs[1], msg2)
 	}
 
-	// Message count.
 	count, err := repo.MessageCount("test:session-1")
 	if err != nil {
 		t.Fatalf("MessageCount() failed: %v", err)
@@ -538,7 +497,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("MessageCount() = %d, want 2", count)
 	}
 
-	// Max seq.
 	maxSeq, err := repo.MaxSeq("test:session-1")
 	if err != nil {
 		t.Fatalf("MaxSeq() failed: %v", err)
@@ -547,7 +505,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("MaxSeq() = %d, want 1", maxSeq)
 	}
 
-	// Update message.
 	msg3 := `{"role":"assistant","content":"Updated response"}`
 	if err := repo.UpdateMessage("test:session-1", 1, "assistant", msg3, false); err != nil {
 		t.Fatalf("UpdateMessage() failed: %v", err)
@@ -557,7 +514,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("Message[1] after update = %q, want %q", msgs[1], msg3)
 	}
 
-	// Delete last message.
 	deletedSeq, err := repo.DeleteLastMessage("test:session-1")
 	if err != nil {
 		t.Fatalf("DeleteLastMessage() failed: %v", err)
@@ -570,13 +526,11 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("MessageCount() after delete = %d, want 1", count)
 	}
 
-	// Add more messages for delete range test.
 	for i := 1; i < 5; i++ {
 		msgJSON := `{"role":"user","content":"msg"}`
 		repo.InsertMessage("test:session-1", i, "user", msgJSON, false)
 	}
 
-	// Delete messages from seq 3 onwards.
 	if err := repo.DeleteMessagesFrom("test:session-1", 3); err != nil {
 		t.Fatalf("DeleteMessagesFrom(3) failed: %v", err)
 	}
@@ -585,7 +539,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Errorf("MessageCount() after delete from = %d, want 3", count)
 	}
 
-	// Session exists.
 	exists, err := repo.SessionExists("test:session-1")
 	if err != nil {
 		t.Fatalf("SessionExists() failed: %v", err)
@@ -598,7 +551,6 @@ func TestSessionRepo_CRUD(t *testing.T) {
 		t.Error("SessionExists(nonexistent) = true, want false")
 	}
 
-	// Delete session.
 	if err := repo.DeleteSession("test:session-1"); err != nil {
 		t.Fatalf("DeleteSession() failed: %v", err)
 	}
@@ -613,13 +565,11 @@ func TestSessionRepo_ListByMode(t *testing.T) {
 	repo := s.Sessions()
 
 	now := time.Now()
-	// Create sessions with different modes.
 	repo.UpsertSession(SessionMeta{Key: "s1", Mode: "agent", CreatedAt: now, UpdatedAt: now})
 	repo.UpsertSession(SessionMeta{Key: "s2", Mode: "chat", CreatedAt: now, UpdatedAt: now})
 	repo.UpsertSession(SessionMeta{Key: "s3", Mode: "agent", CreatedAt: now, UpdatedAt: now})
 	repo.UpsertSession(SessionMeta{Key: "s4", Mode: "", CreatedAt: now, UpdatedAt: now})
 
-	// List by mode "agent".
 	agents, err := repo.ListSessionMetaByMode("agent")
 	if err != nil {
 		t.Fatalf("ListSessionMetaByMode(agent) failed: %v", err)
@@ -628,7 +578,6 @@ func TestSessionRepo_ListByMode(t *testing.T) {
 		t.Errorf("ListSessionMetaByMode(agent) returned %d, want 2", len(agents))
 	}
 
-	// List by mode "chat".
 	chats, err := repo.ListSessionMetaByMode("chat")
 	if err != nil {
 		t.Fatalf("ListSessionMetaByMode(chat) failed: %v", err)
@@ -637,7 +586,6 @@ func TestSessionRepo_ListByMode(t *testing.T) {
 		t.Errorf("ListSessionMetaByMode(chat) returned %d, want 1", len(chats))
 	}
 
-	// List by mode "" (should return "agent" sessions).
 	empty, err := repo.ListSessionMetaByMode("")
 	if err != nil {
 		t.Fatalf("ListSessionMetaByMode('') failed: %v", err)
@@ -654,14 +602,12 @@ func TestSessionRepo_PruneExcluded(t *testing.T) {
 	now := time.Now()
 	repo.UpsertSession(SessionMeta{Key: "test", CreatedAt: now, UpdatedAt: now})
 
-	// Add 10 messages, mark first 7 as excluded.
 	for i := 0; i < 10; i++ {
 		excluded := i < 7
 		msgJSON := `{"role":"user","content":"msg"}`
 		repo.InsertMessage("test", i, "user", msgJSON, excluded)
 	}
 
-	// Prune to keep 5.
 	pruned, err := repo.PruneExcluded("test", 5)
 	if err != nil {
 		t.Fatalf("PruneExcluded() failed: %v", err)
@@ -683,7 +629,6 @@ func TestSessionRepo_ReplaceMessages(t *testing.T) {
 	now := time.Now()
 	repo.UpsertSession(SessionMeta{Key: "rm-test", CreatedAt: now, UpdatedAt: now})
 
-	// Insert initial 3 messages.
 	for i := 0; i < 3; i++ {
 		msgJSON := fmt.Sprintf(`{"role":"user","content":"msg%d"}`, i)
 		repo.InsertMessage("rm-test", i, "user", msgJSON, false)
@@ -693,7 +638,6 @@ func TestSessionRepo_ReplaceMessages(t *testing.T) {
 		t.Fatalf("initial MessageCount = %d, want 3", count)
 	}
 
-	// Replace with 5 new messages (simulates a session save after adding messages).
 	newRows := make([]MessageRow, 5)
 	for i := range newRows {
 		newRows[i] = MessageRow{
@@ -722,7 +666,6 @@ func TestSessionRepo_ReplaceMessages(t *testing.T) {
 		}
 	}
 
-	// Replace with empty (clears all messages).
 	if err := repo.ReplaceMessages("rm-test", nil); err != nil {
 		t.Fatalf("ReplaceMessages(nil) failed: %v", err)
 	}
@@ -738,22 +681,18 @@ func TestSessionRepo_AllMessageCounts(t *testing.T) {
 
 	now := time.Now()
 
-	// Create 3 sessions with different message counts
 	repo.UpsertSession(SessionMeta{Key: "sess-a", CreatedAt: now, UpdatedAt: now})
 	repo.UpsertSession(SessionMeta{Key: "sess-b", CreatedAt: now, UpdatedAt: now})
 	repo.UpsertSession(SessionMeta{Key: "sess-c", CreatedAt: now, UpdatedAt: now})
 
-	// sess-a: 2 messages
 	for i := 0; i < 2; i++ {
 		repo.InsertMessage("sess-a", i, "user",
 			fmt.Sprintf(`{"role":"user","content":"a%d"}`, i), false)
 	}
-	// sess-b: 5 messages
 	for i := 0; i < 5; i++ {
 		repo.InsertMessage("sess-b", i, "assistant",
 			fmt.Sprintf(`{"role":"assistant","content":"b%d"}`, i), false)
 	}
-	// sess-c: 0 messages (just metadata)
 
 	counts, err := repo.AllMessageCounts()
 	if err != nil {
@@ -779,7 +718,6 @@ func TestSessionRepo_LoadMessagesBeforeSeq(t *testing.T) {
 	if err := repo.UpsertSession(SessionMeta{Key: key, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("UpsertSession() failed: %v", err)
 	}
-	// Insert 5 messages (seq 0..4) with mixed excluded flags.
 	messages := []MessageRow{
 		{Seq: 0, Role: "user", JSON: `{"role":"user","content":"m0"}`, Excluded: true},
 		{Seq: 1, Role: "assistant", JSON: `{"role":"assistant","content":"m1"}`, Excluded: false},
@@ -791,7 +729,6 @@ func TestSessionRepo_LoadMessagesBeforeSeq(t *testing.T) {
 		t.Fatalf("InsertMessages() failed: %v", err)
 	}
 
-	// LoadMessagesBeforeSeq(key, 3) returns exactly the JSON of seq 0,1,2 in order.
 	got, err := repo.LoadMessagesBeforeSeq(key, 3)
 	if err != nil {
 		t.Fatalf("LoadMessagesBeforeSeq(key, 3) failed: %v", err)
@@ -805,7 +742,6 @@ func TestSessionRepo_LoadMessagesBeforeSeq(t *testing.T) {
 		t.Errorf("LoadMessagesBeforeSeq(key, 3) = %v, want %v", got, want)
 	}
 
-	// LoadMessagesBeforeSeq(key, 0) returns empty (no error).
 	empty, err := repo.LoadMessagesBeforeSeq(key, 0)
 	if err != nil {
 		t.Fatalf("LoadMessagesBeforeSeq(key, 0) failed: %v", err)
@@ -814,7 +750,6 @@ func TestSessionRepo_LoadMessagesBeforeSeq(t *testing.T) {
 		t.Errorf("LoadMessagesBeforeSeq(key, 0) = %v, want empty", empty)
 	}
 
-	// LoadMessagesBeforeSeq on unknown session returns empty (no error).
 	unknown, err := repo.LoadMessagesBeforeSeq("missing", 3)
 	if err != nil {
 		t.Fatalf("LoadMessagesBeforeSeq(missing, 3) failed: %v", err)
@@ -833,7 +768,6 @@ func TestSessionRepo_LoadMessagesFromSeq(t *testing.T) {
 	if err := repo.UpsertSession(SessionMeta{Key: key, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("UpsertSession() failed: %v", err)
 	}
-	// Insert 5 messages (seq 0..4).
 	messages := []MessageRow{
 		{Seq: 0, Role: "user", JSON: `{"role":"user","content":"m0"}`, Excluded: true},
 		{Seq: 1, Role: "assistant", JSON: `{"role":"assistant","content":"m1"}`, Excluded: false},
@@ -845,7 +779,6 @@ func TestSessionRepo_LoadMessagesFromSeq(t *testing.T) {
 		t.Fatalf("InsertMessages() failed: %v", err)
 	}
 
-	// LoadMessagesFromSeq(key, 2) returns exactly the seq>=2 JSON in order.
 	got, err := repo.LoadMessagesFromSeq(key, 2)
 	if err != nil {
 		t.Fatalf("LoadMessagesFromSeq(key, 2) failed: %v", err)
@@ -859,7 +792,6 @@ func TestSessionRepo_LoadMessagesFromSeq(t *testing.T) {
 		t.Errorf("LoadMessagesFromSeq(key, 2) = %v, want %v", got, want)
 	}
 
-	// LoadMessagesFromSeq(key, 0) returns all messages in order.
 	all, err := repo.LoadMessagesFromSeq(key, 0)
 	if err != nil {
 		t.Fatalf("LoadMessagesFromSeq(key, 0) failed: %v", err)
@@ -875,7 +807,6 @@ func TestSessionRepo_LoadMessagesFromSeq(t *testing.T) {
 		t.Errorf("LoadMessagesFromSeq(key, 0) = %v, want %v", all, wantAll)
 	}
 
-	// LoadMessagesFromSeq(key, 99) returns empty (no error).
 	empty, err := repo.LoadMessagesFromSeq(key, 99)
 	if err != nil {
 		t.Fatalf("LoadMessagesFromSeq(key, 99) failed: %v", err)
@@ -889,7 +820,6 @@ func TestSessionRepo_FirstInMemorySeq_RoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
 
-	// Upsert a session with an explicit FirstInMemorySeq.
 	key := "test:first-in-mem"
 	now := time.Now()
 	if err := repo.UpsertSession(SessionMeta{
@@ -912,7 +842,6 @@ func TestSessionRepo_FirstInMemorySeq_RoundTrip(t *testing.T) {
 		t.Errorf("FirstInMemorySeq = %d, want 7", got.FirstInMemorySeq)
 	}
 
-	// A fresh session (no explicit set) reads back 0.
 	freshKey := "test:first-in-mem-fresh"
 	if err := repo.UpsertSession(SessionMeta{Key: freshKey, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("UpsertSession(fresh) failed: %v", err)
@@ -988,7 +917,6 @@ func TestSessionRepo_LoadMessagesWithSeq(t *testing.T) {
 		t.Errorf("LoadMessagesWithSeq() = %v, want %v", got, want)
 	}
 
-	// Empty session returns empty slice.
 	empty, err := repo.LoadMessagesWithSeq("missing")
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq(missing) failed: %v", err)
@@ -1026,7 +954,6 @@ func TestSessionRepo_CountExcludedMessages(t *testing.T) {
 		t.Errorf("CountExcludedMessages() = %d, want 3", count)
 	}
 
-	// Empty session returns 0.
 	emptyCount, err := repo.CountExcludedMessages("missing")
 	if err != nil {
 		t.Fatalf("CountExcludedMessages(missing) failed: %v", err)

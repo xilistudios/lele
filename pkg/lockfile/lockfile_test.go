@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// writePIDFile writes contents to the lock file path, returning the open file
-// handle so the test can close it afterwards.
 func writePIDFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
@@ -30,7 +28,6 @@ func TestAcquireRelease(t *testing.T) {
 		t.Errorf("Path() = %q, want %q", l.Path(), path)
 	}
 
-	// The file must exist and contain our own PID.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
@@ -77,12 +74,10 @@ func TestAcquire_AlreadyRunning(t *testing.T) {
 	}
 }
 
-// deadPID returns the PID of a process that is guaranteed (as far as possible)
-// to be dead. On Windows it falls back to a hardcoded large PID.
 func deadPID(t *testing.T) int {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		return 4194303 // 2^22-1, almost certainly unassigned
+		return 4194303
 	}
 
 	cmd := exec.Command("sleep", "5")
@@ -94,7 +89,6 @@ func deadPID(t *testing.T) int {
 		t.Fatalf("killing sleep (pid %d): %v", pid, err)
 	}
 	if err := cmd.Wait(); err != nil {
-		// Expected: the process was killed. Ignore the error.
 		_ = err
 	}
 	return pid
@@ -149,7 +143,6 @@ func TestAcquire_CorruptFile(t *testing.T) {
 func TestReadPID(t *testing.T) {
 	dir := t.TempDir()
 
-	// Valid PID.
 	validPath := filepath.Join(dir, "valid.lock")
 	writePIDFile(t, validPath, "12345\n")
 	pid, err := ReadPID(validPath)
@@ -160,14 +153,12 @@ func TestReadPID(t *testing.T) {
 		t.Errorf("ReadPID = %d, want 12345", pid)
 	}
 
-	// Corrupt content.
 	corruptPath := filepath.Join(dir, "corrupt.lock")
 	writePIDFile(t, corruptPath, "not-a-pid\n")
 	if _, err := ReadPID(corruptPath); err == nil {
 		t.Error("ReadPID(corrupt) = nil error, want error")
 	}
 
-	// Missing file.
 	missingPath := filepath.Join(dir, "missing.lock")
 	if _, err := ReadPID(missingPath); err == nil {
 		t.Error("ReadPID(missing) = nil error, want error")
@@ -185,21 +176,12 @@ func trimSpace(b []byte) []byte {
 	return b[start:end]
 }
 
-// TestAcquire_LivePIDWithoutHolder_Takeover verifies the new flock-first
-// semantics: a PID file naming a live process is no longer sufficient to
-// refuse acquisition, because the kernel lock — not the file — decides
-// ownership. A holder that crashed while leaving its PID behind (flock is
-// auto-released on process exit) must not wedge the lock forever.
-//
-// Windows keeps the conservative PID-only guard, so this test is Unix-only.
 func TestAcquire_LivePIDWithoutHolder_Takeover(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows uses the conservative PID-file guard, not flock")
 	}
 	path := filepath.Join(t.TempDir(), "gateway.lock")
 
-	// Simulate a crashed holder: a live PID (ours) in the file, but no
-	// process actually holding the flock.
 	writePIDFile(t, path, strconv.Itoa(os.Getpid())+"\n")
 
 	l, err := Acquire(path)
@@ -217,10 +199,6 @@ func TestAcquire_LivePIDWithoutHolder_Takeover(t *testing.T) {
 	}
 }
 
-// TestAcquire_AfterRelease verifies that Release fully relinquishes the lock
-// (explicit unlock plus close), so a subsequent Acquire on the same path
-// succeeds. This guards against regressions where the kernel lock or the
-// open handle would be left behind.
 func TestAcquire_AfterRelease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway.lock")
 

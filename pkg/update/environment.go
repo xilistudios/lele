@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// UnsupportedEnvironmentError is returned when self-update cannot run.
 type UnsupportedEnvironmentError struct {
 	Reason string
 }
@@ -14,8 +13,6 @@ func (e *UnsupportedEnvironmentError) Error() string {
 	return e.Reason
 }
 
-// CheckEnvironment verifies self-update is possible in this environment.
-// Returns an *UnsupportedEnvironmentError when it is not.
 func CheckEnvironment() error {
 	if isDocker() {
 		return &UnsupportedEnvironmentError{
@@ -25,7 +22,6 @@ func CheckEnvironment() error {
 	return nil
 }
 
-// isDocker detects common container environments.
 func isDocker() bool {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
@@ -43,7 +39,6 @@ func isDocker() bool {
 	return false
 }
 
-// IsDevBuild reports whether the current version is a local/dev build.
 func IsDevBuild(version string) bool {
 	v := strings.TrimSpace(version)
 	return v == "" || v == "dev" || strings.HasPrefix(v, "dev-")

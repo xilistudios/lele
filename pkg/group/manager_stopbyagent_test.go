@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package group
 
 import (
@@ -11,12 +6,6 @@ import (
 	"time"
 )
 
-// --- StopByAgent tests ---
-//
-// StopByAgent exists for the config-reload path: when an agent leaves the
-// registry, running groups that included it as a speaker must be stopped,
-// while groups made only of surviving agents keep running.
-
 func startBlockingGroup(t *testing.T, gm *GroupManager, id string, be *blockingExecutor, participants []Participant, moderator string) {
 	t.Helper()
 	_, err := gm.Start(context.Background(), id, "p1", "task", "round_robin",
@@ -24,7 +13,6 @@ func startBlockingGroup(t *testing.T, gm *GroupManager, id string, be *blockingE
 	if err != nil {
 		t.Fatalf("Start %s: %v", id, err)
 	}
-	// Let the run goroutine enter the executor before asserting on it.
 	time.Sleep(50 * time.Millisecond)
 }
 
@@ -37,9 +25,6 @@ func groupStatus(t *testing.T, gm *GroupManager, id string) string {
 	return st.Status
 }
 
-// waitGroupStatus polls until the group reaches want or the deadline expires.
-// Stop only signals cancellation; the run goroutine writes the terminal status
-// when it observes it, so assertions must not assume it is synchronous.
 func waitGroupStatus(t *testing.T, gm *GroupManager, id, want string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -69,14 +54,10 @@ func TestStopByAgent_StopsGroupContainingAgent(t *testing.T) {
 	if s := groupStatus(t, gm, "g-miss"); s != StatusRunning {
 		t.Errorf("g-miss status = %q, want %q (agent a is not a participant)", s, StatusRunning)
 	}
-	gm.Stop("g-miss") // cleanup: don't leak the running goroutine
+	gm.Stop("g-miss")
 	waitGroupStatus(t, gm, "g-miss", StatusStopped)
 }
 
-// TestGroupIncludesAgent_ModeratorIsAlsoSpokenFor covers the membership rule
-// StopByAgent uses. It is exercised directly because Start rejects a moderator
-// that is not among the participants, so a moderator-only membership cannot be
-// built through the public API.
 func TestGroupIncludesAgent_ModeratorIsAlsoSpokenFor(t *testing.T) {
 	state := &GroupState{
 		Participants: []Participant{plainParticipant("a")},
@@ -109,7 +90,6 @@ func TestStopByAgent_IgnoresUnknownAgentAndFinishedGroups(t *testing.T) {
 		t.Errorf("StopByAgent(unknown) = %d, want 0", got)
 	}
 
-	// A finished group must not be counted or re-stopped.
 	startBlockingGroup(t, gm, "g-done", be, []Participant{plainParticipant("a")}, "")
 	gm.Stop("g-done")
 	waitGroupStatus(t, gm, "g-done", StatusStopped)

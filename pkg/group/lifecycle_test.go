@@ -12,33 +12,15 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// ---------------------------------------------------------------------------
-// Regression tests for the single-terminal-signal guarantee.
-//
-// Every group must emit EXACTLY one terminal signal pair to clients — one
-// terminal group.status (done | stopped | error) followed by exactly one
-// group.complete — no matter how the run ends: natural completion, Stop(),
-// cancellation of the parent context, a strategy error, or a panic.
-//
-// The invariant lives in GroupManager.finalize (manager.go), which is guarded
-// by managedGroup.finalizeOnce and is the only place that publishes terminal
-// events or closes mg.done.
-// ---------------------------------------------------------------------------
-
-// isTerminalStatus reports whether a group.status value ends the group.
 func isTerminalStatus(s string) bool {
 	return s == StatusDone || s == StatusStopped || s == StatusError
 }
 
-// lifecycleEvent is one recorded bus event relevant to group lifecycle.
 type lifecycleEvent struct {
-	event  string // "group.status" | "group.complete" | other
-	status string // Metadata["status"] for group.status, "" otherwise
+	event  string
+	status string
 }
 
-// lifecycleRecorder is a Publisher that records, per group ID, the ordered
-// sequence of lifecycle events. It owns its mutex — it never shares state with
-// the manager under test.
 type lifecycleRecorder struct {
 	mu      sync.Mutex
 	byGroup map[string][]lifecycleEvent
@@ -63,8 +45,6 @@ func (r *lifecycleRecorder) publish(msg bus.OutboundMessage) {
 	})
 }
 
-// terminalPair returns the number of terminal group.status events and the
-// number of group.complete events recorded for groupID.
 func (r *lifecycleRecorder) terminalPair(t *testing.T, groupID string) (statusCount, completeCount int, seq []lifecycleEvent) {
 	t.Helper()
 	r.mu.Lock()
@@ -83,8 +63,6 @@ func (r *lifecycleRecorder) terminalPair(t *testing.T, groupID string) (statusCo
 	return statusCount, completeCount, seq
 }
 
-// terminalStatus returns the status carried by the (single) terminal
-// group.status event, failing if there is not exactly one.
 func (r *lifecycleRecorder) terminalStatus(t *testing.T, groupID string) string {
 	t.Helper()
 	n, _, seq := r.terminalPair(t, groupID)
@@ -99,9 +77,6 @@ func (r *lifecycleRecorder) terminalStatus(t *testing.T, groupID string) string 
 	return ""
 }
 
-// assertExactlyOnePair asserts the core invariant for one group: exactly one
-// terminal group.status, exactly one group.complete, and status-before-complete
-// in the published order.
 func assertExactlyOnePair(t *testing.T, r *lifecycleRecorder, groupID string) {
 	t.Helper()
 	statusCount, completeCount, seq := r.terminalPair(t, groupID)
@@ -112,7 +87,6 @@ func assertExactlyOnePair(t *testing.T, r *lifecycleRecorder, groupID string) {
 		t.Errorf("group %s: group.complete events = %d, want exactly 1 (seq=%v)", groupID, completeCount, seq)
 	}
 
-	// Ordering: the terminal status must precede the complete event.
 	firstStatus, firstComplete := -1, -1
 	for i, e := range seq {
 		if e.event == "group.status" && isTerminalStatus(e.status) && firstStatus < 0 {
@@ -128,7 +102,6 @@ func assertExactlyOnePair(t *testing.T, r *lifecycleRecorder, groupID string) {
 	}
 }
 
-// waitWithTimeout blocks until fn returns, failing the test after d.
 func waitWithTimeout(t *testing.T, d time.Duration, desc string, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -143,9 +116,6 @@ func waitWithTimeout(t *testing.T, d time.Duration, desc string, fn func()) {
 	}
 }
 
-// stepExecutor answers the first `fast` calls immediately and then blocks
-// until the turn context is cancelled or release is closed. Used to pin a
-// group in a known mid-run position.
 type stepExecutor struct {
 	mu      sync.Mutex
 	calls   int
@@ -180,8 +150,6 @@ func (e *stepExecutor) callCount() int {
 	return e.calls
 }
 
-// waitBlockingFor polls until the executor has been called `n` times, so the
-// test knows the group is parked inside a turn.
 func (e *stepExecutor) waitBlockedFor(t *testing.T, n int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -194,13 +162,9 @@ func (e *stepExecutor) waitBlockedFor(t *testing.T, n int) {
 	t.Fatalf("executor never reached %d calls (got %d)", n, e.callCount())
 }
 
-// TestRegression_StopEmitsExactlyOneTerminalPair covers the path that motivated
-// the fix: Stop() used to publish group.status=stopped itself while the run
-// loop published nothing, so clients saw a status with no matching complete
-// (and, depending on transcript length, sometimes two statuses).
 func TestRegression_StopEmitsExactlyOneTerminalPair(t *testing.T) {
 	rec := newLifecycleRecorder()
-	exec := newStepExecutor(1) // turn 1 succeeds, turn 2 blocks
+	exec := newStepExecutor(1)
 	gm := NewGroupManager(mockResolve, exec.execute, rec.publish)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -212,7 +176,6 @@ func TestRegression_StopEmitsExactlyOneTerminalPair(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Park the group inside turn 2.
 	exec.waitBlockedFor(t, 2)
 
 	if !gm.Stop(groupID) {
@@ -241,8 +204,6 @@ func TestRegression_StopEmitsExactlyOneTerminalPair(t *testing.T) {
 	}
 }
 
-// TestRegression_CtxCancelEmitsTerminalPair covers cancellation of the *parent*
-// context passed to Start (session teardown), which bypasses Stop() entirely.
 func TestRegression_CtxCancelEmitsTerminalPair(t *testing.T) {
 	rec := newLifecycleRecorder()
 	exec := newStepExecutor(1)
@@ -270,16 +231,12 @@ func TestRegression_CtxCancelEmitsTerminalPair(t *testing.T) {
 	}
 }
 
-// startManaged registers a pre-built group with the manager, mirroring what
-// Start does after validation. Used to drive runGroup with states that Start
-// would refuse (e.g. an unknown strategy).
 func startManaged(gm *GroupManager, mg *managedGroup) {
 	gm.mu.Lock()
 	gm.groups[mg.state.ID] = mg
 	gm.mu.Unlock()
 }
 
-// newManaged builds a managedGroup in StatusRunning with a live done channel.
 func newManaged(state *GroupState) *managedGroup {
 	_, cancel := context.WithCancel(context.Background())
 	return &managedGroup{
@@ -291,11 +248,6 @@ func newManaged(state *GroupState) *managedGroup {
 	}
 }
 
-// TestRegression_InvalidStrategyEmitsTerminalPair covers the early-return path
-// of runGroup. Start() validates the strategy, so the only way to reach it is a
-// GroupState built elsewhere (a persisted group rehydrated with a strategy that
-// no longer exists). Previously that path published group.status=error and no
-// group.complete at all.
 func TestRegression_InvalidStrategyEmitsTerminalPair(t *testing.T) {
 	rec := newLifecycleRecorder()
 	exec := newStepExecutor(0)
@@ -305,7 +257,7 @@ func TestRegression_InvalidStrategyEmitsTerminalPair(t *testing.T) {
 		ID:           "life-badstrategy-1",
 		Task:         "task",
 		Participants: []Participant{plainParticipant("a")},
-		Strategy:     "nope", // valid at Start time is impossible; drive runGroup directly
+		Strategy:     "nope",
 		Status:       StatusRunning,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
@@ -333,17 +285,12 @@ func TestRegression_InvalidStrategyEmitsTerminalPair(t *testing.T) {
 	}
 }
 
-// panicExecutor blows up inside a turn, simulating a bad strategy/renderer/
-// provider path that would otherwise take down the process.
 type panicExecutor struct{}
 
 func (panicExecutor) execute(_ context.Context, req TurnRequest) (string, int, error) {
 	panic("boom in turn for " + req.Speaker)
 }
 
-// TestRegression_PanicInTurnIsContained asserts that a panic inside the run
-// loop is converted into the single terminal pair instead of killing the test
-// process, and that Wait surfaces an error.
 func TestRegression_PanicInTurnIsContained(t *testing.T) {
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(mockResolve, panicExecutor{}.execute, rec.publish)
@@ -372,10 +319,6 @@ func TestRegression_PanicInTurnIsContained(t *testing.T) {
 	}
 }
 
-// TestRegression_PanicInParallelTurnIsContained covers the worker-goroutine
-// path: a panic inside a parallel turn cannot be recovered by runGroup (it
-// happens on a different goroutine), so it must be converted into an error at
-// the errgroup boundary and still produce exactly one terminal pair.
 func TestRegression_PanicInParallelTurnIsContained(t *testing.T) {
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(mockResolve, panicExecutor{}.execute, rec.publish)
@@ -404,8 +347,6 @@ func TestRegression_PanicInParallelTurnIsContained(t *testing.T) {
 	}
 }
 
-// jitterExecutor sleeps a random slice of time per turn so that the run loop's
-// natural completion races with a concurrent Stop()/finalize.
 type jitterExecutor struct {
 	mu  sync.Mutex
 	rnd *rand.Rand
@@ -425,10 +366,6 @@ func (e *jitterExecutor) execute(_ context.Context, req TurnRequest) (string, in
 	return fmt.Sprintf("turn-%s", req.Speaker), 10, nil
 }
 
-// TestRegression_NoDoubleTerminalOnStopRace hammers the boundary between Stop()
-// and natural completion: 50 groups whose turns are racing with a concurrent
-// Stop() on each. finalizeOnce must collapse the race into exactly one terminal
-// pair per group, regardless of which side wins.
 func TestRegression_NoDoubleTerminalOnStopRace(t *testing.T) {
 	const groups = 50
 
@@ -454,14 +391,10 @@ func TestRegression_NoDoubleTerminalOnStopRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, id := range ids {
 		wg.Add(2)
-		// Racer 2: collect the result (may be won by natural completion).
 		go func(gid string) {
 			defer wg.Done()
 			_, _ = gm.Wait(gid)
 		}(id)
-		// Racer 1: try to stop it mid-run. Started last and with a staggered
-		// delay so that it lands inside the loop's final turns sometimes and
-		// after natural completion other times — both orders must be safe.
 		delay := time.Duration(rand.Int63n(int64(6 * time.Millisecond)))
 		go func(gid string, d time.Duration) {
 			defer wg.Done()
@@ -472,8 +405,6 @@ func TestRegression_NoDoubleTerminalOnStopRace(t *testing.T) {
 
 	waitWithTimeout(t, 20*time.Second, "all racers to finish", wg.Wait)
 
-	// Give any straggler publisher a moment; the invariant is checked after all
-	// goroutines have observed done, so nothing should still be in flight.
 	time.Sleep(50 * time.Millisecond)
 
 	var stopped, done, errored int
@@ -500,6 +431,5 @@ func TestRegression_NoDoubleTerminalOnStopRace(t *testing.T) {
 		}
 	}
 
-	// Informational: confirms the race window was actually contested.
 	t.Logf("terminal outcomes: stopped=%d done=%d error=%d", stopped, done, errored)
 }

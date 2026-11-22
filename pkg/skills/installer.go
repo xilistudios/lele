@@ -29,9 +29,6 @@ func NewSkillInstaller(workspace string) *SkillInstaller {
 	}
 }
 
-// Workspace returns the base directory this installer writes into. Skills land
-// in <workspace>/skills. Exposed so callers (and tests) can verify an installer
-// was pointed at the right directory before anything is written.
 func (si *SkillInstaller) Workspace() string {
 	return si.workspace
 }
@@ -85,7 +82,6 @@ func (si *SkillInstaller) Uninstall(skillName string) error {
 
 	skillDir := filepath.Join(si.workspace, "skills", skillName)
 
-	// Defense in depth: ensure the resolved directory stays inside the skills dir.
 	absDir, _ := filepath.Abs(skillDir)
 	absSkills, _ := filepath.Abs(filepath.Join(si.workspace, "skills"))
 	if !strings.HasPrefix(absDir, absSkills+string(filepath.Separator)) {

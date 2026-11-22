@@ -30,7 +30,7 @@ type SkillInfo struct {
 	Path        string `json:"path"`
 	Source      string `json:"source"`
 	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"` // Whether skill is enabled in workspace config
+	Enabled     bool   `json:"enabled"`
 }
 
 func (info SkillInfo) validate() error {
@@ -56,9 +56,9 @@ func (info SkillInfo) validate() error {
 
 type SkillsLoader struct {
 	workspace       string
-	workspaceSkills string // workspace skills (项目级别)
-	globalSkills    string // 全局 skills (~/.lele/skills)
-	builtinSkills   string // 内置 skills
+	workspaceSkills string
+	globalSkills    string
+	builtinSkills   string
 	configMgr       *WorkspaceConfigManager
 }
 
@@ -66,11 +66,10 @@ func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string
 	loader := &SkillsLoader{
 		workspace:       workspace,
 		workspaceSkills: filepath.Join(workspace, "skills"),
-		globalSkills:    globalSkills, // ~/.lele/skills
+		globalSkills:    globalSkills,
 		builtinSkills:   builtinSkills,
 	}
 
-	// Try to load workspace config
 	if workspace != "" {
 		if mgr, err := NewWorkspaceConfigManager(workspace); err == nil {
 			loader.configMgr = mgr
@@ -82,26 +81,18 @@ func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string
 	return loader
 }
 
-// SetConfigManager sets the workspace config manager (for testing or external injection).
 func (sl *SkillsLoader) SetConfigManager(mgr *WorkspaceConfigManager) {
 	sl.configMgr = mgr
 }
 
-// GetConfigManager returns the workspace config manager.
 func (sl *SkillsLoader) GetConfigManager() *WorkspaceConfigManager {
 	return sl.configMgr
 }
 
-// WorkspaceDir returns the workspace this loader scans for workspace-scoped
-// skills (the directory whose "skills" subfolder receives new installs). It is
-// the same value the loader was built with, so callers can construct a
-// SkillInstaller that writes exactly where this loader reads.
 func (sl *SkillsLoader) WorkspaceDir() string {
 	return sl.workspace
 }
 
-// GlobalSkillsDir returns the shared (user-wide) skills directory this loader
-// reads, if any.
 func (sl *SkillsLoader) GlobalSkillsDir() string {
 	return sl.globalSkills
 }
@@ -136,14 +127,12 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 		}
 	}
 
-	// 全局 skills (~/.lele/skills) - 被 workspace skills 覆盖
 	if sl.globalSkills != "" {
 		if dirs, err := os.ReadDir(sl.globalSkills); err == nil {
 			for _, dir := range dirs {
 				if dir.IsDir() {
 					skillFile := filepath.Join(sl.globalSkills, dir.Name(), "SKILL.md")
 					if _, err := os.Stat(skillFile); err == nil {
-						// 检查是否已被 workspace skills 覆盖
 						exists := false
 						for _, s := range skills {
 							if s.Name == dir.Name() && s.Source == "workspace" {
@@ -182,7 +171,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 				if dir.IsDir() {
 					skillFile := filepath.Join(sl.builtinSkills, dir.Name(), "SKILL.md")
 					if _, err := os.Stat(skillFile); err == nil {
-						// 检查是否已被 workspace 或 global skills 覆盖
 						exists := false
 						for _, s := range skills {
 							if s.Name == dir.Name() && (s.Source == "workspace" || s.Source == "global") {
@@ -215,7 +203,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 		}
 	}
 
-	// Set Enabled field based on workspace config
 	for i := range skills {
 		skills[i].Enabled = sl.isSkillEnabled(skills[i].Name)
 	}
@@ -223,8 +210,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	return skills
 }
 
-// isSkillEnabled checks if a skill is enabled based on workspace config.
-// If no config manager is set, all skills are enabled by default.
 func (sl *SkillsLoader) isSkillEnabled(name string) bool {
 	if sl.configMgr == nil {
 		return true
@@ -237,7 +222,6 @@ func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
 		return "", false
 	}
 
-	// 1. 优先从 workspace skills 加载（项目级别）
 	if sl.workspaceSkills != "" {
 		skillFile := filepath.Join(sl.workspaceSkills, name, "SKILL.md")
 		if content, err := os.ReadFile(skillFile); err == nil {
@@ -245,7 +229,6 @@ func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
 		}
 	}
 
-	// 2. 其次从全局 skills 加载 (~/.lele/skills)
 	if sl.globalSkills != "" {
 		skillFile := filepath.Join(sl.globalSkills, name, "SKILL.md")
 		if content, err := os.ReadFile(skillFile); err == nil {
@@ -253,7 +236,6 @@ func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
 		}
 	}
 
-	// 3. 最后从内置 skills 加载
 	if sl.builtinSkills != "" {
 		skillFile := filepath.Join(sl.builtinSkills, name, "SKILL.md")
 		if content, err := os.ReadFile(skillFile); err == nil {
@@ -271,7 +253,6 @@ func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
 
 	var parts []string
 	for _, name := range skillNames {
-		// Skip disabled skills
 		if !sl.isSkillEnabled(name) {
 			continue
 		}
@@ -285,21 +266,6 @@ func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
 	return strings.Join(parts, "\n\n---\n\n")
 }
 
-// BuildSkillsSummary renders the <skills> block injected into the system
-// prompt: one <skill> entry per enabled installed skill (name, description,
-// SKILL.md path, source).
-//
-// filter limits the block to an allowlist of skill names and backs the
-// per-agent `skills:` config (AgentInstance.SkillsFilter):
-//   - nil / empty → every enabled skill is listed (the pre-filter behaviour,
-//     so callers without a per-agent allowlist pass nil);
-//   - non-empty → only skills whose name matches an entry, case-sensitively,
-//     compared after trimming surrounding whitespace on both sides. Names in
-//     the filter that are not installed are simply absent; that is not an
-//     error (a skill may be uninstalled elsewhere).
-//
-// Returns "" when there is nothing to list, so the caller drops the whole
-// "# Skills" section instead of emitting an empty block.
 func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
 	allSkills := sl.ListSkills()
 	if len(allSkills) == 0 {
@@ -310,11 +276,9 @@ func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
 
 	var lines []string
 	for _, s := range allSkills {
-		// Skip disabled skills in summary
 		if !s.Enabled {
 			continue
 		}
-		// Skip skills outside the per-agent allowlist (nil set = no filtering)
 		if allowed != nil && !allowed[normalizeSkillName(s.Name)] {
 			continue
 		}
@@ -340,10 +304,6 @@ func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// skillNameSet turns an allowlist of skill names into a lookup set. It returns
-// nil for a nil/empty allowlist, which callers read as "no filtering", keeping
-// the "all skills" vs. "only these" distinction in one place. Entries that are
-// empty after trimming are dropped.
 func skillNameSet(filter []string) map[string]bool {
 	if len(filter) == 0 {
 		return nil
@@ -359,20 +319,10 @@ func skillNameSet(filter []string) map[string]bool {
 	return set
 }
 
-// normalizeSkillName canonicalises a skill name for allowlist comparison.
-// Names come from SKILL.md frontmatter or from user-written config, so stray
-// whitespace must not silently break a match.
 func normalizeSkillName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// SkillAllowed reports whether name passes the per-agent allowlist filter.
-// It is the exported, single source of truth for the matching semantics used
-// by BuildSkillsSummary, so other renderers (e.g. the agent context builder's
-// skill-content path) stay consistent with the system prompt.
-//
-// An empty filter allows everything (back-compat); otherwise the comparison is
-// case-sensitive and whitespace-trimmed on both sides.
 func SkillAllowed(filter []string, name string) bool {
 	if len(filter) == 0 {
 		return true
@@ -404,7 +354,6 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 		}
 	}
 
-	// Try JSON first (for backward compatibility)
 	var jsonMeta struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -416,7 +365,6 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 		}
 	}
 
-	// Fall back to simple YAML parsing
 	yamlMeta := sl.parseSimpleYAML(frontmatter)
 	return &SkillMetadata{
 		Name:        yamlMeta["name"],
@@ -424,13 +372,9 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 	}
 }
 
-// parseSimpleYAML parses simple key: value YAML format
-// Example: name: github\n description: "..."
-// Normalizes line endings to handle \n (Unix), \r\n (Windows), and \r (classic Mac)
 func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]string {
 	result := make(map[string]string)
 
-	// Normalize line endings: convert \r\n and \r to \n
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 
@@ -444,7 +388,6 @@ func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]string {
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
 			value := strings.TrimSpace(parts[1])
-			// Remove quotes if present
 			value = strings.Trim(value, "\"'")
 			result[key] = value
 		}
@@ -454,9 +397,6 @@ func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]string {
 }
 
 func (sl *SkillsLoader) extractFrontmatter(content string) string {
-	// Support \n (Unix), \r\n (Windows), and \r (classic Mac) line endings for frontmatter blocks
-	// (?s) enables DOTALL so . matches newlines;
-	// ^--- at start, then ... --- at start of line, honoring all three line ending types
 	re := regexp.MustCompile(`(?s)^---(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---`)
 	match := re.FindStringSubmatch(content)
 	if len(match) > 1 {
@@ -466,10 +406,6 @@ func (sl *SkillsLoader) extractFrontmatter(content string) string {
 }
 
 func (sl *SkillsLoader) stripFrontmatter(content string) string {
-	// Support \n (Unix), \r\n (Windows), and \r (classic Mac) line endings for frontmatter blocks
-	// (?s) enables DOTALL so . matches newlines;
-	// ^--- at start, then ... --- at start of line, honoring all three line ending types
-	// Match zero or more trailing line endings after closing --- (handles both with and without blank lines)
 	re := regexp.MustCompile(`(?s)^---(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r)*`)
 	return re.ReplaceAllString(content, "")
 }

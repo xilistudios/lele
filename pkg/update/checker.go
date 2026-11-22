@@ -1,6 +1,3 @@
-// Package update implements self-update functionality for lele:
-// checking GitHub releases, downloading and verifying binaries,
-// atomic installation, and service restart.
 package update
 
 import (
@@ -15,20 +12,16 @@ import (
 )
 
 const (
-	// DefaultRepo is the GitHub repository used when none is configured.
-	DefaultRepo = "xilistudios/lele"
-	// DefaultUserAgent identifies lele to the GitHub API.
+	DefaultRepo      = "xilistudios/lele"
 	DefaultUserAgent = "lele-self-update"
 )
 
-// Asset represents a single release asset (binary archive, checksums, etc.).
 type Asset struct {
 	Name string `json:"name"`
 	URL  string `json:"browser_download_url"`
 	Size int64  `json:"size"`
 }
 
-// Release represents a GitHub release.
 type Release struct {
 	Tag         string    `json:"tag_name"`
 	Name        string    `json:"name"`
@@ -40,12 +33,10 @@ type Release struct {
 	Assets      []Asset   `json:"assets"`
 }
 
-// Version returns the tag without the leading "v".
 func (r *Release) Version() string {
 	return strings.TrimPrefix(r.Tag, "v")
 }
 
-// FindAsset returns the asset with the given name, or nil.
 func (r *Release) FindAsset(name string) *Asset {
 	for i := range r.Assets {
 		if r.Assets[i].Name == name {
@@ -55,14 +46,11 @@ func (r *Release) FindAsset(name string) *Asset {
 	return nil
 }
 
-// Checker queries the GitHub API for releases.
 type Checker struct {
 	Repo   string
 	Client *http.Client
 }
 
-// NewChecker creates a Checker for the given repo (owner/name).
-// An empty repo falls back to DefaultRepo.
 func NewChecker(repo string) *Checker {
 	if repo == "" {
 		repo = DefaultRepo
@@ -73,13 +61,11 @@ func NewChecker(repo string) *Checker {
 	}
 }
 
-// Latest returns the latest stable release.
 func (c *Checker) Latest(ctx context.Context) (*Release, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", c.Repo)
 	return c.fetch(ctx, url)
 }
 
-// ByTag returns a specific release by tag (e.g. "v0.9.0" or "0.9.0").
 func (c *Checker) ByTag(ctx context.Context, tag string) (*Release, error) {
 	if !strings.HasPrefix(tag, "v") {
 		tag = "v" + tag
@@ -122,9 +108,6 @@ func (c *Checker) fetch(ctx context.Context, url string) (*Release, error) {
 	return &rel, nil
 }
 
-// NewerVersion reports whether latest is a newer version than current.
-// Both may have a leading "v". Build suffixes (e.g. "-dev") are ignored
-// for comparison but a "dev"/empty current version is never "older".
 func NewerVersion(current, latest string) bool {
 	cur := normalizeVersion(current)
 	lat := normalizeVersion(latest)
@@ -134,23 +117,18 @@ func NewerVersion(current, latest string) bool {
 	return compareSemver(lat, cur) > 0
 }
 
-// normalizeVersion strips a leading "v" and any build/prerelease suffix.
-// Returns "" for dev/empty versions.
 func normalizeVersion(v string) string {
 	v = strings.TrimSpace(v)
 	v = strings.TrimPrefix(v, "v")
 	if v == "" || v == "dev" {
 		return ""
 	}
-	// Strip prerelease/build metadata: 1.2.3-rc1, 1.2.3+build
 	if i := strings.IndexAny(v, "-+"); i >= 0 {
 		v = v[:i]
 	}
 	return v
 }
 
-// compareSemver compares two dot-separated numeric versions.
-// Returns >0 if a>b, <0 if a<b, 0 if equal.
 func compareSemver(a, b string) int {
 	ap := strings.Split(a, ".")
 	bp := strings.Split(b, ".")

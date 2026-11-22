@@ -40,7 +40,6 @@ func TestAgentModelConfig_UnmarshalObject(t *testing.T) {
 }
 
 func TestAgentModelConfig_MarshalObjectNoFallbacks(t *testing.T) {
-	// Now always serializes as object, even without fallbacks
 	m := AgentModelConfig{Primary: "gpt-4"}
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -51,7 +50,6 @@ func TestAgentModelConfig_MarshalObjectNoFallbacks(t *testing.T) {
 	if result["primary"] != "gpt-4" {
 		t.Errorf("primary = %v, want 'gpt-4'", result["primary"])
 	}
-	// Should not have fallbacks key when empty
 	if _, ok := result["fallbacks"]; ok {
 		t.Errorf("fallbacks key present, want omitted")
 	}
@@ -89,7 +87,6 @@ func TestProviderModelConfig_UnmarshalVideo(t *testing.T) {
 		t.Fatal("expected Video to be true")
 	}
 
-	// Omitted key defaults to false (no auto-enable).
 	var omitted ProviderModelConfig
 	if err := json.Unmarshal([]byte(`{"vision":true}`), &omitted); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -98,7 +95,6 @@ func TestProviderModelConfig_UnmarshalVideo(t *testing.T) {
 		t.Fatal("expected Video to be false when the key is omitted")
 	}
 
-	// Zero value must stay off the wire (omitempty contract).
 	data, err := json.Marshal(ProviderModelConfig{Model: "gpt-4o", Vision: true})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -242,7 +238,6 @@ func TestConfig_BackwardCompat_NoAgentsList(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_HeartbeatEnabled verifies heartbeat is enabled by default
 func TestDefaultConfig_HeartbeatEnabled(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -251,7 +246,6 @@ func TestDefaultConfig_HeartbeatEnabled(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_WorkspacePath verifies workspace path is correctly set
 func TestDefaultConfig_WorkspacePath(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -260,7 +254,6 @@ func TestDefaultConfig_WorkspacePath(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_Model verifies model is set
 func TestDefaultConfig_Model(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -269,27 +262,22 @@ func TestDefaultConfig_Model(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_MaxTokens verifies max tokens has a valid default value
 func TestDefaultConfig_MaxTokens(t *testing.T) {
 	cfg := DefaultConfig()
 
-	// 0 means "use provider/model fallback" (instance resolves to 8192 when unset)
 	if cfg.Agents.Defaults.MaxTokens < 0 {
 		t.Error("MaxTokens should not be negative")
 	}
 }
 
-// TestDefaultConfig_MaxToolIterations verifies max tool iterations has default value
 func TestDefaultConfig_MaxToolIterations(t *testing.T) {
 	cfg := DefaultConfig()
 
-	// 0 means unlimited (timeout is the real safety guard)
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {
 		t.Error("MaxToolIterations should not be negative")
 	}
 }
 
-// TestDefaultConfig_Temperature verifies temperature has default value
 func TestDefaultConfig_Temperature(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -298,7 +286,6 @@ func TestDefaultConfig_Temperature(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_Gateway verifies gateway defaults
 func TestDefaultConfig_Gateway(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -310,7 +297,6 @@ func TestDefaultConfig_Gateway(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_Providers verifies provider structure
 func TestDefaultConfig_Providers(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -325,7 +311,6 @@ func TestDefaultConfig_Providers(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_Channels verifies channels are disabled by default
 func TestDefaultConfig_Channels(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -340,11 +325,9 @@ func TestDefaultConfig_Channels(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_WebTools verifies web tools config
 func TestDefaultConfig_WebTools(t *testing.T) {
 	cfg := DefaultConfig()
 
-	// Verify web tools defaults
 	if cfg.Tools.Web.Brave.MaxResults != 5 {
 		t.Error("Expected Brave MaxResults 5, got ", cfg.Tools.Web.Brave.MaxResults)
 	}
@@ -354,7 +337,6 @@ func TestDefaultConfig_WebTools(t *testing.T) {
 	if cfg.Tools.Web.DuckDuckGo.MaxResults != 5 {
 		t.Error("Expected DuckDuckGo MaxResults 5, got ", cfg.Tools.Web.DuckDuckGo.MaxResults)
 	}
-	// SearXNG defaults
 	if cfg.Tools.Web.SearXNG.Enabled {
 		t.Error("SearXNG should be disabled by default")
 	}
@@ -435,7 +417,6 @@ func TestConfig_PersistSessionEphemeral(t *testing.T) {
 	}
 }
 
-// TestConfig_Complete verifies all config fields are set
 func TestConfig_Complete(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -448,11 +429,9 @@ func TestConfig_Complete(t *testing.T) {
 	if cfg.Agents.Defaults.Temperature != nil {
 		t.Error("Temperature should be nil when not provided")
 	}
-	// MaxTokens: 0 means "use provider/model fallback" (valid default)
 	if cfg.Agents.Defaults.MaxTokens < 0 {
 		t.Error("MaxTokens should not be negative")
 	}
-	// MaxToolIterations: 0 means unlimited (valid default)
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {
 		t.Error("MaxToolIterations should not be negative")
 	}
@@ -936,7 +915,6 @@ func TestAgentConfig_Description(t *testing.T) {
 		t.Errorf("support.Description = %q, want empty", support.Description)
 	}
 
-	// Re-marshal and verify description is preserved
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -978,14 +956,12 @@ func TestConfig_EvictExcluded_False(t *testing.T) {
 }
 
 func TestConfig_EvictExcluded_EnvOverride(t *testing.T) {
-	// Config true but env forces false.
 	cfg := DefaultConfig()
 	t.Setenv("LELE_EVICT_EXCLUDED", "false")
 	if cfg.EvictExcludedFromMemory() {
 		t.Error("EvictExcludedFromMemory should be false when LELE_EVICT_EXCLUDED=false")
 	}
 
-	// Config false but env forces true.
 	cfg.Session.EvictExcludedFromMemory = false
 	t.Setenv("LELE_EVICT_EXCLUDED", "true")
 	if !cfg.EvictExcludedFromMemory() {
@@ -993,8 +969,6 @@ func TestConfig_EvictExcluded_EnvOverride(t *testing.T) {
 	}
 }
 
-// TestHasUsableProvider covers the config-level "is there a usable provider?"
-// check used by the TUI to decide whether to trigger first-run onboarding.
 func TestHasUsableProvider(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1033,10 +1007,6 @@ func TestHasUsableProvider(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_SubagentMaxRetries pins the default that makes runTask's
-// retry reachable. It was absent from DefaultConfig, so SubagentMaxRetries was
-// the zero value and the subagent retry loop could never fire: a single flaky
-// provider response killed the subagent permanently.
 func TestDefaultConfig_SubagentMaxRetries(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -1046,15 +1016,6 @@ func TestDefaultConfig_SubagentMaxRetries(t *testing.T) {
 	}
 }
 
-// TestApplyDefaults_SubagentMaxRetries covers the editable-document path: unset
-// inherits 2, an explicit non-zero value is preserved.
-//
-// Known limitation asserted rather than hidden: on this path an explicit 0 is
-// indistinguishable from unset, because applyDefaults uses the same `== 0` test
-// as every other numeric default. 0 is therefore a no-op yielding the default 2,
-// not "retries disabled". Disabling on this path requires a sentinel type (*int),
-// out of scope here; TestLoadConfig_SubagentMaxRetriesZeroPinned covers the
-// config.json path, where an explicit 0 does win.
 func TestApplyDefaults_SubagentMaxRetries(t *testing.T) {
 	t.Run("unset inherits default", func(t *testing.T) {
 		doc := defaultEditableDocument()
@@ -1075,11 +1036,6 @@ func TestApplyDefaults_SubagentMaxRetries(t *testing.T) {
 	})
 }
 
-// TestLoadConfig_SubagentMaxRetriesZeroPinned is the other half of the "0 means
-// disabled" contract: LoadConfig starts from DefaultConfig and unmarshals the
-// file over it, so an explicit 0 in config.json survives and really does disable
-// retries. Without this, changing the default to 2 would have silently removed
-// the user's only way to turn the retry loop off.
 func TestLoadConfig_SubagentMaxRetriesZeroPinned(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
@@ -1175,13 +1131,6 @@ func TestProvidersConfig_UnmarshalAcceptsThinkingType(t *testing.T) {
 	}
 }
 
-// TestProvidersConfigMarshalJSONPersistsAuthMethodOnlyProvider pins the fix for
-// a silent config-drop: `lele auth login --provider claude` only writes
-// Providers.Anthropic.AuthMethod = "oauth" (no API key, no models), and
-// MarshalJSON used to skip any provider without an API key or models. The write
-// therefore never reached disk, so the provider selector kept reading
-// AuthMethod == "" and refused to route to the Claude OAuth path. An explicit
-// auth method is itself configuration and must survive serialization.
 func TestProvidersConfigMarshalJSONPersistsAuthMethodOnlyProvider(t *testing.T) {
 	p := &ProvidersConfig{Anthropic: ProviderConfig{AuthMethod: "oauth"}}
 
@@ -1204,8 +1153,6 @@ func TestProvidersConfigMarshalJSONPersistsAuthMethodOnlyProvider(t *testing.T) 
 		t.Errorf("anthropic.auth_method = %v, want %q", got, "oauth")
 	}
 
-	// The truly-empty case still collapses to null so the parent `omitempty`
-	// keeps working.
 	empty, err := json.Marshal(&ProvidersConfig{})
 	if err != nil {
 		t.Fatalf("marshal empty: %v", err)
@@ -1215,9 +1162,6 @@ func TestProvidersConfigMarshalJSONPersistsAuthMethodOnlyProvider(t *testing.T) 
 	}
 }
 
-// TestProvidersConfigAuthMethodRoundTrip is the end-to-end proof that the CLI's
-// best-effort `Providers.Anthropic.AuthMethod = "oauth"` write now survives
-// SaveConfig -> LoadConfig, which is what the provider selector depends on.
 func TestProvidersConfigAuthMethodRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 
@@ -1239,9 +1183,6 @@ func TestProvidersConfigAuthMethodRoundTrip(t *testing.T) {
 	}
 }
 
-// TestNormalizeProviderKey_OpenCodeGo verifies the opencode-go alias maps to
-// the canonical opencode_go key (aliases kept in sync with providers.NormalizeProvider
-// and catalog.normalizeType).
 func TestNormalizeProviderKey_OpenCodeGo(t *testing.T) {
 	tests := []struct {
 		input string
@@ -1250,7 +1191,6 @@ func TestNormalizeProviderKey_OpenCodeGo(t *testing.T) {
 		{"opencode-go", "opencode_go"},
 		{"OpenCode-Go", "opencode_go"},
 		{"opencode_go", "opencode_go"},
-		// Existing aliases must keep working (no regression).
 		{"opencode-zen", "opencode"},
 		{"zen", "opencode"},
 	}
@@ -1262,10 +1202,6 @@ func TestNormalizeProviderKey_OpenCodeGo(t *testing.T) {
 	}
 }
 
-// TestProvidersConfigMarshalJSONPersistsKeylessConfiguredProvider pins the
-// serialization contract for providers that intentionally have no API key:
-// local endpoints (APIBase/Proxy) and OAuth-completed sessions (ConnectMode)
-// must survive SaveConfig -> LoadConfig.
 func TestProvidersConfigMarshalJSONPersistsKeylessConfiguredProvider(t *testing.T) {
 	p := &ProvidersConfig{
 		Named: map[string]NamedProviderConfig{
@@ -1310,9 +1246,6 @@ func TestProvidersConfigMarshalJSONPersistsKeylessConfiguredProvider(t *testing.
 	}
 }
 
-// TestProvidersConfigRoundTripsKeylessConfiguredProvider proves that a
-// keyless provider created by /connect remains configured after a complete
-// save/load cycle instead of reverting to the ensureNamedDefaults placeholder.
 func TestProvidersConfigRoundTripsKeylessConfiguredProvider(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := DefaultConfig()
@@ -1337,17 +1270,6 @@ func TestProvidersConfigRoundTripsKeylessConfiguredProvider(t *testing.T) {
 	}
 }
 
-// TestDefaultConfigMarshalsNoProviders pins the other half of the same
-// contract: a PRISTINE config must serialize to "null" (the parent field is
-// `omitempty`, and the loader nils the section back out when the JSON is
-// null). Widening isEmpty() to count APIBase/Proxy/ConnectMode made this
-// reachable in the wrong direction — DefaultConfig() used to seed
-// AlibabaCodingPlan.APIBase with the built-in endpoint, which is NOT user
-// configuration (pkg/catalog and pkg/providers/factory.go both supply that
-// default at runtime), so counting it wrote a phantom
-// providers.alibaba_coding_plan entry into every user's config.json on the
-// next save. The zero-value ProvidersConfig case above cannot catch this
-// because it never goes through DefaultConfig().
 func TestDefaultConfigMarshalsNoProviders(t *testing.T) {
 	data, err := json.Marshal(DefaultConfig().Providers)
 	if err != nil {
@@ -1357,8 +1279,6 @@ func TestDefaultConfigMarshalsNoProviders(t *testing.T) {
 		t.Fatalf("a pristine config must persist no provider, got %s", data)
 	}
 
-	// Same assertion through the real save path, because SaveConfig writes the
-	// whole AppConfig and the field only disappears when the section is null.
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := SaveConfig(path, DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)

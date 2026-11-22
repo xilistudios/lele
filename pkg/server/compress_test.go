@@ -17,9 +17,6 @@ import (
 	"time"
 )
 
-// --- helpers ---
-
-// gzipRequest runs h behind compressionMiddleware with Accept-Encoding: gzip.
 func gzipRequest(h http.Handler, method, target string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -31,9 +28,6 @@ func gzipRequest(h http.Handler, method, target string, headers map[string]strin
 	return rec
 }
 
-// decodeGzip inflates a gzip body, failing on any framing error. A truncated
-// stream (a gzip writer that was never closed) surfaces here as an error, which
-// is the regression this guards against.
 func decodeGzip(t *testing.T, body []byte) []byte {
 	t.Helper()
 	zr, err := gzip.NewReader(bytes.NewReader(body))
@@ -49,8 +43,6 @@ func decodeGzip(t *testing.T, body []byte) []byte {
 	return out
 }
 
-// decodeGzipPartial returns what a client that has only received body so far
-// can decode: it tolerates a missing trailer (the stream is still open).
 func decodeGzipPartial(t *testing.T, body []byte) []byte {
 	t.Helper()
 	zr, err := gzip.NewReader(bytes.NewReader(body))
@@ -66,9 +58,6 @@ func decodeGzipPartial(t *testing.T, body []byte) []byte {
 	return out
 }
 
-// fixedResponseHandler answers every request with a fixed status, content type
-// and body. When declared is true it also sets Content-Length, the shape
-// http.ServeContent produces for a file; otherwise it mimics a chunked stream.
 func fixedResponseHandler(status int, contentType string, declared bool, body []byte) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if contentType != "" {
@@ -84,8 +73,6 @@ func fixedResponseHandler(status int, contentType string, declared bool, body []
 	})
 }
 
-// hijackableRecorder is a ResponseRecorder that also implements http.Hijacker,
-// like the connection net/http hands to an upgrade handler.
 type hijackableRecorder struct {
 	*httptest.ResponseRecorder
 	conn     net.Conn
@@ -97,7 +84,6 @@ func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return h.conn, nil, nil
 }
 
-// flushRecorder counts how many times Flush reached the client.
 type flushRecorder struct {
 	*httptest.ResponseRecorder
 	flushes int
@@ -108,8 +94,6 @@ func (f *flushRecorder) Flush() {
 	f.ResponseRecorder.Flush()
 }
 
-// headerWriteRecorder counts WriteHeader calls, so a test can tell whether the
-// middleware committed a status the handler never wrote.
 type headerWriteRecorder struct {
 	*httptest.ResponseRecorder
 	headerWrites int
@@ -120,14 +104,10 @@ func (n *headerWriteRecorder) WriteHeader(code int) {
 	n.ResponseRecorder.WriteHeader(code)
 }
 
-// hasVary reports whether the recorded response advertises value in Vary.
 func hasVary(rec *httptest.ResponseRecorder, value string) bool {
 	return strings.Contains(rec.Header().Get("Vary"), value)
 }
 
-// deadlineRecorder records SetWriteDeadline calls arriving through
-// http.ResponseController: the seam the SSE handlers use to escape the server
-// WriteTimeout.
 type deadlineRecorder struct {
 	*httptest.ResponseRecorder
 	deadlineCalls int
@@ -139,8 +119,6 @@ func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 	d.lastDeadline = t
 	return nil
 }
-
-// --- eligibility ---
 
 func TestCompressibleContentType(t *testing.T) {
 	tests := []struct {
@@ -241,10 +219,8 @@ func TestIsPrecompressedPath(t *testing.T) {
 	}
 }
 
-// --- eligibility matrix through the middleware ---
-
 func TestCompressionMiddlewareCompressesEligibleTypes(t *testing.T) {
-	body := bytes.Repeat([]byte("export const x = 1;\n"), 300) // ~6 KB
+	body := bytes.Repeat([]byte("export const x = 1;\n"), 300)
 	for _, ct := range []string{
 		"text/html; charset=utf-8",
 		"text/css; charset=utf-8",
@@ -302,14 +278,11 @@ func TestCompressionMiddlewareSkipsIneligibleTypes(t *testing.T) {
 	}
 }
 
-// A mislabelled already-compressed file must not be re-compressed.
 func TestCompressionMiddlewareSkipsPrecompressedPaths(t *testing.T) {
 	body := bytes.Repeat([]byte("wOF2"), 2048)
 
 	for _, path := range []string{"/assets/font.woff2", "/assets/logo.png"} {
 		t.Run(path, func(t *testing.T) {
-			// text/plain would otherwise be eligible: the extension rule is the
-			// only thing standing between this body and a useless re-encode.
 			rec := gzipRequest(compressionMiddleware(fixedResponseHandler(http.StatusOK, "text/plain; charset=utf-8", true, body)), http.MethodGet, path, nil)
 
 			if got := rec.Header().Get("Content-Encoding"); got != "" {
@@ -341,8 +314,6 @@ func TestCompressionMiddlewareSkipsBodyThatIsAlreadyEncoded(t *testing.T) {
 	}
 }
 
-// --- size threshold ---
-
 func TestCompressionMiddlewareSkipsSmallResponses(t *testing.T) {
 	small := []byte("hello, not worth a gzip header")
 
@@ -370,18 +341,13 @@ func TestCompressionMiddlewareSkipsSmallResponses(t *testing.T) {
 		})
 	}
 
-	// The declared Content-Length must survive for a body that is not encoded.
 	rec := gzipRequest(compressionMiddleware(fixedResponseHandler(http.StatusOK, "text/plain", true, small)), http.MethodGet, "/small.txt", nil)
 	if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(len(small)) {
 		t.Errorf("Content-Length = %q, want %d", got, len(small))
 	}
 }
 
-// --- body integrity ---
-
 func TestCompressionMiddlewareBodyRoundTripsExactly(t *testing.T) {
-	// Incompressible bytes: the encoder cannot cheat here, so the decoded
-	// output has to be the exact input.
 	body := make([]byte, 32*1024)
 	rnd := rand.New(rand.NewSource(1))
 	if _, err := rnd.Read(body); err != nil {
@@ -397,8 +363,6 @@ func TestCompressionMiddlewareBodyRoundTripsExactly(t *testing.T) {
 		t.Error("decoded body is not byte-identical to the original")
 	}
 }
-
-// --- status handling ---
 
 func TestCompressionMiddlewareSkipsNotModified(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -455,8 +419,6 @@ func TestCompressionMiddlewareHandlerThatWritesNothing(t *testing.T) {
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	h := compressionMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The handler never writes: net/http answers 200 on its own, and the
-		// middleware must not pre-empt that with a status of its own.
 	}))
 	h.ServeHTTP(rec, req)
 
@@ -467,8 +429,6 @@ func TestCompressionMiddlewareHandlerThatWritesNothing(t *testing.T) {
 		t.Errorf("body = %q, want empty", rec.Body.String())
 	}
 }
-
-// --- flush ---
 
 func TestCompressionMiddlewareFlushDelegatesPartialOutput(t *testing.T) {
 	partial := []byte("partial output")
@@ -486,7 +446,6 @@ func TestCompressionMiddlewareFlushDelegatesPartialOutput(t *testing.T) {
 		}
 		f.Flush()
 
-		// The bytes must already be at the client, not held in the encoder.
 		if got := rec.Body.String(); got != string(partial) {
 			t.Errorf("after Flush the client has %q, want %q", got, string(partial))
 		}
@@ -508,7 +467,7 @@ func TestCompressionMiddlewareFlushDelegatesPartialOutput(t *testing.T) {
 }
 
 func TestCompressionMiddlewareFlushOfEncodedStream(t *testing.T) {
-	big := bytes.Repeat([]byte("compress me "), 4096) // ~48 KB
+	big := bytes.Repeat([]byte("compress me "), 4096)
 	tail := []byte(`{"tail":true}`)
 
 	var afterFlush int
@@ -539,8 +498,6 @@ func TestCompressionMiddlewareFlushOfEncodedStream(t *testing.T) {
 	if afterFlush == 0 {
 		t.Error("Flush pushed no encoded bytes: the gzip stream was not flushed")
 	}
-	// Flushing the gzip writer means the client can decode everything written
-	// so far, not just the 10-byte header of an empty stream.
 	if !bytes.Equal(afterFlushDecoded, big) {
 		t.Errorf("after Flush the client can decode %d of %d bytes", len(afterFlushDecoded), len(big))
 	}
@@ -551,8 +508,6 @@ func TestCompressionMiddlewareFlushOfEncodedStream(t *testing.T) {
 		t.Error("decoded stream is not byte-identical to what the handler wrote")
 	}
 }
-
-// --- upgrade / hijack safety ---
 
 func TestCompressionMiddlewareUpgradeDetection(t *testing.T) {
 	tests := []struct {
@@ -607,7 +562,6 @@ func TestCompressionMiddlewareUpgradeDetection(t *testing.T) {
 	}
 }
 
-// A request that is not eligible must be handed the very same ResponseWriter.
 func TestCompressionMiddlewareNotWrappedWhenRequestIneligible(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -666,9 +620,6 @@ func TestCompressionMiddlewareHijackDelegates(t *testing.T) {
 		}
 	}))
 
-	// An upgrade request that somehow lost its Upgrade headers: the wrapper is
-	// installed, but hijacking must still work (protocol code copies the
-	// wrapper into an interface and would otherwise panic on assertion).
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	h.ServeHTTP(rec, req)
@@ -681,7 +632,6 @@ func TestCompressionMiddlewareHijackDelegates(t *testing.T) {
 func TestCompressionMiddlewareHijackUnsupportedReturnsError(t *testing.T) {
 	var hijackErr error
 
-	// httptest.ResponseRecorder is not an http.Hijacker.
 	h := compressionMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -709,7 +659,7 @@ func TestCompressionMiddlewareHijackFinishesEncodedBodyFirst(t *testing.T) {
 	defer client.Close()
 
 	rec := &hijackableRecorder{ResponseRecorder: httptest.NewRecorder(), conn: server}
-	body := bytes.Repeat([]byte("hijack me "), 2048) // ~20 KB
+	body := bytes.Repeat([]byte("hijack me "), 2048)
 	proto := []byte("RAW-PROTOCOL-BYTES")
 	var encodedLen int
 
@@ -722,8 +672,6 @@ func TestCompressionMiddlewareHijackFinishesEncodedBodyFirst(t *testing.T) {
 			t.Errorf("Hijack() error = %v", err)
 		}
 
-		// The connection now belongs to the handler: stand in for the protocol
-		// bytes it would write straight to the socket.
 		encodedLen = rec.Body.Len()
 		_, _ = rec.ResponseRecorder.Write(proto)
 	}))
@@ -738,8 +686,6 @@ func TestCompressionMiddlewareHijackFinishesEncodedBodyFirst(t *testing.T) {
 	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", got)
 	}
-	// Nothing may be appended after the handover: the encoder has to be closed
-	// by Hijack, not by the deferred finish().
 	if got := rec.Body.Len(); got != encodedLen+len(proto) {
 		t.Fatalf("body length = %d, want %d: %d byte(s) were written after the hijack",
 			got, encodedLen+len(proto), got-encodedLen-len(proto))
@@ -747,20 +693,14 @@ func TestCompressionMiddlewareHijackFinishesEncodedBodyFirst(t *testing.T) {
 	if !bytes.HasSuffix(rec.Body.Bytes(), proto) {
 		t.Error("the handler's protocol bytes were overwritten after the hijack")
 	}
-	// The encoded part must be a complete, well-formed gzip stream.
 	if got := decodeGzip(t, rec.Body.Bytes()[:encodedLen]); !bytes.Equal(got, body) {
 		t.Errorf("decoded pre-hijack body differs from the original (%d vs %d bytes)", len(got), len(body))
 	}
 }
 
-// --- integration with the static SPA path ---
-
-// TestServerHandlerChainCompressesStaticResponses pins the wiring: the
-// middleware is only useful if the server actually installs it, and the rest of
-// the chain (security headers) must survive the reordering.
 func TestServerHandlerChainCompressesStaticResponses(t *testing.T) {
 	fsys := spaTestFS()
-	bundle := bytes.Repeat([]byte("const x=1;console.log('bundle');"), 4096) // ~131 KB
+	bundle := bytes.Repeat([]byte("const x=1;console.log('bundle');"), 4096)
 	fsys["assets/bundle.0badc0de.js"] = &fstest.MapFile{Data: bundle}
 
 	s := New(&Config{Host: "127.0.0.1", Port: 0})
@@ -787,7 +727,7 @@ func TestServerHandlerChainCompressesStaticResponses(t *testing.T) {
 
 func TestCompressionMiddlewareSPAStaticAsset(t *testing.T) {
 	fsys := spaTestFS()
-	bundle := bytes.Repeat([]byte("const x=1;console.log('bundle');"), 4096) // ~131 KB
+	bundle := bytes.Repeat([]byte("const x=1;console.log('bundle');"), 4096)
 	fsys["assets/bundle.0badc0de.js"] = &fstest.MapFile{Data: bundle}
 
 	h := compressionMiddleware(newSPAHandler(http.FS(fsys)))
@@ -879,9 +819,6 @@ func TestCompressionMiddlewareSPAStaticAsset(t *testing.T) {
 	})
 }
 
-// The SSE endpoints clear the server WriteTimeout through
-// http.ResponseController, which unwraps ResponseWriters. The wrapper must keep
-// that path open.
 func TestCompressionMiddlewareSupportsResponseController(t *testing.T) {
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	var panicVal any
