@@ -349,6 +349,9 @@ test('a long draft never pushes the composer off screen', async ({ page }, testI
 const SELECTOR_LABELS = ['Model', 'Thinking', 'Agent'] as const
 
 const TRIGGER_CHROME_PX = 8 + 8 + 6 + 12
+const FOLDER_CHIP_MAX_WIDTH = 200
+const THINKING_FLOOR_WIDTH = 68
+const AGENT_FLOOR_WIDTH = 88
 
 type Box = {
   top: number
@@ -376,13 +379,14 @@ type ChipMeasurement = {
   label: { text: string | null; box: Box | null; truncated: boolean }
 }
 
-type StripMeasurement = {
+type ComposerMeasurement = {
   viewport: number
   innerHeight: number
-  row: Box
-  group: Box
-  nowrap: boolean
-  secondTier: Box | null
+  capsule: Box
+  capsuleWraps: boolean
+  sendOverlapsTextarea: boolean
+  chips: Box | null
+  chipsWraps: boolean
   controls: ControlMeasurement[]
   chip: ChipMeasurement | null
   overlaps: string[]
@@ -391,7 +395,7 @@ type StripMeasurement = {
   list: { height: number } | null
 }
 
-const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
+const measureComposer = async (page: Page): Promise<ComposerMeasurement | null> =>
   page.evaluate(
     ({ chrome }: { chrome: number }) => {
       const box = (el: Element): Box => {
@@ -418,30 +422,19 @@ const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
         }
       }
 
+      const capsule = document.querySelector('[data-testid="composer-capsule"]')
+      const chips = document.querySelector('[data-testid="composer-chips"]')
+      const textarea = document.querySelector('main form textarea')
       const send = document.querySelector('main form button[aria-label="Send"]')
-      const row = send?.parentElement ?? null
-      if (!send || !row) return null
-      const group = Array.from(row.children).find((el) => classOf(el).includes('flex-wrap')) ?? null
-      if (!group) return null
-      const secondTier =
-        Array.from(row.querySelectorAll('div')).find((el) =>
-          classOf(el).includes('max-md:basis-full'),
-        ) ?? null
-
-      const flatten = (nodes: Element[]): Element[] =>
-        nodes.flatMap((el) =>
-          classOf(el).includes('md:contents') ? flatten(Array.from(el.children)) : [el],
-        )
+      if (!capsule || !chips || !textarea || !send) return null
 
       const describe = (el: Element): ControlMeasurement => {
-        const trigger = (
-          el.tagName === 'BUTTON' ? el : el.querySelector('button')
-        ) as HTMLElement | null
+        const trigger = (el.tagName === 'BUTTON' ? el : el.querySelector('button')) as HTMLElement
         const itemBox = box(el)
         const triggerBox = trigger ? box(trigger) : null
         const { text, textWidth, spanWidth } = textOf(trigger ?? el)
         return {
-          label: trigger?.getAttribute('aria-label') ?? el.getAttribute('aria-label') ?? el.tagName,
+          label: trigger?.getAttribute('aria-label') ?? el.tagName,
           box: itemBox,
           trigger: triggerBox,
           text,
@@ -454,9 +447,7 @@ const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
       }
 
       const chipEl =
-        Array.from(document.querySelectorAll('main form [data-testid="folder-chip"]')).find(
-          (el) => el.getBoundingClientRect().width > 0,
-        ) ?? null
+        (chips.querySelector('[data-testid="folder-chip"]') as HTMLElement | null) ?? null
       const chipLabel = chipEl?.querySelector('span.truncate') as HTMLElement | null
       const chip = chipEl
         ? {
@@ -469,15 +460,14 @@ const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
           }
         : null
 
-      const isChipCell = (el: Element) =>
-        el.getAttribute('data-testid') === 'folder-chip' ||
-        el.querySelector('[data-testid="folder-chip"]') !== null
-
-      const controls = flatten(Array.from(group.children))
-        .filter((el) => !isChipCell(el))
+      const controls = Array.from(chips.children)
+        .filter((el) => el.querySelector('button') && el !== chipEl)
         .map(describe)
 
-      const boxes = [...controls.map((control) => control.box), ...(chip ? [chip.box] : [])]
+      const boxes = [
+        ...controls.map((control) => control.box),
+        ...(chip ? [chip.box] : []),
+      ]
       const labels = [...controls.map((control) => control.label), 'Folder chip']
       const overlaps: string[] = []
       for (let i = 0; i < boxes.length; i += 1) {
@@ -491,18 +481,22 @@ const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
       }
 
       const list = document.querySelector('[data-testid="message-list"]')
+      const textareaBox = box(textarea)
+      const sendBox = box(send)
 
       return {
         viewport: window.innerWidth,
         innerHeight: window.innerHeight,
-        row: box(row),
-        group: box(group),
-        nowrap: classOf(group).includes('max-md:flex-nowrap'),
-        secondTier: secondTier ? box(secondTier) : null,
+        capsule: box(capsule),
+        capsuleWraps: classOf(capsule).includes('flex-wrap'),
+        sendOverlapsTextarea:
+          Math.min(sendBox.right, textareaBox.right) - Math.max(sendBox.left, textareaBox.left) > 1,
+        chips: box(chips),
+        chipsWraps: classOf(chips).includes('flex-wrap'),
         controls,
         chip,
         overlaps,
-        send: box(send),
+        send: sendBox,
         scrollWidth: document.documentElement.scrollWidth,
         list: list ? { height: box(list).height } : null,
       }
@@ -510,15 +504,9 @@ const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
     { chrome: TRIGGER_CHROME_PX },
   )
 
-const lineOfBox = (box: Box, secondTier: Box | null): 1 | 2 =>
-  secondTier && box.top >= secondTier.top - 1 ? 2 : 1
-
-const lineOf = (control: ControlMeasurement, secondTier: Box | null): 1 | 2 =>
-  lineOfBox(control.box, secondTier)
-
-const describeControl = (control: ControlMeasurement, secondTier: Box | null): string => {
+const describeControl = (control: ControlMeasurement): string => {
   const width = control.trigger?.width ?? control.box.width
-  const parts = [`w=${Math.round(width)}`, `line=${lineOf(control, secondTier)}`]
+  const parts = [`w=${Math.round(width)}`]
   if (control.text !== null) {
     parts.push(
       `text=${JSON.stringify(control.text)}`,
@@ -531,152 +519,13 @@ const describeControl = (control: ControlMeasurement, secondTier: Box | null): s
   return `${control.label}{${parts.join(' ')}}`
 }
 
-test('the single-selector control strip keeps every control on one line', async ({
-  page,
-}, testInfo) => {
-  await openChat(page)
-
-  const strip = await measureStrip(page)
-  expect(strip).not.toBeNull()
-  if (!strip) return
-
-  await attach(page, testInfo, `control-strip-${testInfo.project.name}`)
-
-  console.log(
-    `[control-strip ${testInfo.project.name}] viewport=${strip.viewport} ` +
-      `row=${Math.round(strip.row.width)}px group=${Math.round(strip.group.width)}x${Math.round(strip.group.height)} ` +
-      `nowrap=${strip.nowrap} tier2=${strip.secondTier ? 'yes' : 'none'} ` +
-      `controls=${strip.controls.map((control) => describeControl(control, strip.secondTier)).join(' ')} ` +
-      `send=${strip.send ? `${Math.round(strip.send.width)}x${Math.round(strip.send.height)}` : 'none'} ` +
-      `list=${Math.round(strip.list?.height ?? -1)}px innerHeight=${strip.innerHeight} ` +
-      `scrollWidth=${strip.scrollWidth}`,
-  )
-
-  expect(strip.nowrap).toBe(false)
-  expect(strip.secondTier).toBeNull()
-  expect(strip.controls).toHaveLength(3)
-
-  const model = strip.controls.find((control) => control.label === 'Model')
-  expect(model).toBeDefined()
-  if (!model) return
-
-  expect(strip.group.height).toBeLessThanOrEqual(45)
-  for (const control of strip.controls) {
-    expect(control.box.top).toBeGreaterThanOrEqual(strip.group.top - 1)
-    expect(control.box.bottom).toBeLessThanOrEqual(strip.group.bottom + 1)
-    expect(control.box.left).toBeGreaterThanOrEqual(strip.group.left - 1)
-    expect(control.box.right).toBeLessThanOrEqual(strip.group.right + 1)
-    expect(control.clipped).toBe(false)
-  }
-
-  expect(model.trigger?.width ?? 0).toBeGreaterThanOrEqual(110)
-
-  expect(strip.send).not.toBeNull()
-  const send = strip.send
-  if (!send) return
-  expect(send.width).toBeGreaterThanOrEqual(40)
-  expect(send.height).toBeGreaterThanOrEqual(40)
-  expect(send.right).toBeLessThanOrEqual(strip.row.right + 1)
-  expect(send.bottom).toBeLessThanOrEqual(strip.row.bottom + 1)
-  expect(Math.max(send.top, model.box.top)).toBeLessThanOrEqual(
-    Math.min(send.bottom, model.box.bottom),
-  )
-
-  expect(strip.scrollWidth).toBeLessThanOrEqual(strip.viewport + 1)
-})
-
-test('the three-selector strip splits into two tiers with every trigger usable', async ({
-  page,
-}, testInfo) => {
-  await openChat(page, { multipleAgents: true, reasoning: true })
-
-  for (const label of SELECTOR_LABELS) {
-    await expect(page.locator(`main form button[aria-label="${label}"]`)).toBeVisible({
-      timeout: 15_000,
-    })
-  }
-
-  const strip = await measureStrip(page)
-  expect(strip).not.toBeNull()
-  if (!strip) return
-
-  await attach(page, testInfo, `full-strip-${testInfo.project.name}`)
-
-  console.log(
-    `[full-strip ${testInfo.project.name}] viewport=${strip.viewport} ` +
-      `row=${Math.round(strip.row.width)}px group=${Math.round(strip.group.width)}x${Math.round(strip.group.height)} ` +
-      `nowrap=${strip.nowrap} tier2Top=${strip.secondTier ? Math.round(strip.secondTier.top) : 'none'} ` +
-      `controls=${strip.controls.map((control) => describeControl(control, strip.secondTier)).join(' ')} ` +
-      `send=${strip.send ? `${Math.round(strip.send.width)}x${Math.round(strip.send.height)} line=${lineOfBox(strip.send, strip.secondTier)}` : 'none'} ` +
-      `list=${Math.round(strip.list?.height ?? -1)}px innerHeight=${strip.innerHeight} ` +
-      `scrollWidth=${strip.scrollWidth}`,
-  )
-
-  expect(strip.controls).toHaveLength(5)
-  expect(strip.nowrap).toBe(false)
-  expect(strip.secondTier).not.toBeNull()
-  const secondTier = strip.secondTier
-  const send = strip.send
-  if (!secondTier || !send) return
-
-  const byLabel = (label: string) => {
-    const control = strip.controls.find((item) => item.label === label)
-    expect(control).toBeDefined()
-    return control as ControlMeasurement
-  }
-  const model = byLabel('Model')
-  const thinking = byLabel('Thinking')
-  const agent = byLabel('Agent')
-
-  expect(lineOf(model, secondTier)).toBe(1)
-  expect(lineOf(thinking, secondTier)).toBe(2)
-  expect(lineOf(agent, secondTier)).toBe(2)
-  expect(Math.abs(thinking.box.top - agent.box.top)).toBeLessThanOrEqual(1)
-  expect(thinking.box.top - model.box.top).toBeGreaterThanOrEqual(8)
-
-  const primary = strip.controls.filter((control) => lineOf(control, secondTier) === 1)
-  const secondary = strip.controls.filter((control) => lineOf(control, secondTier) === 2)
-  expect(primary).toHaveLength(3)
-  expect(secondary).toHaveLength(2)
-  for (const control of primary) {
-    expect(control.box.bottom).toBeLessThanOrEqual(secondTier.top)
-  }
-
-  expect(model.trigger?.width ?? 0).toBeGreaterThanOrEqual(strip.viewport <= 320 ? 110 : 140)
-  for (const control of [thinking, agent]) {
-    expect(control.trigger?.width ?? 0).toBeGreaterThanOrEqual(60)
-  }
-
-  const primaryTop = Math.min(...primary.map((control) => control.box.top))
-  const primaryBottom = Math.max(...primary.map((control) => control.box.bottom))
-  expect(send.width).toBeGreaterThanOrEqual(40)
-  expect(send.height).toBeGreaterThanOrEqual(40)
-  expect(send.top).toBeLessThan(secondTier.top)
-  expect(send.bottom).toBeGreaterThan(primaryTop)
-  expect(send.top).toBeLessThan(primaryBottom)
-  expect(send.right).toBeLessThanOrEqual(strip.row.right + 1)
-  expect(send.bottom).toBeLessThanOrEqual(strip.row.bottom + 1)
-
-  for (const control of strip.controls) {
-    expect(control.box.left).toBeGreaterThanOrEqual(strip.group.left - 1)
-    expect(control.box.right).toBeLessThanOrEqual(strip.group.right + 1)
-    expect(control.clipped).toBe(false)
-  }
-
-  expect(strip.scrollWidth).toBeLessThanOrEqual(strip.viewport + 1)
-  expect(strip.list?.height ?? -1).toBeGreaterThanOrEqual(0.3 * strip.innerHeight)
-})
-
-const THINKING_FLOOR_WIDTH = 68
-const AGENT_FLOOR_WIDTH = 88
-
-const controlByLabel = (strip: StripMeasurement, label: string): ControlMeasurement => {
+const controlByLabel = (strip: ComposerMeasurement, label: string): ControlMeasurement => {
   const control = strip.controls.find((item) => item.label === label)
   expect(control).toBeDefined()
   return control as ControlMeasurement
 }
 
-const expectSecondarySelectorsReadable = (strip: StripMeasurement) => {
+const expectSelectorsReadable = (strip: ComposerMeasurement) => {
   for (const [label, floor, spanFloor] of [
     ['Thinking', THINKING_FLOOR_WIDTH, 34],
     ['Agent', AGENT_FLOOR_WIDTH, 53.5],
@@ -688,7 +537,91 @@ const expectSecondarySelectorsReadable = (strip: StripMeasurement) => {
   }
 }
 
-test('a session folder never squeezes the primary line', async ({ page }, testInfo) => {
+const logComposer = (name: string, strip: ComposerMeasurement) =>
+  console.log(
+    `[${name}] viewport=${strip.viewport} ` +
+      `capsule=${Math.round(strip.capsule.width)}x${Math.round(strip.capsule.height)} ` +
+      `chips=${strip.chips ? `${Math.round(strip.chips.width)}x${Math.round(strip.chips.height)}` : 'none'} ` +
+      `controls=${strip.controls.map(describeControl).join(' ')} ` +
+      `chip=${Math.round(strip.chip?.box.width ?? -1)}px label=${JSON.stringify(strip.chip?.label.text)} ` +
+      `labelTruncated=${strip.chip?.label.truncated} ` +
+      `send=${strip.send ? `${Math.round(strip.send.width)}x${Math.round(strip.send.height)}` : 'none'} ` +
+      `overlaps=${strip.overlaps.join(',') || 'none'} ` +
+      `list=${Math.round(strip.list?.height ?? -1)}px innerHeight=${strip.innerHeight} ` +
+      `scrollWidth=${strip.scrollWidth}`,
+  )
+
+test('the input capsule keeps the textarea and the send action on one row', async ({
+  page,
+}, testInfo) => {
+  await openChat(page)
+
+  const strip = await measureComposer(page)
+  expect(strip).not.toBeNull()
+  if (!strip) return
+
+  await attach(page, testInfo, `capsule-${testInfo.project.name}`)
+  logComposer(`capsule ${testInfo.project.name}`, strip)
+
+  const send = strip.send
+  expect(send).not.toBeNull()
+  if (!send) return
+
+  expect(strip.capsuleWraps).toBe(false)
+  expect(send.height).toBeLessThanOrEqual(strip.capsule.height - 8)
+  expect(strip.capsule.height).toBeLessThanOrEqual(50)
+  expect(send.width).toBeGreaterThanOrEqual(36)
+  expect(send.height).toBeGreaterThanOrEqual(36)
+  expect(send.left).toBeGreaterThanOrEqual(strip.capsule.left - 1)
+  expect(send.right).toBeLessThanOrEqual(strip.capsule.right + 1)
+  expect(send.bottom).toBeLessThanOrEqual(strip.capsule.bottom + 1)
+  expect(strip.sendOverlapsTextarea).toBe(false)
+  expect(strip.scrollWidth).toBeLessThanOrEqual(strip.viewport + 1)
+})
+
+test('the selector chips stay readable pills below the capsule', async ({ page }, testInfo) => {
+  await openChat(page, { multipleAgents: true, reasoning: true })
+
+  for (const label of SELECTOR_LABELS) {
+    await expect(page.locator(`main form button[aria-label="${label}"]`)).toBeVisible({
+      timeout: 15_000,
+    })
+  }
+
+  const strip = await measureComposer(page)
+  expect(strip).not.toBeNull()
+  if (!strip) return
+
+  await attach(page, testInfo, `chips-${testInfo.project.name}`)
+  logComposer(`chips ${testInfo.project.name}`, strip)
+
+  const chips = strip.chips
+  expect(chips).not.toBeNull()
+  if (!chips) return
+
+  expect(strip.chipsWraps).toBe(true)
+  expect(chips.top).toBeGreaterThanOrEqual(strip.capsule.bottom)
+  expect(strip.controls).toHaveLength(3)
+  expect(strip.overlaps).toEqual([])
+
+  for (const control of strip.controls) {
+    expect(control.clipped).toBe(false)
+    expect(control.box.left).toBeGreaterThanOrEqual(chips.left - 1)
+    expect(control.box.right).toBeLessThanOrEqual(chips.right + 1)
+    expect(control.box.bottom).toBeLessThanOrEqual(chips.bottom + 1)
+  }
+
+  const model = controlByLabel(strip, 'Model')
+  expect(model.trigger?.width ?? 0).toBeGreaterThanOrEqual(strip.viewport <= 320 ? 110 : 130)
+  expect(model.truncated).toBe(false)
+  expectSelectorsReadable(strip)
+
+  expect(chips.height).toBeLessThanOrEqual(92)
+  expect(strip.list?.height ?? -1).toBeGreaterThanOrEqual(0.3 * strip.innerHeight)
+  expect(strip.scrollWidth).toBeLessThanOrEqual(strip.viewport + 1)
+})
+
+test('a session folder never squeezes the model chip', async ({ page }, testInfo) => {
   await openChat(page, { multipleAgents: true, reasoning: true, folder: SESSION_FOLDER })
 
   for (const label of SELECTOR_LABELS) {
@@ -700,58 +633,31 @@ test('a session folder never squeezes the primary line', async ({ page }, testIn
     timeout: 15_000,
   })
 
-  const strip = await measureStrip(page)
+  const strip = await measureComposer(page)
   expect(strip).not.toBeNull()
   if (!strip) return
 
-  await attach(page, testInfo, `folder-strip-${testInfo.project.name}`)
-
-  console.log(
-    `[folder-strip ${testInfo.project.name}] viewport=${strip.viewport} ` +
-      `row=${Math.round(strip.row.width)}px group=${Math.round(strip.group.width)}x${Math.round(strip.group.height)} ` +
-      `tier2Top=${strip.secondTier ? Math.round(strip.secondTier.top) : 'none'} ` +
-      `controls=${strip.controls.map((control) => describeControl(control, strip.secondTier)).join(' ')} ` +
-      `chip=${Math.round(strip.chip?.box.width ?? -1)}px label=${JSON.stringify(strip.chip?.label.text)} ` +
-      `labelTruncated=${strip.chip?.label.truncated} ` +
-      `send=${strip.send ? `${Math.round(strip.send.width)}x${Math.round(strip.send.height)} line=${lineOfBox(strip.send, strip.secondTier)}` : 'none'} ` +
-      `overlaps=${strip.overlaps.join(',') || 'none'} ` +
-      `list=${Math.round(strip.list?.height ?? -1)}px innerHeight=${strip.innerHeight} ` +
-      `scrollWidth=${strip.scrollWidth}`,
-  )
+  await attach(page, testInfo, `folder-chips-${testInfo.project.name}`)
+  logComposer(`folder-chips ${testInfo.project.name}`, strip)
 
   expect(strip.overlaps).toEqual([])
-  expect(strip.controls).toHaveLength(5)
-  expect(strip.secondTier).not.toBeNull()
-  const secondTier = strip.secondTier
-  const send = strip.send
   const chip = strip.chip
-  if (!secondTier || !send || !chip) return
+  const send = strip.send
+  if (!chip || !send) return
 
   const model = controlByLabel(strip, 'Model')
-  const thinking = controlByLabel(strip, 'Thinking')
-  const agent = controlByLabel(strip, 'Agent')
-
-  expect(lineOf(model, secondTier)).toBe(1)
-  expect(model.trigger?.width ?? 0).toBeGreaterThanOrEqual(110)
-  expect(model.spanWidth).toBeGreaterThan(40)
-  expect(model.clipped).toBe(false)
-
-  expect(Math.round(send.width)).toBe(44)
-  expect(Math.round(send.height)).toBe(44)
-  expect(lineOfBox(send, secondTier)).toBe(1)
-  expect(send.right).toBeLessThanOrEqual(strip.row.right + 1)
-
-  expectSecondarySelectorsReadable(strip)
-
-  expect(chip.box.top).toBeGreaterThanOrEqual(secondTier.top - 1)
-  expect(Math.abs(chip.box.left - secondTier.left)).toBeLessThanOrEqual(1)
-  expect(chip.box.right).toBeLessThanOrEqual(strip.group.right + 1)
-  expect(chip.label.box).not.toBeNull()
-  expect((chip.label.box?.width ?? 0) > 0).toBe(true)
+  if (strip.viewport <= 360) {
+    expect(chip.box.bottom).toBeLessThanOrEqual(model.box.top - 1)
+  }
+  expect(chip.box.width).toBeLessThanOrEqual(FOLDER_CHIP_MAX_WIDTH + 0.5)
   expect(chip.label.truncated).toBe(true)
-  expect(chip.box.width).toBeLessThanOrEqual(200.5)
-  expect(chip.box.bottom).toBeLessThanOrEqual(thinking.box.top - 1)
-  expect(chip.box.bottom).toBeLessThanOrEqual(agent.box.top - 1)
+  expect(model.trigger?.width ?? 0).toBeGreaterThanOrEqual(110)
+  expect(model.clipped).toBe(false)
+  expectSelectorsReadable(strip)
+
+  expect(Math.round(send.width)).toBe(36)
+  expect(Math.round(send.height)).toBe(36)
+  expect(send.right).toBeLessThanOrEqual(strip.capsule.right + 1)
 
   expect(strip.scrollWidth).toBeLessThanOrEqual(strip.viewport + 1)
   expect(strip.list?.height ?? -1).toBeGreaterThanOrEqual(0.3 * strip.innerHeight)
@@ -774,21 +680,19 @@ test('a session folder and a long draft still leave the list room', async ({ pag
   const textareaHeight = await page
     .locator('main form textarea')
     .evaluate((el) => el.getBoundingClientRect().height)
-  const strip = await measureStrip(page)
+  const strip = await measureComposer(page)
   const shell = await measure(page)
   expect(strip).not.toBeNull()
   if (!strip) return
 
   await attach(page, testInfo, `folder-long-draft-${testInfo.project.name}`)
+  logComposer(`folder-long-draft ${testInfo.project.name}`, strip)
 
   console.log(
-    `[folder-long-draft ${testInfo.project.name}] viewport=${strip.viewport} ` +
-      `composer=${Math.round(shell.composer?.height ?? -1)}px ` +
+    `[folder-long-draft ${testInfo.project.name}] composer=${Math.round(shell.composer?.height ?? -1)}px ` +
       `(${(((shell.composer?.height ?? 0) / strip.innerHeight) * 100).toFixed(1)}%) ` +
-      `textarea=${Math.round(textareaHeight)}px list=${Math.round(strip.list?.height ?? -1)}px ` +
-      `chip=${Math.round(strip.chip?.box.width ?? -1)}px ` +
-      `chipOwnLine=${(strip.chip?.box.bottom ?? 0) <= controlByLabel(strip, 'Thinking').box.top - 1} ` +
-      `scrollWidth=${strip.scrollWidth}`,
+      `textarea=${Math.round(textareaHeight)}px ` +
+      `chipOwnLine=${(strip.chip?.box.bottom ?? 0) <= controlByLabel(strip, 'Model').box.top - 1}`,
   )
 
   expect(textareaHeight).toBeLessThanOrEqual(0.35 * strip.innerHeight)
@@ -798,17 +702,16 @@ test('a session folder and a long draft still leave the list room', async ({ pag
   expect(shell.composer?.top ?? -1).toBeGreaterThanOrEqual(0)
 
   expect(strip.overlaps).toEqual([])
-  expectSecondarySelectorsReadable(strip)
+  expect(strip.sendOverlapsTextarea).toBe(false)
+  expectSelectorsReadable(strip)
 
   const chip = strip.chip
-  const secondTier = strip.secondTier
   expect(chip).not.toBeNull()
-  expect(secondTier).not.toBeNull()
-  if (!chip || !secondTier) return
+  if (!chip) return
 
   expect(chip.label.truncated).toBe(true)
-  expect(chip.box.width).toBeLessThanOrEqual(200.5)
-  expect(chip.box.bottom).toBeLessThanOrEqual(controlByLabel(strip, 'Thinking').box.top - 1)
+  expect(chip.box.width).toBeLessThanOrEqual(FOLDER_CHIP_MAX_WIDTH + 0.5)
+  expect(controlByLabel(strip, 'Model').trigger?.width ?? 0).toBeGreaterThanOrEqual(110)
 
   expect(strip.scrollWidth).toBeLessThanOrEqual(strip.viewport + 1)
   expect(strip.list?.height ?? -1).toBeGreaterThanOrEqual(0.25 * strip.innerHeight)

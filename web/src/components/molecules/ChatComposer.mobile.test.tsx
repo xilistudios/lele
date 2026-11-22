@@ -81,7 +81,6 @@ function baseChatPageCtx(): MockCtx {
 
 const REASONING_CHAT_PAGE_CTX: MockCtx = {
   ...baseChatPageCtx(),
-  availableModels: [{ value: 'gpt-4', label: 'gpt-4' }],
   groupedModels: [
     {
       label: 'Reasoning',
@@ -98,6 +97,8 @@ const TWO_AGENTS: MockCtx = {
   ],
   currentAgent: { id: 'main', name: 'Main Agent' },
 }
+
+const SESSION_FOLDER = '/home/user/projects/lele'
 
 const visibleMetrics: StreamMetrics = {
   tokens: 120,
@@ -128,47 +129,37 @@ function contains(el: Element | null, ...tokens: string[]) {
   for (const token of tokens) expect(classes).toContain(token)
 }
 
-const hasClass = (el: Element, token: string) => classesOf(el).includes(token)
+const capsuleOf = (container: HTMLElement) =>
+  (container.querySelector('[data-testid="composer-capsule"]') as HTMLElement | null) ?? null
+
+const chipsOf = (container: HTMLElement) =>
+  (container.querySelector('[data-testid="composer-chips"]') as HTMLElement | null) ?? null
+
+const textareaOf = (container: HTMLElement) =>
+  (container.querySelector('textarea') as HTMLTextAreaElement | null) ?? null
 
 const sendButtonOf = (container: HTMLElement) =>
   (container.querySelector('button[type="submit"]') as HTMLElement | null) ?? null
 
-const controlsRowOf = (container: HTMLElement) => sendButtonOf(container)?.parentElement ?? null
+const folderButtonOf = (container: HTMLElement) =>
+  (container.querySelector(`button[aria-label="${label('addFolder')}"]`) as HTMLElement | null) ??
+  null
 
-const controlGroupOf = (container: HTMLElement) => {
-  const row = controlsRowOf(container)
-  const group = Array.from(row?.children ?? []).find((el) => hasClass(el, 'flex-wrap'))
-  return (group as HTMLElement | undefined) ?? null
-}
+const attachButtonOf = (container: HTMLElement) =>
+  (container.querySelector(`button[aria-label="${label('attachFiles')}"]`) as HTMLElement | null) ??
+  null
+
+const metricChipOf = (container: HTMLElement) =>
+  (Array.from(container.querySelectorAll('span')).find((el) =>
+    (el.textContent ?? '').includes('tok/s'),
+  ) as HTMLElement | undefined) ?? null
 
 const selectRootOf = (container: HTMLElement, ariaLabel: string) =>
   (container.querySelector(`button[aria-label="${ariaLabel}"]`)
     ?.parentElement as HTMLElement | null) ?? null
 
-const tierWrapperOf = (container: HTMLElement) =>
-  (Array.from(container.querySelectorAll('div')).find(
-    (el) => hasClass(el, 'max-md:basis-full') && hasClass(el, 'md:contents'),
-  ) as HTMLElement | undefined) ?? null
-
-const toolbarRowOf = (container: HTMLElement) =>
-  (Array.from(container.querySelectorAll('div')).find((el) => hasClass(el, 'max-md:hidden')) as
-    | HTMLElement
-    | undefined) ?? null
-
 const folderChipsOf = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('[data-testid="folder-chip"]')) as HTMLElement[]
-
-const toolbarChipOf = (container: HTMLElement) =>
-  folderChipsOf(container).find((chip) => toolbarRowOf(container)?.contains(chip)) ?? null
-
-const tierChipBoxOf = (container: HTMLElement) =>
-  (Array.from(container.querySelectorAll('div')).find(
-    (el) => hasClass(el, 'max-md:basis-full') && hasClass(el, 'md:hidden'),
-  ) as HTMLElement | undefined) ?? null
-
-const tierChipOf = (container: HTMLElement) =>
-  (tierChipBoxOf(container)?.querySelector('[data-testid="folder-chip"]') as HTMLElement | null) ??
-  null
 
 beforeEach(() => {
   mockAppCtxReturn = baseAppCtx()
@@ -177,20 +168,71 @@ beforeEach(() => {
   mockSlashCommandsReturn = { commands: [], loading: false, error: null }
 })
 
-describe('ChatComposer — mobile controls row', () => {
-  test('the group dissolves at md and never goes nowrap on mobile', () => {
+describe('ChatComposer — capsule input', () => {
+  test('the input row is a single non-wrapping capsule holding the textarea and the send action', () => {
     const { container } = renderComposer()
-    const group = controlGroupOf(container)
-    expect(group).not.toBeNull()
-    contains(group, 'flex-wrap', 'gap-2', 'min-w-0', 'flex-1', 'md:contents')
-    expect(classesOf(group)).not.toContain('sm:contents')
-    for (const el of container.querySelectorAll('*')) {
-      expect(classesOf(el)).not.toContain('max-md:flex-nowrap')
+    const capsule = capsuleOf(container)
+    const textarea = textareaOf(container)
+    const send = sendButtonOf(container)
+
+    expect(capsule).not.toBeNull()
+    expect(textarea).not.toBeNull()
+    expect(send).not.toBeNull()
+
+    contains(capsule, 'flex', 'items-center', 'rounded-full')
+    expect(classesOf(capsule)).not.toContain('flex-wrap')
+    expect(classesOf(capsule)).not.toContain('max-md:flex-nowrap')
+
+    expect(capsule?.contains(textarea ?? null)).toBe(true)
+    expect(capsule?.contains(send ?? null)).toBe(true)
+    expect(send?.parentElement).toBe(capsule)
+    expect(textarea?.parentElement).toBe(capsule)
+  })
+
+  test('the textarea grows inside the capsule and stays capped against the mobile viewport', () => {
+    const { container } = renderComposer()
+    const textarea = textareaOf(container)
+
+    contains(textarea, 'min-w-0', 'flex-1', 'max-h-[200px]', 'max-md:max-h-[min(200px,30dvh)]')
+  })
+
+  test('every capsule action is a centered circle capped to the input height', () => {
+    const { container } = renderComposer()
+    const capsule = capsuleOf(container)
+
+    for (const control of [
+      folderButtonOf(container),
+      attachButtonOf(container),
+      sendButtonOf(container),
+    ]) {
+      expect(control).not.toBeNull()
+      contains(control, 'h-9', 'w-9', 'flex', 'items-center', 'justify-center')
+      expect(classesOf(control)).toContain('rounded-full')
+      expect(capsule?.contains(control ?? null)).toBe(true)
+      for (const oversized of ['h-11', 'w-11', 'h-10', 'w-10', 'h-12', 'w-12']) {
+        expect(classesOf(control)).not.toContain(oversized)
+      }
+    }
+  })
+
+  test('the input line sets the height of the row, not the actions', () => {
+    const { container } = renderComposer()
+    const textarea = textareaOf(container)
+    const capsule = capsuleOf(container)
+
+    contains(textarea, 'min-h-[36px]', 'py-[9px]')
+    expect(classesOf(capsule)).not.toContain('min-h')
+    for (const control of [
+      folderButtonOf(container),
+      attachButtonOf(container),
+      sendButtonOf(container),
+    ]) {
+      expect(classesOf(control ?? null)).not.toContain('min-h-[36px]')
     }
   })
 
   test('no element mixes a max-md utility with an sm boundary', () => {
-    mockAppCtxReturn = { ...TWO_AGENTS, sessionFolder: '/home/user/projects/lele' }
+    mockAppCtxReturn = { ...TWO_AGENTS, sessionFolder: SESSION_FOLDER }
     mockChatPageCtxReturn = REASONING_CHAT_PAGE_CTX
     const { container } = renderComposer()
     for (const el of container.querySelectorAll('*')) {
@@ -199,187 +241,112 @@ describe('ChatComposer — mobile controls row', () => {
       if (tiered) expect(classes).not.toContain('sm:contents')
       expect(classes).not.toContain('sm:basis-full')
     }
-    for (const el of [controlGroupOf(container), tierWrapperOf(container)]) {
-      contains(el ?? null, 'md:contents')
-    }
+  })
+})
+
+describe('ChatComposer — selector chips', () => {
+  test('the chips strip sits under the capsule and wraps instead of scrolling', () => {
+    const { container } = renderComposer()
+    const form = container.querySelector('form')
+    const chips = chipsOf(container)
+    const capsule = capsuleOf(container)
+
+    expect(chips).not.toBeNull()
+    expect(chips?.parentElement).toBe(form)
+    contains(chips, 'flex', 'flex-wrap', 'items-center', 'gap-1.5')
+    expect(classesOf(chips)).not.toContain('flex-nowrap')
+    expect(chips?.contains(capsule ?? null)).toBe(false)
   })
 
-  test('the desktop control row keeps the single wrapping row the composer always had', () => {
+  test('the model select is a direct child of the strip and takes the leftover width', () => {
     const { container } = renderComposer()
-    const row = controlsRowOf(container)
-    contains(row, 'flex', 'flex-wrap', 'items-center', 'gap-2', 'px-3', 'pb-2', 'pt-1', 'sm:gap-3')
-    expect(classesOf(row)).not.toContain('flex-nowrap')
-    expect(classesOf(row)).not.toContain('max-md:flex-nowrap')
-  })
-
-  test('the send button is not a descendant of the wrapping group', () => {
-    const { container } = renderComposer()
-    const row = controlsRowOf(container)
-    const group = controlGroupOf(container)
-    const send = sendButtonOf(container)
-    expect(row?.children.length).toBe(2)
-    expect(row?.children[0] === group).toBe(true)
-    expect(row?.children[1] === send).toBe(true)
-    expect(group).not.toBeNull()
-    expect(send).not.toBeNull()
-    expect(group?.contains(send ?? null)).toBe(false)
-    expect(send?.parentElement).toBe(controlsRowOf(container))
-  })
-
-  test('the model select is a direct child of the group and takes the leftover width', () => {
-    const { container } = renderComposer()
-    const group = controlGroupOf(container)
+    const chips = chipsOf(container)
     const model = selectRootOf(container, label('model'))
+
     expect(model).not.toBeNull()
-    expect(model?.parentElement).toBe(group)
-    contains(model, 'max-md:min-w-0', 'max-md:flex-1')
+    expect(model?.parentElement).toBe(chips)
+    contains(model, 'min-w-0', 'flex-1', 'basis-[132px]')
   })
 
-  test('thinking and agent share one full-width tier on mobile and dissolve on desktop', () => {
+  test('only the model select renders when no reasoning, agent or folder is set', () => {
+    const { container } = renderComposer()
+    const chips = chipsOf(container)
+
+    expect(selectRootOf(container, label('thinking'))).toBeNull()
+    expect(selectRootOf(container, label('agent'))).toBeNull()
+    expect(folderChipsOf(container)).toHaveLength(0)
+    expect(chips?.querySelectorAll('button[aria-label]').length).toBe(1)
+  })
+
+  test('thinking and agent are content-width pills that never squeeze the model', () => {
     mockAppCtxReturn = TWO_AGENTS
     mockChatPageCtxReturn = REASONING_CHAT_PAGE_CTX
     const { container } = renderComposer()
+    const chips = chipsOf(container)
 
-    const wrapper = tierWrapperOf(container)
-    expect(wrapper).not.toBeNull()
-    contains(wrapper, 'max-md:basis-full', 'max-md:flex', 'md:contents')
-    expect(classesOf(wrapper)).not.toContain('sm:contents')
-    expect(wrapper?.parentElement).toBe(controlGroupOf(container))
-
-    const thinking = selectRootOf(container, label('thinking'))
-    const agent = selectRootOf(container, label('agent'))
-    expect(thinking?.parentElement).toBe(wrapper)
-    expect(agent?.parentElement).toBe(wrapper)
-
-    for (const root of [thinking, agent]) {
-      contains(root, 'max-md:min-w-0')
-      expect(classesOf(root)).not.toContain('max-md:flex-1')
+    for (const ariaLabel of [label('thinking'), label('agent')]) {
+      const root = selectRootOf(container, ariaLabel)
+      expect(root).not.toBeNull()
+      expect(root?.parentElement).toBe(chips)
+      contains(root, 'min-w-0', 'flex-none')
+      expect(classesOf(root)).not.toContain('flex-1')
+      contains(root?.querySelector('button') ?? null, 'rounded-full')
     }
-    contains(tierWrapperOf(container), 'max-md:items-center', 'max-md:gap-2')
   })
+})
 
-  test('the second tier is not rendered when neither secondary selector nor a folder is set', () => {
+describe('ChatComposer — folder chip', () => {
+  test('a session folder renders one chip in the strip and none inside the capsule', () => {
+    mockAppCtxReturn = { ...baseAppCtx(), sessionFolder: SESSION_FOLDER }
     const { container } = renderComposer()
-    expect(tierWrapperOf(container)).toBeNull()
-    expect(selectRootOf(container, label('thinking'))).toBeNull()
-    expect(selectRootOf(container, label('agent'))).toBeNull()
-  })
+    const chips = chipsOf(container)
+    const capsule = capsuleOf(container)
 
-  test('a folder alone still gets the second tier', () => {
-    mockAppCtxReturn = { ...baseAppCtx(), sessionFolder: '/home/user/projects/lele' }
-    const { container } = renderComposer()
-    const wrapper = tierWrapperOf(container)
-    expect(wrapper).not.toBeNull()
-    const chipBox = tierChipBoxOf(container)
-    expect(chipBox).not.toBeNull()
-    expect(tierChipOf(container)).not.toBeNull()
-  })
-
-  test('the send button keeps its desktop size and grows to a touch target on mobile', () => {
-    const { container } = renderComposer()
-    const send = sendButtonOf(container)
-    contains(send, 'h-9', 'w-9', 'max-md:h-11', 'max-md:w-11', 'flex-shrink-0')
-  })
-
-  test('the folder controls live in the wrapping group on mobile', () => {
-    const { container } = renderComposer()
-    expect(classesOf(toolbarRowOf(container))).toContain('max-md:hidden')
-    const group = controlGroupOf(container)
-    const folderButton = Array.from(group?.querySelectorAll('button') ?? []).find((button) =>
-      hasClass(button, 'md:hidden'),
-    )
-    expect(folderButton).toBeDefined()
-    contains(folderButton ?? null, 'md:hidden', 'max-md:h-11', 'max-md:w-11')
-  })
-
-  test('the folder chip rides the second tier, ahead of the selectors', () => {
-    mockAppCtxReturn = { ...TWO_AGENTS, sessionFolder: '/home/user/projects/lele' }
-    mockChatPageCtxReturn = REASONING_CHAT_PAGE_CTX
-    const { container } = renderComposer()
-    const wrapper = tierWrapperOf(container)
-    expect(folderChipsOf(container).length).toBe(2)
-
-    const chipBox = tierChipBoxOf(container)
-    expect(chipBox?.parentElement).toBe(wrapper)
-    expect(wrapper?.children[0] ?? null).toBe(chipBox)
-
-    const mobileChip = tierChipOf(container)
-    expect(mobileChip).not.toBeNull()
-    contains(mobileChip, 'min-w-0', 'max-md:max-w-[200px]')
-
-    const desktopChip = toolbarChipOf(container)
-    expect(desktopChip).not.toBeNull()
-    contains(desktopChip, 'max-w-[180px]')
-    expect(desktopChip?.closest('[data-testid="folder-chip"]')).toBe(desktopChip as HTMLElement)
-  })
-
-  test('the folder chip takes a line of its own on the second tier', () => {
-    mockAppCtxReturn = { ...TWO_AGENTS, sessionFolder: '/home/user/projects/lele' }
-    mockChatPageCtxReturn = REASONING_CHAT_PAGE_CTX
-    const { container } = renderComposer()
-    const wrapper = tierWrapperOf(container)
-    contains(wrapper, 'max-md:flex-wrap')
-
-    const chipBox = tierChipBoxOf(container)
-    contains(chipBox, 'max-md:basis-full', 'md:hidden')
-    for (const root of [
-      selectRootOf(container, label('thinking')),
-      selectRootOf(container, label('agent')),
-    ]) {
-      expect(classesOf(root)).not.toContain('max-md:basis-full')
-    }
-    expect(classesOf(chipBox)).not.toContain('max-md:shrink-[2]')
-  })
-
-  test('the folder button stays on the primary line', () => {
-    mockAppCtxReturn = { ...baseAppCtx(), sessionFolder: '/home/user/projects/lele' }
-    const { container } = renderComposer()
-    const group = controlGroupOf(container)
-    const wrapper = tierWrapperOf(container)
-    const folderButton = group?.querySelector(`button[aria-label="${label('addFolder')}"]`) ?? null
-    expect(folderButton).not.toBeNull()
-    expect(folderButton?.parentElement).toBe(group)
-    expect(wrapper?.contains(folderButton ?? null)).toBe(false)
-  })
-
-  test('the folder chip is rendered in both rows when a folder is set', () => {
-    mockAppCtxReturn = { ...baseAppCtx(), sessionFolder: '/home/user/projects/lele' }
-    const { container } = renderComposer()
-    expect(folderChipsOf(container).length).toBe(2)
-    const mobileChip = tierChipOf(container)
-    expect(mobileChip).not.toBeNull()
-    contains(mobileChip, 'max-md:max-w-[200px]')
-    expect(mobileChip?.closest('[data-testid="folder-chip"]')).toBe(mobileChip as HTMLElement)
-    const desktopChip = toolbarChipOf(container)
-    expect(desktopChip).not.toBeNull()
-    contains(desktopChip, 'max-w-[180px]')
-  })
-
-  test('both ml-auto anchors survive (chip inside the group, send outside it)', () => {
-    const { container } = renderComposer(visibleMetrics)
-    const send = sendButtonOf(container)
-    contains(send, 'ml-auto')
-    const group = controlGroupOf(container)
-    const chip = Array.from(group?.querySelectorAll('*') ?? []).find((el) =>
-      hasClass(el, 'ml-auto'),
-    )
+    const [chip] = folderChipsOf(container)
+    expect(folderChipsOf(container)).toHaveLength(1)
     expect(chip).toBeDefined()
-    expect(group?.querySelectorAll('.ml-auto').length).toBe(1)
+    expect(chip.parentElement).toBe(chips)
+    expect(capsule?.contains(chip)).toBe(false)
+    expect(chips?.children[0]).toBe(chip)
   })
 
-  test('the textarea is capped against the mobile viewport', () => {
+  test('the chip takes a line of its own on mobile and caps its width on desktop', () => {
+    mockAppCtxReturn = { ...baseAppCtx(), sessionFolder: SESSION_FOLDER }
     const { container } = renderComposer()
-    const textarea = container.querySelector('textarea')
-    contains(textarea, 'max-h-[200px]', 'max-md:max-h-[min(200px,30dvh)]')
+    const [chip] = folderChipsOf(container)
+
+    contains(chip, 'min-w-0', 'max-w-[200px]', 'max-md:basis-full')
+    for (const root of [selectRootOf(container, label('model'))]) {
+      expect(classesOf(root ?? null)).not.toContain('max-md:basis-full')
+    }
   })
 
-  test('the attach button keeps a 44px touch target inside the group', () => {
+  test('the folder button stays in the capsule next to the attach action', () => {
+    mockAppCtxReturn = { ...baseAppCtx(), sessionFolder: SESSION_FOLDER }
     const { container } = renderComposer()
-    const group = controlGroupOf(container)
-    const attach = group?.querySelector(`button[aria-label="${label('attachFiles')}"]`) ?? null
-    expect(attach).not.toBeNull()
-    contains(attach, 'max-md:h-11', 'max-md:w-11')
-    expect(attach?.closest('.relative')).not.toBeNull()
-    expect(group?.contains(attach ?? null)).toBe(true)
+    const capsule = capsuleOf(container)
+    const folderButton = folderButtonOf(container)
+
+    expect(folderButton?.parentElement).toBe(capsule)
+    expect(folderButton?.nextElementSibling?.contains(attachButtonOf(container) ?? null)).toBe(true)
+  })
+})
+
+describe('ChatComposer — metrics chip', () => {
+  test('the rate rides the end of the chips strip', () => {
+    const { container } = renderComposer(visibleMetrics)
+    const chips = chipsOf(container)
+    const chip = metricChipOf(container)
+
+    expect(chip).not.toBeNull()
+    contains(chip, 'ml-auto')
+    expect(chips?.contains(chip ?? null)).toBe(true)
+    expect(chips?.querySelectorAll('.ml-auto').length).toBe(1)
+  })
+
+  test('no chip is rendered before the first token of a turn', () => {
+    const { container } = renderComposer()
+    expect(metricChipOf(container)).toBeNull()
+    expect(sendButtonOf(container)).not.toBeNull()
   })
 })

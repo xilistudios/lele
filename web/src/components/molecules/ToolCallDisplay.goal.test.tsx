@@ -42,10 +42,9 @@ describe('ToolCallDisplay for tool "goal"', () => {
   })
 
   test('tints the icon with the accent color token', () => {
-    const { container } = renderGoal()
+    const { getByTestId } = renderGoal()
 
-    const iconBox = container.querySelector('div.rounded-md')
-    expect(iconBox?.className).toContain('text-accent-primary')
+    expect(getByTestId('tool-icon').className).toContain('text-accent-primary')
   })
 
   test('resolves the goal label in every shipped locale', () => {

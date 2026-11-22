@@ -1,8 +1,12 @@
 import type { ReactNode } from 'react'
 
-const variantStyles: Record<string, string> = {
+export type IconButtonVariant = 'default' | 'capsule' | 'nav' | 'nav-full' | 'danger' | 'ghost'
+
+const variantStyles: Record<IconButtonVariant, string> = {
   default:
     'rounded p-1.5 text-text-tertiary transition-colors hover:text-text-secondary hover:bg-surface-hover',
+  capsule:
+    'flex flex-shrink-0 items-center justify-center rounded-full text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary',
   nav: 'flex items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary',
   'nav-full':
     'flex items-center gap-2 w-full rounded-md px-2 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary',
@@ -16,7 +20,7 @@ type Props = {
   onClick?: () => void
   title?: string
   disabled?: boolean
-  variant?: 'default' | 'nav' | 'nav-full' | 'danger' | 'ghost'
+  variant?: IconButtonVariant
   className?: string
   ariaLabel?: string
   ariaExpanded?: boolean

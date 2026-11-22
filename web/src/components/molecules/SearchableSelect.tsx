@@ -13,6 +13,8 @@ type OptionGroup = {
 
 type Direction = 'up' | 'down'
 
+type Shape = 'default' | 'pill'
+
 type Props = {
   ariaLabel: string
   buttonLabel: string
@@ -26,10 +28,16 @@ type Props = {
   placeholder: string
   searchAriaLabel: string
   searchPlaceholder: string
+  shape?: Shape
   value: string
 }
 
 const ANIMATION_MS = 200
+
+const triggerShapeStyles: Record<Shape, string> = {
+  default: 'rounded-md px-2 py-1.5 sm:px-3 sm:py-2',
+  pill: 'rounded-full py-1.5 pl-3 pr-2.5 sm:py-2 sm:pl-3.5 sm:pr-3',
+}
 
 const formatDisplayValue = shortModelName
 
@@ -46,6 +54,7 @@ export function SearchableSelect({
   placeholder,
   searchAriaLabel,
   searchPlaceholder,
+  shape = 'default',
   value,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -215,7 +224,7 @@ export function SearchableSelect({
     <div ref={rootRef} className={`relative ${className ?? ''}`}>
       <button
         aria-label={ariaLabel}
-        className="flex w-full min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+        className={`flex w-full min-w-0 items-center gap-1.5 border border-border bg-background-primary text-xs text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2 sm:text-sm ${triggerShapeStyles[shape]}`}
         disabled={disabled}
         type="button"
         onClick={() => (isMounted ? close() : open())}

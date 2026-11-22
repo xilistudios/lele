@@ -73,15 +73,15 @@ export function GroupComposer() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border">
-        <div className={`h-0.5 w-full rounded-t-lg ${groupTheme.accentBar}`} />
+      <div className="rounded-3xl border border-border bg-background-secondary transition-colors focus-within:border-border">
+        <div className={`h-0.5 w-full rounded-t-3xl ${groupTheme.accentBar}`} />
 
         {hasExistingGroups && (
           <div className="flex items-center gap-2 px-4 pt-2">
             <button
               type="button"
               onClick={() => setIsNewGroupMode(false)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                 !isNewGroupMode
                   ? 'bg-mode-group/14 text-text-primary dark:text-mode-group'
                   : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-hover'
@@ -92,7 +92,7 @@ export function GroupComposer() {
             <button
               type="button"
               onClick={() => setIsNewGroupMode(true)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                 isNewGroupMode
                   ? 'bg-mode-group/14 text-text-primary dark:text-mode-group'
                   : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-hover'
@@ -106,7 +106,7 @@ export function GroupComposer() {
         {showNewGroupForm && hasProfiles && (
           <div className="px-4 pt-3">
             <select
-              className="w-full rounded-md border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-border disabled:opacity-40"
+              className="w-full rounded-full border border-border bg-background-primary px-4 py-2 text-sm text-text-primary outline-none focus:border-border disabled:opacity-40"
               value={selectedProfile}
               onChange={(e) => setSelectedProfile(e.target.value)}
             >
@@ -165,7 +165,7 @@ export function GroupComposer() {
                 type="button"
                 onClick={onCancel}
                 aria-label={t('groups.cancel')}
-                className="flex h-7 items-center justify-center rounded-md border border-state-error/30 bg-state-error/10 px-3 text-xs font-medium text-state-error transition-colors hover:bg-state-error-fill hover:text-text-on-accent"
+                className="flex h-8 items-center justify-center rounded-full border border-state-error/30 bg-state-error/10 px-3.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-fill hover:text-text-on-accent"
               >
                 {t('groups.cancel')}
               </button>
@@ -174,7 +174,7 @@ export function GroupComposer() {
                 type="submit"
                 disabled={!canSubmit}
                 aria-label={showNewGroupForm ? t('groups.start') : t('groups.send')}
-                className="flex h-7 items-center justify-center rounded-md bg-accent-primary px-3 text-xs font-medium text-text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex h-8 items-center justify-center rounded-full bg-accent-primary px-3.5 text-xs font-medium text-text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {showNewGroupForm ? t('groups.start') : t('groups.send')}
               </button>

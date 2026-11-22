@@ -264,7 +264,7 @@ export function ChatComposer() {
               return (
                 <div
                   key={attachment}
-                  className="relative group h-16 w-16 overflow-hidden rounded-lg border border-border bg-background-secondary transition-all hover:border-border shadow-sm"
+                  className="relative group h-16 w-16 overflow-hidden rounded-2xl border border-border bg-background-secondary transition-all hover:border-border shadow-sm"
                 >
                   <img
                     src={url}
@@ -291,7 +291,7 @@ export function ChatComposer() {
             return (
               <div
                 key={attachment}
-                className="relative group flex items-center h-16 max-w-[240px] min-w-[160px] gap-2 rounded-lg border border-border bg-background-secondary p-2 transition-all hover:border-border shadow-sm pr-8"
+                className="relative group flex items-center h-16 max-w-[240px] min-w-[160px] gap-2 rounded-2xl border border-border bg-background-secondary p-2 transition-all hover:border-border shadow-sm pr-8"
               >
                 <div className="h-12 w-10 bg-accent-primary/10 text-accent-primary rounded-md flex flex-col items-center justify-center border border-accent-primary/15 flex-shrink-0 select-none">
                   <svg
@@ -331,29 +331,40 @@ export function ChatComposer() {
           })}
         </div>
       )}
-      <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-accent-primary/40">
-        <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
-        <div className="flex items-center gap-1 px-2 pt-1.5 max-md:hidden">
-          <IconButton
-            onClick={() => setFolderPickerOpen(true)}
-            title={t('chat.addFolder')}
-            ariaLabel={t('chat.addFolder')}
-          >
-            <PlusIcon size={14} />
-          </IconButton>
-          {sessionFolder && <FolderChip folder={sessionFolder} onClear={onClearFolder} />}
-        </div>
-        {paletteOpen && (
+      {paletteOpen && (
+        <div className="mb-2">
           <SlashCommandMenu
             items={paletteItems}
             activeIndex={activePaletteIdx}
             onSelect={selectCommand}
             onHover={setPaletteIdx}
           />
-        )}
+        </div>
+      )}
+      <div
+        data-testid="composer-capsule"
+        className={`flex items-center gap-1 rounded-full border bg-background-secondary p-1 shadow-card transition-all duration-fast focus-within:ring-1 focus-within:ring-accent-primary/40 ${composerTheme.border}`}
+      >
+        <IconButton
+          variant="capsule"
+          onClick={() => setFolderPickerOpen(true)}
+          title={t('chat.addFolder')}
+          ariaLabel={t('chat.addFolder')}
+          className="h-9 w-9"
+        >
+          <PlusIcon size={16} />
+        </IconButton>
+        <div className="flex-shrink-0">
+          <AttachmentInput
+            variant="capsule"
+            onUpload={onUploadAttachments}
+            onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
+            className="h-9 w-9"
+          />
+        </div>
         <textarea
           ref={textareaRef}
-          className="min-h-[44px] max-h-[200px] max-md:max-h-[min(200px,30dvh)] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+          className="min-h-[36px] max-h-[200px] min-w-0 flex-1 resize-none bg-transparent px-2 py-[9px] text-sm text-text-primary outline-none placeholder:text-text-tertiary focus-visible:outline-none max-md:max-h-[min(200px,30dvh)]"
           placeholder={t('chat.messagePlaceholder')}
           value={draft}
           onChange={handleTextareaChange}
@@ -364,122 +375,96 @@ export function ChatComposer() {
           disabled={false}
           rows={1}
         />
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 max-md:gap-1.5 sm:gap-3">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-md:gap-1.5 md:contents">
-            <IconButton
-              onClick={() => setFolderPickerOpen(true)}
-              title={t('chat.addFolder')}
-              ariaLabel={t('chat.addFolder')}
-              className="md:hidden max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
+        <button
+          type={canCancel ? 'button' : 'submit'}
+          disabled={false}
+          aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
+          className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+            canCancel
+              ? 'border border-state-error/30 bg-state-error/10 text-state-error hover:bg-state-error-fill hover:text-text-on-accent'
+              : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'
+          }`}
+          onClick={canCancel ? onCancel : undefined}
+        >
+          {canCancel ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : (
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              aria-hidden="true"
             >
-              <PlusIcon size={14} />
-            </IconButton>
-            <AttachmentInput
-              onUpload={onUploadAttachments}
-              onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
-              className="max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
-            />
-            <SearchableSelect
-              className="max-md:min-w-0 max-md:flex-1"
-              ariaLabel={t('chat.model')}
-              buttonLabel={t('chat.model')}
-              emptyLabel={t('chat.default')}
-              groups={groupedModels}
-              onChange={onSelectModel}
-              options={groupedModels ? undefined : availableModels}
-              placeholder={selectedModel}
-              searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
-              searchPlaceholder={t('chat.model')}
-              value={selectedModel}
-            />
-            {(thinkingEnabled || agentsOptions.length > 1 || Boolean(sessionFolder)) && (
-              <div className="max-md:flex max-md:min-w-0 max-md:basis-full max-md:flex-wrap max-md:items-center max-md:gap-2 md:contents">
-                {sessionFolder && (
-                  <div className="max-md:basis-full md:hidden">
-                    <FolderChip
-                      folder={sessionFolder}
-                      onClear={onClearFolder}
-                      className="min-w-0 max-md:max-w-[200px]"
-                    />
-                  </div>
-                )}
-                {thinkingEnabled && (
-                  <SearchableSelect
-                    className="max-md:min-w-0"
-                    ariaLabel={t('chat.thinking')}
-                    buttonLabel={t('chat.thinking')}
-                    direction="up"
-                    emptyLabel={t('chat.thinkingOff')}
-                    onChange={onSelectThinkLevel}
-                    options={thinkOptions}
-                    placeholder={
-                      thinkOptions.find((o) => o.value === thinkLevel)?.label ??
-                      t('chat.thinkingOff')
-                    }
-                    searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
-                    searchPlaceholder={t('chat.thinking')}
-                    value={thinkLevel}
-                  />
-                )}
-                {agentsOptions.length > 1 && (
-                  <SearchableSelect
-                    className="max-md:min-w-0"
-                    ariaLabel={t('chat.agent')}
-                    buttonLabel={t('chat.agent')}
-                    disabled={hasConversation}
-                    emptyLabel={t('chat.agentLocked')}
-                    onChange={onSelectAgent}
-                    options={agentsOptions}
-                    placeholder={
-                      agentsOptions.find((a) => a.value === selectedAgentId)?.label ??
-                      t('chat.agent')
-                    }
-                    searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
-                    searchPlaceholder={t('chat.agent')}
-                    value={selectedAgentId}
-                  />
-                )}
-              </div>
-            )}
-            <StreamMetricsChip className="ml-auto" />
-          </div>
-          <button
-            type={canCancel ? 'button' : 'submit'}
-            disabled={false}
-            aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
-            className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors max-md:h-11 max-md:w-11 ${
-              canCancel
-                ? 'bg-state-error/10 text-state-error hover:bg-state-error-fill hover:text-text-on-accent border border-state-error/30'
-                : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'
-            }`}
-            onClick={canCancel ? onCancel : undefined}
-          >
-            {canCancel ? (
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-            ) : (
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                aria-hidden="true"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            )}
-          </button>
-        </div>
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+          )}
+        </button>
+      </div>
+      <div data-testid="composer-chips" className="mt-2 flex flex-wrap items-center gap-1.5 px-1">
+        {sessionFolder && (
+          <FolderChip
+            folder={sessionFolder}
+            onClear={onClearFolder}
+            className="min-w-0 max-w-[200px] max-md:basis-full"
+          />
+        )}
+        <SearchableSelect
+          className="min-w-0 flex-1 basis-[132px] max-w-[240px]"
+          shape="pill"
+          ariaLabel={t('chat.model')}
+          buttonLabel={t('chat.model')}
+          emptyLabel={t('chat.default')}
+          groups={groupedModels}
+          onChange={onSelectModel}
+          options={groupedModels ? undefined : availableModels}
+          placeholder={selectedModel}
+          searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
+          searchPlaceholder={t('chat.model')}
+          value={selectedModel}
+        />
+        {thinkingEnabled && (
+          <SearchableSelect
+            className="min-w-0 flex-none"
+            shape="pill"
+            ariaLabel={t('chat.thinking')}
+            buttonLabel={t('chat.thinking')}
+            direction="up"
+            emptyLabel={t('chat.thinkingOff')}
+            onChange={onSelectThinkLevel}
+            options={thinkOptions}
+            placeholder={
+              thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
+            }
+            searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
+            searchPlaceholder={t('chat.thinking')}
+            value={thinkLevel}
+          />
+        )}
+        {agentsOptions.length > 1 && (
+          <SearchableSelect
+            className="min-w-0 flex-none"
+            shape="pill"
+            ariaLabel={t('chat.agent')}
+            buttonLabel={t('chat.agent')}
+            disabled={hasConversation}
+            emptyLabel={t('chat.agentLocked')}
+            onChange={onSelectAgent}
+            options={agentsOptions}
+            placeholder={
+              agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
+            }
+            searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
+            searchPlaceholder={t('chat.agent')}
+            value={selectedAgentId}
+          />
+        )}
+        <StreamMetricsChip className="ml-auto pl-1" />
       </div>
       <FolderPickerModal
         open={folderPickerOpen}
