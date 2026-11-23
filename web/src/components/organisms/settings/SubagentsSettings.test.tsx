@@ -129,13 +129,14 @@ describe('SubagentsSettings — agent selector', () => {
   })
 
   test('the default selection writes to its own agent index', () => {
-    const u = setup()
+    const u = setup([{ id: '   ' }, CODER, RESEARCHER])
     expect(selectOf(u.container)?.value).toBe('researcher')
     fireEvent.click(u.getByLabelText(tr('settings.agentPage.subagentsEnable')))
-    expect(u.lastWrite('agents.list.1.subagents')).toEqual([
-      'agents.list.1.subagents',
+    expect(u.lastWrite('agents.list.2.subagents')).toEqual([
+      'agents.list.2.subagents',
       { allow_agents: [] },
     ])
+    expect(u.lastWrite('agents.list.1.subagents')).toBeUndefined()
     expect(u.lastWrite('agents.list.0.subagents')).toBeUndefined()
   })
 
