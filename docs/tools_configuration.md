@@ -289,6 +289,77 @@ Server configuration — `mcp.json` layers, `${VAR}` expansion, transports,
 usage counters (`<LeleDir>/mcp_usage.json`), security notes and limitations — is
 documented in `docs/mcp.md`.
 
+## Skill Discovery
+
+Skills come from three catalogs — the agent workspace, the global
+`<LeleDir>/skills` directory and the builtin skills bundled with lele — and the
+prompt inlines only the **5 most used** for the agent's ID (usage lives in
+`<LeleDir>/skills_usage.json`). Until usage accumulates that window is
+alphabetical, so a fresh install shows the first five skills by name. Three
+tools cover the rest of the catalog:
+
+| Tool | Arguments | Description |
+| --- | --- | --- |
+| `search_skill` | `query` (string, required), `limit` (integer, default 10, max 50) | Keyword search over names, descriptions and SKILL.md bodies, ranked by relevance |
+| `list_skills` | `page` (integer, default 1), `page_size` (integer, default 20, max 100) | One page of the catalog, no bodies, ordered most-used first |
+| `load_skill` | `skill` (string) or `skills` (array of strings), `unload` (boolean) | Loads the full SKILL.md instructions of those skills, or unpins them when `unload` is true |
+
+### Behavior
+
+- `search_skill` ranks name matches above description matches and both above
+  SKILL.md body matches, then breaks score ties by usage frequency and finally
+  alphabetically; the result carries names, one trimmed description line and an
+  absolute `location:` per skill — never a body.
+- `list_skills` paginates the catalog (20 per page, `page_size` up to 100);
+  an out-of-range `page` is clamped to the last page. Entries carry a
+  `(used N times)` marker once the skill has been loaded at least once.
+- Both listings exclude what is already in **this session's** context: the
+  top-5 window plus the skills pinned by this session. An exclusion is only
+  reported for a skill that will actually render, so a skill disabled or
+  deleted since it was loaded neither renders nor hides from `list_skills`.
+- `load_skill` pins the loaded skill to the **calling session** and returns the
+  bodies in the tool result (the system prompt is fixed at turn start, so a
+  mid-turn load is only usable same-turn through the result). Another chat of
+  the same agent sees nothing, and `/new` drops only the retired session's pins.
+- A session pins at most **8 skills / 32 KiB of SKILL.md text**. A load that
+  would exceed either cap is refused with a message naming the skills and the
+  unload call to make room; a partially accepted batch loads what fits.
+- Loading a skill that is already pinned is a no-op: no second copy of the body
+  and no extra usage count. Each newly pinned skill increments its usage
+  counter once.
+- `{"skill": "x", "unload": true}` (or `"skills": [...]`) removes a pin and
+  never touches the usage counters — they record how often a skill was loaded,
+  not how long it stays pinned. Unloading something that is not pinned is
+  reported, not an error.
+- Subagent runs receive the bodies and the usage count but never pin: a
+  subagent prompt renders no pins, so pinning there would inflate the session
+  that spawned it while telling the subagent nothing. The result says so.
+
+### Allowlist
+
+The three tools are gated individually by `tools` in `config.json`, and the
+`# Skills` prompt section only names the tools the allowlist keeps — an agent
+allowed only `search_skill` is never told about `list_skills` or `load_skill`,
+mirroring the MCP discovery tools. With the skill tools removed the prompt still
+lists the top-5 skills (they are context, not tools). The agent's `skills`
+filter and the workspace enabled/disabled settings apply to all three.
+
+### Example
+
+```text
+search_skill
+{"query": "dagu", "limit": 5}
+
+list_skills
+{"page": 2, "page_size": 10}
+
+load_skill
+{"skills": ["dagu", "lele"]}
+
+load_skill
+{"skill": "dagu", "unload": true}
+```
+
 ## Environment Variables
 
 Tool settings can be overridden with environment variables using the `LELE_TOOLS_*` prefix.
