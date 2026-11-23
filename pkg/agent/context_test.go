@@ -1285,6 +1285,7 @@ func TestGetInitialContext_WithMemory(t *testing.T) {
 }
 
 func TestGetInitialContext_WithSkills(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -1881,6 +1882,7 @@ func skillNamesInPrompt(t *testing.T, prompt string) []string {
 }
 
 func TestSetSkillsFilter_RestrictsPromptSkills(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	tmpDir, err := os.MkdirTemp("", "skills-filter-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -1925,6 +1927,7 @@ func TestSetSkillsFilter_RestrictsPromptSkills(t *testing.T) {
 }
 
 func TestSetSkillsFilter_InvalidatesCachedContext(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	tmpDir, err := os.MkdirTemp("", "skills-filter-invalidation-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)

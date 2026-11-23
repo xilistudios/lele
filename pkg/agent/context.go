@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -53,7 +54,10 @@ type ContextBuilder struct {
 
 	videoSupported bool
 
-	skillsFilter []string
+	skillsFilter    []string
+	skillUsage      *skills.UsageStore
+	skillUsageAgent string
+	loadedSkills    []string
 
 	folderResolver func(sessionKey string) string
 	folderMu       sync.RWMutex
@@ -63,6 +67,8 @@ type ContextBuilder struct {
 }
 
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
+
+const maxContextSkills = 5
 
 func getGlobalConfigDir() string {
 	return config.GetLeleDir()
@@ -190,6 +196,46 @@ func (cb *ContextBuilder) SkillsLoader() *skills.SkillsLoader {
 	return cb.skillsLoader
 }
 
+func (cb *ContextBuilder) SetSkillUsage(agentID string, store *skills.UsageStore) {
+	cb.initialMu.Lock()
+	cb.skillUsageAgent = agentID
+	cb.skillUsage = store
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+}
+
+func (cb *ContextBuilder) AddLoadedSkills(names []string) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	for _, name := range names {
+		if name == "" || slices.Contains(cb.loadedSkills, name) {
+			continue
+		}
+		cb.loadedSkills = append(cb.loadedSkills, name)
+	}
+	cb.initialContext = ""
+}
+
+func (cb *ContextBuilder) SkillsInContext() []string {
+	cb.initialMu.RLock()
+	filter := cb.skillsFilter
+	usage := cb.skillUsage
+	agentID := cb.skillUsageAgent
+	loaded := cb.loadedSkills
+	cb.initialMu.RUnlock()
+
+	var names []string
+	for _, s := range cb.skillsLoader.TopSkills(filter, usage.CountsFor(agentID), maxContextSkills) {
+		names = append(names, s.Name)
+	}
+	for _, name := range loaded {
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (cb *ContextBuilder) InvalidatePromptCache() {
 	cb.initialMu.Lock()
 	cb.initialContext = ""
@@ -225,13 +271,19 @@ func (cb *ContextBuilder) GetInitialContext() string {
 		parts = append(parts, bootstrapContent)
 	}
 
-	skillsSummary := cb.skillsLoader.BuildSkillsSummary(cb.skillsFilter)
+	skillsSummary := cb.skillsLoader.BuildTopSkillsSummary(cb.skillsFilter, cb.skillUsage.CountsFor(cb.skillUsageAgent), maxContextSkills)
 	if skillsSummary != "" {
 		parts = append(parts, fmt.Sprintf(`# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+The skills below are the ones this agent uses most. The catalog has more: use `+"`list_skills`"+` to browse it (most used first) or `+"`search_skill`"+` to find skills by keyword, and `+"`load_skill`"+` with {"skill": "<name>"} — or "skills": ["<a>", "<b>"] for several — to load their full instructions into the context.
 
 %s`, skillsSummary))
+	}
+
+	if len(cb.loadedSkills) > 0 {
+		if content := cb.skillsLoader.LoadSkillsForContext(cb.loadedSkills); content != "" {
+			parts = append(parts, "# Loaded Skills\n\n"+content)
+		}
 	}
 
 	if len(cb.availableSubagents) > 0 {
@@ -265,7 +317,7 @@ func (cb *ContextBuilder) getIdentity() string {
 
 	toolsSection := cb.buildToolsSection()
 
-	return fmt.Sprintf(`# lele 🦞
+	return fmt.Sprintf(`# lele
 
 You are lele, a helpful AI assistant.
 

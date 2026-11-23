@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/logger"
@@ -267,14 +269,14 @@ func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
 }
 
 func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
-	allSkills := sl.ListSkills()
-	if len(allSkills) == 0 {
-		return ""
-	}
+	return renderSkillsSummary(sl.VisibleSkills(filter))
+}
 
+func (sl *SkillsLoader) VisibleSkills(filter []string) []SkillInfo {
+	allSkills := sl.ListSkills()
 	allowed := skillNameSet(filter)
 
-	var lines []string
+	visible := make([]SkillInfo, 0, len(allSkills))
 	for _, s := range allSkills {
 		if !s.Enabled {
 			continue
@@ -282,7 +284,40 @@ func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
 		if allowed != nil && !allowed[normalizeSkillName(s.Name)] {
 			continue
 		}
+		visible = append(visible, s)
+	}
+	return visible
+}
 
+func (sl *SkillsLoader) TopSkills(filter []string, counts map[string]uint64, limit int) []SkillInfo {
+	visible := sl.VisibleSkills(filter)
+	slices.SortStableFunc(visible, func(a, b SkillInfo) int {
+		if diff := cmp.Compare(counts[b.Name], counts[a.Name]); diff != 0 {
+			return diff
+		}
+		return cmp.Compare(a.Name, b.Name)
+	})
+	if limit > 0 && len(visible) > limit {
+		visible = visible[:limit]
+	}
+	return visible
+}
+
+func (sl *SkillsLoader) BuildTopSkillsSummary(filter []string, counts map[string]uint64, limit int) string {
+	return renderSkillsSummary(sl.TopSkills(filter, counts, limit))
+}
+
+func (sl *SkillsLoader) SearchSkills(query string, filter []string) []SearchMatch {
+	return Search(sl.VisibleSkills(filter), query, sl.LoadSkill)
+}
+
+func renderSkillsSummary(list []SkillInfo) string {
+	if len(list) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, s := range list {
 		escapedName := escapeXML(s.Name)
 		escapedDesc := escapeXML(s.Description)
 		escapedPath := escapeXML(s.Path)
@@ -293,9 +328,6 @@ func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
 		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapedPath))
 		lines = append(lines, fmt.Sprintf("    <source>%s</source>", s.Source))
 		lines = append(lines, "  </skill>")
-	}
-	if len(lines) == 0 {
-		return ""
 	}
 
 	lines = append([]string{"<skills>"}, lines...)

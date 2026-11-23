@@ -30,6 +30,25 @@ lele skills install-builtin
 lele skills list-builtin
 ```
 
+## How Skills Reach the Agent Context
+
+To keep the system prompt small, the agent only sees the **5 most used skills**
+for its agent ID (usage is tracked per agent in `~/.lele/skills_usage.json`).
+Two tools cover the rest of the catalog:
+
+- `list_skills` — browses the catalog paginated (20 per page, `page` argument),
+  ordered by usage frequency (most used first), excluding the skills already
+  in the context (the top-5 summary and the loaded ones).
+- `search_skill` — keyword search over skill names, descriptions and SKILL.md
+  bodies, ranked by relevance (name matches weigh most). Returns metadata only.
+- `load_skill` — loads the full SKILL.md instructions of one or several skills
+  into the context (`{"skill": "name"}` or `{"skills": ["a", "b"]}`). Loaded
+  skills are pinned into the system prompt for subsequent turns and count
+  towards the agent's usage ranking.
+
+These tools respect the agent's `skills` filter and the workspace
+enabled/disabled configuration.
+
 ## Authoring Approach
 
 Keep each skill focused on one reusable capability or workflow.

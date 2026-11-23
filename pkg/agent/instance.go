@@ -13,6 +13,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/voice"
 )
@@ -207,17 +208,6 @@ func NewAgentInstance(
 	}
 	toolsRegistry.Register(tools.NewReadVideoTool(workspace, restrict, videoCaps, transcribe))
 
-	if agentCfg != nil {
-		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
-	}
-
-	sessionsManager := session.NewSessionManager()
-
-	contextBuilder := NewContextBuilder(workspace)
-	contextBuilder.SetToolsRegistry(toolsRegistry)
-	contextBuilder.SetVisionSupported(videoCaps.Vision)
-	contextBuilder.SetVideoSupported(videoCaps.Video)
-
 	agentID := routing.DefaultAgentID
 	agentName := ""
 	var agentDescription string
@@ -234,7 +224,23 @@ func NewAgentInstance(
 		isDefault = agentCfg.Default
 	}
 
+	sessionsManager := session.NewSessionManager()
+
+	contextBuilder := NewContextBuilder(workspace)
+	contextBuilder.SetToolsRegistry(toolsRegistry)
+	contextBuilder.SetVisionSupported(videoCaps.Vision)
+	contextBuilder.SetVideoSupported(videoCaps.Video)
 	contextBuilder.SetSkillsFilter(skillsFilter)
+
+	skillUsage := skills.NewUsageStore(filepath.Join(config.GetLeleDir(), "skills_usage.json"))
+	contextBuilder.SetSkillUsage(agentID, skillUsage)
+	toolsRegistry.Register(tools.NewSearchSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter))
+	toolsRegistry.Register(tools.NewListSkillsTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.SkillsInContext))
+	toolsRegistry.Register(tools.NewLoadSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.AddLoadedSkills))
+
+	if agentCfg != nil {
+		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, agentID)
+	}
 
 	if subagents != nil && len(subagents.AllowAgents) > 0 {
 		available := resolveAvailableSubagents(agentCfg, cfg)
