@@ -96,6 +96,29 @@ describe('Sidebar — mobile drawer ignores the desktop collapsed preference', (
   })
 })
 
+describe('Sidebar — the mobile drawer covers the viewport', () => {
+  test('the drawer is full width and full height on mobile, desktop width intact', () => {
+    setViewport(390)
+
+    const view = renderSidebar(true)
+    const classes = asideClass(view.container).split(/\s+/)
+
+    expect(classes).toContain('max-md:w-full')
+    expect(classes).toContain('max-md:h-dvh')
+    expect(classes).toContain(FULL_WIDTH)
+    expect(classes).not.toContain(RAIL_WIDTH)
+  })
+
+  test('the desktop rail keeps its capped width on desktop', () => {
+    setViewport(1280)
+
+    const classes = asideClass(renderSidebar(true).container).split(/\s+/)
+
+    expect(classes).toContain(RAIL_WIDTH)
+    expect(classes).not.toContain('w-full')
+  })
+})
+
 describe('Sidebar — desktop rail keeps working', () => {
   test('desktop + collapsed preference renders the 60px icon rail', () => {
     setViewport(1280)
