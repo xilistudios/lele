@@ -482,16 +482,30 @@
       "skillsEnableAria": "Ativar {{name}} neste workspace",
       "skillsDisableAria": "Desativar {{name}} neste workspace"
     },
+    "mcpPage": {
+      "agentLabel": "Agente",
+      "intro": "Os servidores MCP ampliam as ferramentas do agente. A camada global é compartilhada por todos os agentes; as camadas de agente e projeto pertencem ao agente selecionado. As alterações aqui são aplicadas imediatamente e não fazem parte do rascunho de configuração.",
+      "unsavedAgent": "Este agente existe apenas no rascunho não salvo. Salve a configuração antes de gerenciar seus servidores MCP.",
+      "implicitMain": "Não há agentes configurados; exibindo o agente implícito main."
+    },
+    "subagentsPage": {
+      "agentLabel": "Agente",
+      "openAgent": "Abrir página do agente",
+      "noAgents": "Ainda não há agentes configurados. Crie um para gerenciar seus subagentes.",
+      "noAgentsAction": "Ir para Agentes"
+    },
     "selectModel": "Selecionar modelo",
     "loading": "Carregando...",
     "tabs": {
       "general": "Geral",
       "agents": "Agentes",
+      "subagents": "Subagentes",
       "session": "Sessão",
       "providers": "Provedores",
       "channels": "Canais",
       "native": "Clientes Nativos",
       "tools": "Ferramentas",
+      "mcp": "MCP",
       "system": "Sistema",
       "updates": "Atualizações",
       "advanced": "Avançado",
@@ -535,7 +549,8 @@
       "model": "Modelo",
       "skills": "Skills",
       "behavior": "Comportamento",
-      "features": "Recursos"
+      "features": "Recursos",
+      "subagentDefaults": "Padrões globais de subagentes"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -698,7 +713,12 @@
       "agentMaxTokens": "Máx tokens",
       "agentSubagentsAllowed": "Agentes permitidos",
       "agentSubagentsEnabled": "Ativar subagentes",
-      "agentSupportsImages": "Suporta imagens"
+      "agentSupportsImages": "Suporta imagens",
+      "subagentTimeout": "Tempo limite (minutos)",
+      "subagentMaxConcurrent": "Máximo simultâneo",
+      "subagentMaxRetries": "Máximo de tentativas",
+      "subagentMaxIterations": "Máximo de iterações",
+      "subagentRetention": "Retenção (minutos)"
     },
     "descriptions": {
       "ephemeralThreshold": "Tempo em segundos antes de remover mensagens",
@@ -746,7 +766,13 @@
       "groupMaxTokensPerTurn": "Limite de tokens por turno",
       "groupTotalTokenBudget": "Orçamento acumulado de tokens",
       "groupStopKeywords": "Palavras-chave que disparam a convergência",
-      "groupParallel": "Executar turnos em paralelo dentro de uma camada"
+      "groupParallel": "Executar turnos em paralelo dentro de uma camada",
+      "subagentDefaults": "Aplicam-se a todos os agentes, salvo se o agente os substituir na aba Subagentes. Tentativas e retenção são apenas globais. As variáveis de ambiente (LELE_AGENTS_DEFAULTS_SUBAGENT_*) têm prioridade.",
+      "subagentTimeout": "Minutos antes de parar um subagente em execução. 0 restaura o padrão (30) no próximo carregamento.",
+      "subagentMaxConcurrent": "Máximo de subagentes executando ao mesmo tempo por agente pai. 0 = sem limite.",
+      "subagentMaxRetries": "Tentativas automáticas de uma tarefa de subagente com falha. 0 restaura o padrão (2) no próximo carregamento.",
+      "subagentMaxIterations": "Iterações do loop de ferramentas por subagente. 0 = aplica-se o limite próprio de cada agente.",
+      "subagentRetention": "Minutos que um subagente concluído permanece em memória antes da limpeza. 0 restaura o padrão (5); a limpeza não pode ser desativada."
     },
     "placeholders": {
       "agentDescription": "Descrição do agente..."

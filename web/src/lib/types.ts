@@ -226,6 +226,11 @@ export type EditableAgentDefaults = {
   max_tool_iterations: number
   max_read_lines: number
   memory_max_lines: number
+  subagent_timeout_minutes?: number
+  subagent_max_concurrent?: number
+  subagent_max_retries?: number
+  subagent_max_iterations?: number
+  subagent_retention_minutes?: number
 }
 
 export type AgentModelConfig = {

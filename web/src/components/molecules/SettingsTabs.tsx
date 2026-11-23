@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import type { SettingsTab } from '../../lib/settingsTabs'
@@ -9,10 +10,12 @@ import {
   DownloadIcon,
   FileTextIcon,
   GroupsIcon,
+  McpIcon,
   ProvidersIcon,
   SendIcon,
   ServerIcon,
   SettingsIcon,
+  SubagentsIcon,
   TerminalIcon,
   ToolsIcon,
 } from '../atoms/Icons'
@@ -20,12 +23,14 @@ import {
 const TAB_ICONS: Record<SettingsTab, typeof SettingsIcon> = {
   general: SettingsIcon,
   agents: AgentsIcon,
+  subagents: SubagentsIcon,
   providers: ProvidersIcon,
   session: ClockIcon,
   channels: SendIcon,
   native: TerminalIcon,
   groups: GroupsIcon,
   tools: ToolsIcon,
+  mcp: McpIcon,
   system: ServerIcon,
   updates: DownloadIcon,
   advanced: CodeIcon,
@@ -41,16 +46,32 @@ type Props = {
 export function SettingsTabs({ activeTab, onTabChange }: Props) {
   const { t } = useTranslation()
   const { groupsEnabled } = useAppLogicContext()
+  const navRef = useRef<HTMLElement | null>(null)
+  const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({})
+
+  useEffect(() => {
+    const scroller = navRef.current
+    const button = tabRefs.current[activeTab]
+    if (!scroller || !button) return
+    const viewRect = scroller.getBoundingClientRect()
+    const buttonRect = button.getBoundingClientRect()
+    const overflowLeft = buttonRect.left - viewRect.left
+    const overflowRight = buttonRect.right - viewRect.right
+    if (overflowLeft < 0) scroller.scrollLeft += overflowLeft
+    else if (overflowRight > 0) scroller.scrollLeft += overflowRight
+  }, [activeTab])
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
     { id: 'agents', label: t('settings.tabs.agents') },
+    { id: 'subagents', label: t('settings.tabs.subagents') },
     { id: 'providers', label: t('settings.tabs.providers') },
     { id: 'session', label: t('settings.tabs.session') },
     { id: 'channels', label: t('settings.tabs.channels') },
     { id: 'native', label: t('settings.tabs.native') },
     ...(groupsEnabled ? [{ id: 'groups' as const, label: t('settings.tabs.groups') }] : []),
     { id: 'tools', label: t('settings.tabs.tools') },
+    { id: 'mcp', label: t('settings.tabs.mcp') },
     { id: 'system', label: t('settings.tabs.system') },
     { id: 'updates', label: t('settings.tabs.updates') },
     { id: 'advanced', label: t('settings.tabs.advanced') },
@@ -60,6 +81,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
 
   return (
     <nav
+      ref={navRef}
       data-testid="settings-tabs"
       className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
     >
@@ -69,6 +91,9 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
           return (
             <button
               key={tab.id}
+              ref={(element) => {
+                tabRefs.current[tab.id] = element
+              }}
               onClick={() => onTabChange(tab.id)}
               type="button"
               data-testid={`settings-tab-${tab.id}`}
