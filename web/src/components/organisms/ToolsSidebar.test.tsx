@@ -77,6 +77,16 @@ describe('ToolsSidebar', () => {
     ).toBe(true)
   })
 
+  test('goes full-screen on mobile', async () => {
+    const view = renderDrawer()
+    await waitFor(() => expect(view.drawer()).not.toBeNull())
+
+    const classes = (view.drawer()?.getAttribute('class') ?? '').split(/\s+/)
+    for (const token of ['max-md:w-full', 'max-md:max-w-full']) {
+      expect(classes).toContain(token)
+    }
+  })
+
   test('the footer status is a bare dot, not an icon', async () => {
     const view = renderDrawer()
     await waitFor(() => expect(view.drawer()).not.toBeNull())

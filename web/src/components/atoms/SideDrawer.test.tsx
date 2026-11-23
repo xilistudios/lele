@@ -70,6 +70,31 @@ describe('SideDrawer', () => {
     expect(drawer?.getAttribute('aria-label')).toBe('drawer')
   })
 
+  test('fills the screen on mobile and keeps the desktop width', () => {
+    const view = render(<DrawerHarness />)
+    fireEvent.click(view.getByRole('button', { name: 'open' }))
+
+    const classes = (panel(view)?.getAttribute('class') ?? '').split(/\s+/)
+    for (const token of ['max-md:w-full', 'max-md:max-w-full', 'max-md:h-dvh', 'w-80']) {
+      expect(classes).toContain(token)
+    }
+  })
+
+  test('keeps a custom desktop width next to the mobile full-screen rules', () => {
+    const view = render(
+      <SideDrawer isOpen onClose={() => undefined} ariaLabel="drawer" widthClassName="w-96">
+        <p>drawer body</p>
+      </SideDrawer>,
+    )
+
+    const classes = (
+      view.getByRole('dialog', { name: 'drawer' }).getAttribute('class') ?? ''
+    ).split(/\s+/)
+    for (const token of ['w-96', 'max-md:w-full', 'max-md:max-w-full']) {
+      expect(classes).toContain(token)
+    }
+  })
+
   test('the backdrop is not a keyboard target', async () => {
     const view = render(<DrawerHarness />)
     fireEvent.click(view.getByRole('button', { name: 'open' }))
