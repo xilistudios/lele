@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
+import { attachmentIdentityKeys } from '../lib/messageIdentity'
 import { noteHistorySnapshot, observeMergedOrder } from '../lib/orderingMonitor'
 import type { ChatMessage, GroupInfo, GroupSnapshot, RawHistoryMessage } from '../lib/types'
 import { sessionKeysLooselyMatch } from './event-handlers/helpers'
@@ -49,15 +50,25 @@ function historyGroupsToInfos(history: { groups?: GroupSnapshot[] }): GroupInfo[
 }
 
 function chatMessageIdentity(message: ChatMessage): string {
-  return message.role === 'tool'
-    ? ['tool', message.toolCallId ?? '', message.toolName ?? '', message.toolArgs ?? ''].join('\0')
-    : [message.role, message.content].join('\0')
+  if (message.role === 'tool') {
+    return ['tool', message.toolCallId ?? '', message.toolName ?? '', message.toolArgs ?? ''].join(
+      '\0',
+    )
+  }
+  if (message.role === 'assistant') {
+    return ['assistant', message.content, ...attachmentIdentityKeys(message.attachments)].join('\0')
+  }
+  return [message.role, message.content].join('\0')
 }
 
 function rawMessageIdentity(message: RawHistoryMessage): string {
-  return message.role === 'tool'
-    ? ['tool', message.tool_call_id ?? '', message.tool_name ?? '', message.content].join('\0')
-    : [message.role, message.content].join('\0')
+  if (message.role === 'tool') {
+    return ['tool', message.tool_call_id ?? '', message.tool_name ?? '', message.content].join('\0')
+  }
+  if (message.role === 'assistant') {
+    return ['assistant', message.content, ...attachmentIdentityKeys(message.attachments)].join('\0')
+  }
+  return [message.role, message.content].join('\0')
 }
 
 const RE_SERVED_MIN_RUN = 2

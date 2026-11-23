@@ -1,6 +1,8 @@
 package channels
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -177,6 +179,10 @@ func attachmentStagingDir(leleDir string) string {
 	return filepath.Join(leleDir, "tmp", "attachments")
 }
 
+func durableAttachmentsDir(leleDir string) string {
+	return filepath.Join(leleDir, "attachments")
+}
+
 func randomHex() string {
 	return uuid.New().String()[:8]
 }
@@ -234,6 +240,79 @@ func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 	a.Name = origName
 	a.Path = destPath
 	return nil
+}
+
+func persistOutboundAttachments(list []bus.FileAttachment, leleDir string) []bus.FileAttachment {
+	if leleDir == "" {
+		return list
+	}
+	for i := range list {
+		if err := persistOutboundAttachment(&list[i], leleDir); err != nil {
+			logger.WarnCF("upload", "Failed to persist outbound attachment",
+				map[string]interface{}{
+					"path":  list[i].Path,
+					"name":  list[i].Name,
+					"error": err.Error(),
+				})
+		}
+	}
+	return list
+}
+
+func persistOutboundAttachment(a *bus.FileAttachment, leleDir string) error {
+	if a == nil || a.Path == "" {
+		return fmt.Errorf("attachment has empty path")
+	}
+
+	dir := durableAttachmentsDir(leleDir)
+
+	absPath, err := filepath.Abs(a.Path)
+	if err != nil {
+		return fmt.Errorf("resolve attachment path %q: %w", a.Path, err)
+	}
+
+	realPath := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		realPath = resolved
+	}
+
+	if isContainedIn(realPath, dir) {
+		return nil
+	}
+
+	info, err := os.Stat(realPath)
+	if err != nil {
+		return fmt.Errorf("stat attachment %q: %w", a.Path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("attachment %q is a directory", a.Path)
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create attachments dir: %w", err)
+	}
+
+	sanitized := utils.SanitizeFilename(filepath.Base(realPath))
+	if sanitized == "" || sanitized == "." {
+		sanitized = "attachment"
+	}
+	destPath := filepath.Join(dir, durableAttachmentName(realPath, info)+"_"+sanitized)
+
+	if err := copyFileAtomic(realPath, destPath); err != nil {
+		return fmt.Errorf("persist attachment %q: %w", a.Path, err)
+	}
+
+	if a.Name == "" {
+		a.Name = filepath.Base(realPath)
+	}
+	a.Path = destPath
+	return nil
+}
+
+func durableAttachmentName(realPath string, info os.FileInfo) string {
+	fingerprint := realPath + "|" + strconv.FormatInt(info.Size(), 10) + "|" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+	sum := sha256.Sum256([]byte(fingerprint))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 func copyFileAtomic(src, dst string) error {

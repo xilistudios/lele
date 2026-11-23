@@ -189,3 +189,102 @@ func TestHealAssistantToolCalls_IgnoresPlainMessages(t *testing.T) {
 		t.Fatalf("expected 3 messages, got %d", len(healed))
 	}
 }
+func attachmentOnlyAssistant() providers.Message {
+	return providers.Message{
+		Role: "assistant",
+		Attachments: []providers.MessageAttachment{{
+			Name:     "chart.png",
+			Path:     "/home/u/.lele/attachments/0123456789abcdef_chart.png",
+			MIMEType: "image/png",
+			Kind:     "image",
+		}},
+	}
+}
+
+func fileDisplayRow() providers.Message {
+	return providers.Message{
+		Role:               "tool",
+		ToolCallID:         "file:0123456789abcdef",
+		Content:            "here is the chart",
+		ExcludeFromContext: true,
+		Attachments: []providers.MessageAttachment{{
+			Name:     "chart.png",
+			Path:     "/home/u/.lele/attachments/0123456789abcdef_chart.png",
+			MIMEType: "image/png",
+			Kind:     "image",
+		}},
+	}
+}
+
+func TestDropBlankAssistantMessages_RemovesAttachmentOnlyRow(t *testing.T) {
+	history := []providers.Message{
+		{Role: "user", Content: "send me the chart"},
+		attachmentOnlyAssistant(),
+	}
+
+	cleaned, removed := dropBlankAssistantMessages(history)
+	if !removed {
+		t.Fatal("an assistant row carrying only attachments must be dropped: it would vanish on reload")
+	}
+	if len(cleaned) != 1 || cleaned[0].Role != "user" {
+		t.Fatalf("cleaned history = %+v, want only the user message", cleaned)
+	}
+}
+
+func TestDropBlankAssistantMessages_KeepsFileDisplayRow(t *testing.T) {
+	history := []providers.Message{
+		{Role: "user", Content: "send me the chart"},
+		fileDisplayRow(),
+	}
+
+	cleaned, removed := dropBlankAssistantMessages(history)
+	if removed {
+		t.Fatalf("a file: tool row must survive dropBlankAssistantMessages, got %+v", cleaned)
+	}
+	if len(cleaned) != 2 {
+		t.Fatalf("cleaned history = %+v, want 2 messages", cleaned)
+	}
+}
+
+func TestHealAssistantToolCalls_DropsAttachmentOnlyRowAndKeepsFileRow(t *testing.T) {
+	history := []providers.Message{
+		{Role: "user", Content: "send me the chart"},
+		{Role: "assistant", ToolCalls: []providers.ToolCall{
+			legacyToolCall("call_dead", "", "{}", map[string]any{}),
+		}},
+		{Role: "tool", Content: "result", ToolCallID: "call_dead"},
+		attachmentOnlyAssistant(),
+		fileDisplayRow(),
+	}
+
+	healed, changed := healAssistantToolCalls(history)
+	if !changed {
+		t.Fatal("expected changed=true")
+	}
+
+	var sawAssistantAttachment bool
+	var sawFileRow bool
+	for _, m := range healed {
+		if m.Role == "assistant" && len(m.Attachments) > 0 {
+			sawAssistantAttachment = true
+		}
+		if m.Role == "tool" && strings.HasPrefix(m.ToolCallID, "file:") {
+			sawFileRow = true
+			if !m.ExcludeFromContext {
+				t.Error("healing dropped exclude_from_context from the file row")
+			}
+			if len(m.Attachments) != 1 {
+				t.Errorf("healing dropped the file row attachments: %+v", m.Attachments)
+			}
+		}
+	}
+	if sawAssistantAttachment {
+		t.Error("an attachment-only assistant row survived healing: it would vanish on reload")
+	}
+	if !sawFileRow {
+		t.Errorf("the file: display row did not survive healing: %+v", healed)
+	}
+	if len(healed) != 2 {
+		t.Errorf("healed history len = %d, want 2 (user + file row): %+v", len(healed), healed)
+	}
+}

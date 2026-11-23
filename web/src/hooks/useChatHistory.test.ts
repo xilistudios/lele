@@ -587,4 +587,71 @@ describe('useChatHistory across the history-id digest change', () => {
     expect(result.current.messages.length).toBe(6)
     expect(result.current.messages.map((m) => m.id).slice(0, 2)).toEqual(['older-u1', 'older-a1'])
   })
+
+  test('two caption-less image rows across a page boundary are not treated as re-served', async () => {
+    const imageRow = (id: string, path: string) => ({
+      id,
+      role: 'assistant',
+      content: '',
+      attachments: [{ name: path.split('/').pop(), path, mime_type: 'image/png', kind: 'image' }],
+    })
+
+    cursorHistoryFetchMock((beforeId) =>
+      beforeId
+        ? {
+            messages: [imageRow('img-c', '/att/c.png'), imageRow('img-d', '/att/d.png')],
+            has_more: false,
+          }
+        : {
+            messages: [imageRow('img-a', '/att/a.png'), imageRow('img-b', '/att/b.png')],
+            has_more: true,
+          },
+    )
+    const { result } = mountHistory()
+
+    await waitFor(() => expect(result.current.messages.length).toBe(2))
+
+    await act(async () => {
+      await result.current.loadMore()
+    })
+
+    expect(result.current.messages.map((m) => m.id)).toEqual(['img-c', 'img-d', 'img-a', 'img-b'])
+    expect(result.current.messages.map((m) => m.attachments?.[0].path)).toEqual([
+      '/att/c.png',
+      '/att/d.png',
+      '/att/a.png',
+      '/att/b.png',
+    ])
+  })
+
+  test('an older page that repeats the exact same image rows is still detected as a re-serve', async () => {
+    const imageRow = (id: string, path: string) => ({
+      id,
+      role: 'assistant',
+      content: '',
+      attachments: [{ name: path.split('/').pop(), path, mime_type: 'image/png', kind: 'image' }],
+    })
+
+    cursorHistoryFetchMock((beforeId) =>
+      beforeId
+        ? {
+            messages: [imageRow('img-a', '/att/a.png'), imageRow('img-b', '/att/b.png')],
+            has_more: false,
+          }
+        : {
+            messages: [imageRow('img-a', '/att/a.png'), imageRow('img-b', '/att/b.png')],
+            has_more: true,
+          },
+    )
+    const { result } = mountHistory()
+
+    await waitFor(() => expect(result.current.messages.length).toBe(2))
+
+    await act(async () => {
+      await result.current.loadMore()
+    })
+
+    expect(result.current.messages.length).toBe(2)
+    expect(result.current.hasMore).toBe(false)
+  })
 })

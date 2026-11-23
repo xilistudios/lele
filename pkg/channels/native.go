@@ -733,12 +733,12 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	}
 
 	if len(msg.Attachments) > 0 {
-		staged := make([]bus.FileAttachment, len(msg.Attachments))
-		copy(staged, msg.Attachments)
-		stageAttachments(staged, n.cfg.LeleDir)
-		msg.Attachments = staged
+		persisted := make([]bus.FileAttachment, len(msg.Attachments))
+		copy(persisted, msg.Attachments)
+		persistOutboundAttachments(persisted, n.cfg.LeleDir)
+		msg.Attachments = persisted
 		if n.agentLoop != nil {
-			n.agentLoop.AttachFilesToLastAssistant(sessionKey, attachmentsToProviders(staged))
+			n.agentLoop.AddAttachmentMessage(sessionKey, msg.Content, attachmentsToProviders(persisted))
 		}
 	}
 

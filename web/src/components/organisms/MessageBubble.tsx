@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { partitionAttachments } from '../../lib/attachments'
 import { SYSTEM_NOTICE_TOOL_NAME } from '../../lib/chatMessageBuilder'
 import { chatRowPadding } from '../../lib/chatRowSpacing'
 import { downloadFileViaApi } from '../../lib/fileDownload'
@@ -12,24 +13,10 @@ import {
   parseFileDiffRow,
 } from '../../lib/markdown'
 import type { Attachment, ChatMessage } from '../../lib/types'
-import { AuthedImage } from '../molecules/AuthedImage'
 import { CanvasBlock } from '../molecules/CanvasBlock'
+import { ImageMosaic } from '../molecules/ImageMosaic'
 import { MarkdownText } from '../molecules/MarkdownText'
 import { ToolCallDisplay } from '../molecules/ToolCallDisplay'
-
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
-
-function isImageByExtension(name: string): boolean {
-  const ext = name.toLowerCase().split('.').pop()
-  return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
-}
-
-function isImageAttachment(attachment: Attachment): boolean {
-  if (attachment.mime_type?.startsWith('image/')) return true
-  if (attachment.name && isImageByExtension(attachment.name)) return true
-  if (attachment.path && isImageByExtension(attachment.path)) return true
-  return false
-}
 
 function DownloadIcon({ className = '' }: { className?: string }) {
   return (
@@ -136,6 +123,9 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   const hasThinking = trimmedReasoning !== ''
   const hasContent = trimmedContent !== ''
   const hasAttachments = (message.attachments?.length ?? 0) > 0
+  const { images: attachmentImages, others: attachmentFiles } = partitionAttachments(
+    message.attachments,
+  )
   const showsTypingDots = !!message.streaming && !hasContent && !hasThinking
 
   if (isTool) {
@@ -184,9 +174,6 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
       )
     }
 
-    const imageAttachments = message.attachments?.filter(isImageAttachment) ?? []
-    const nonImageAttachments = message.attachments?.filter((a) => !isImageAttachment(a)) ?? []
-
     return (
       <div
         data-message-id={message.stableId ?? message.id}
@@ -196,21 +183,10 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
       >
         <div className="max-w-[70%] space-y-2 rounded-2xl bg-background-tertiary shadow-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
-          {imageAttachments.length > 0 ? (
+          {attachmentImages.length > 0 ? <ImageMosaic attachments={attachmentImages} /> : null}
+          {attachmentFiles.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {imageAttachments.map((attachment, index) => (
-                <AuthedImage
-                  key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
-                  path={attachment.path ?? ''}
-                  alt={attachment.name ?? 'image'}
-                  className="max-w-full rounded-lg object-contain max-h-96"
-                />
-              ))}
-            </div>
-          ) : null}
-          {nonImageAttachments.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {nonImageAttachments.map((attachment, index) => (
+              {attachmentFiles.map((attachment, index) => (
                 <span
                   key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
                   className="rounded-full border border-border bg-background-secondary px-3 py-1 text-xs text-text-primary"
@@ -468,60 +444,59 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
         ) : null}
 
         {message.attachments?.length ? (
-          <div className="flex flex-wrap gap-2">
-            {message.attachments.map((attachment, index) => {
-              const label = attachment.name ?? attachment.path ?? 'attachment'
-              if (isImageAttachment(attachment)) {
-                return (
-                  <div
-                    key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
-                    className="relative inline-block max-w-full"
-                  >
-                    <AuthedImage
-                      path={attachment.path ?? ''}
-                      alt={attachment.name ?? 'image'}
-                      className="max-w-full rounded-lg object-contain max-h-96"
-                    />
-                    {attachment.path ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleDownload(attachment)}
-                        aria-label={`${t('chat.download')} ${label}`}
-                        title={`${t('chat.download')} ${label}`}
-                        className="absolute right-1.5 top-1.5 inline-flex items-center justify-center rounded-md border border-border bg-background-primary/90 p-1 text-text-secondary shadow-card transition-colors hover:text-text-primary"
-                      >
-                        <DownloadIcon />
-                      </button>
-                    ) : null}
-                  </div>
-                )
-              }
-              return (
-                <div
-                  key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
-                  className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
-                >
-                  <p className="font-medium text-text-primary">{label}</p>
-                  {attachment.caption ? (
-                    <p className="mt-1 text-text-secondary">{attachment.caption}</p>
-                  ) : null}
-                  {attachment.path ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void handleDownload(attachment)}
-                        aria-label={`${t('chat.download')} ${label}`}
-                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-background-primary px-2 py-1 font-medium text-text-primary transition-colors hover:text-text-secondary"
-                      >
-                        <DownloadIcon />
-                        <span>{t('chat.download')}</span>
-                      </button>
-                      <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
-                    </>
-                  ) : null}
-                </div>
-              )
-            })}
+          <div className="space-y-2">
+            {attachmentImages.length > 0 ? (
+              <ImageMosaic
+                attachments={attachmentImages}
+                renderTileOverlay={(attachment) => {
+                  const label = attachment.name ?? attachment.path ?? 'attachment'
+                  if (!attachment.path) return null
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => void handleDownload(attachment)}
+                      aria-label={`${t('chat.download')} ${label}`}
+                      title={`${t('chat.download')} ${label}`}
+                      className="inline-flex items-center justify-center rounded-md border border-border bg-background-primary/90 p-1 text-text-secondary shadow-card transition-colors hover:text-text-primary"
+                    >
+                      <DownloadIcon />
+                    </button>
+                  )
+                }}
+              />
+            ) : null}
+            {attachmentFiles.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {attachmentFiles.map((attachment, index) => {
+                  const label = attachment.name ?? attachment.path ?? 'attachment'
+                  return (
+                    <div
+                      key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
+                      className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
+                    >
+                      <p className="font-medium text-text-primary">{label}</p>
+                      {attachment.caption ? (
+                        <p className="mt-1 text-text-secondary">{attachment.caption}</p>
+                      ) : null}
+                      {attachment.path ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleDownload(attachment)}
+                            aria-label={`${t('chat.download')} ${label}`}
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-background-primary px-2 py-1 font-medium text-text-primary transition-colors hover:text-text-secondary"
+                          >
+                            <DownloadIcon />
+                            <span>{t('chat.download')}</span>
+                          </button>
+                          <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
+                        </>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

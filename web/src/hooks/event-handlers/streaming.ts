@@ -1,5 +1,5 @@
 import { wsDebug } from '../../lib/debug'
-import { assistantIdentityText } from '../../lib/messageIdentity'
+import { assistantIdentityOf } from '../../lib/messageIdentity'
 import { sendErrorMessage } from '../../lib/sendErrors'
 import type { ChatMessage, GroupSnapshot, HistoryToolCall } from '../../lib/types'
 import { isAttachmentsOnly, isAttachmentsOnlyBase } from '../messageMerge'
@@ -206,9 +206,11 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
 }
 
 function confirmationIdentity(msg: ChatMessage): string {
-  return msg.role === 'assistant'
-    ? assistantIdentityText(msg.content, msg.reasoningContent)
-    : msg.content
+  return msg.role === 'assistant' ? assistantIdentityOf(msg) : msg.content
+}
+
+function carriesAttachments(msg: ChatMessage): boolean {
+  return (msg.attachments?.length ?? 0) > 0
 }
 
 function isConfirmedInCache(
@@ -280,7 +282,7 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
       if (m.sessionKey !== historySessionKey) return true
       if (m.role === 'user' && m.optimistic) return !isConfirmedInCache(m, cached)
       if (m.role === 'assistant' && !m.streaming) {
-        if (m.content.trim() === '' && !m.reasoningContent) return false
+        if (m.content.trim() === '' && !m.reasoningContent && !carriesAttachments(m)) return false
         return !isConfirmedInCache(m, cached)
       }
       if (m.role === 'tool' && m.toolStatus !== 'executing') {
@@ -335,7 +337,11 @@ export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<str
       if (message.role === 'assistant') {
         if (message.streaming) return true
         if (catchupAssistantIds.has(message.id)) return false
-        return message.content.trim() !== '' || Boolean(message.reasoningContent)
+        return (
+          message.content.trim() !== '' ||
+          Boolean(message.reasoningContent) ||
+          carriesAttachments(message)
+        )
       }
 
       if (message.role === 'tool') {

@@ -26,6 +26,41 @@ function renderWithAuth(ui: React.ReactElement, ctx: AuthContextValue) {
   return render(<AuthContext.Provider value={ctx}>{ui}</AuthContext.Provider>)
 }
 
+const FIRST_PATH = '/home/user/.lele/wk/attachments/20260919/first_photo.png'
+const SECOND_PATH = '/home/user/.lele/wk/attachments/20260919/second_photo.png'
+
+function deferredBlob(): { promise: Promise<Blob>; resolve: () => void } {
+  let release: () => void = () => {}
+  const promise = new Promise<Blob>((resolve) => {
+    release = () => resolve(new Blob(['second-png'], { type: 'image/png' }))
+  })
+  return { promise, resolve: release }
+}
+
+function renderSlowPathSwitch() {
+  const pending = deferredBlob()
+  const fileBlob = mock(async (path: string) =>
+    path === SECOND_PATH ? pending.promise : new Blob(['first-png'], { type: 'image/png' }),
+  )
+  const ctx = makeAuthCtx(fileBlob)
+
+  let created = 0
+  URL.createObjectURL = mock((_blob: Blob) => {
+    created += 1
+    return `blob:test-url/${created}`
+  }) as typeof URL.createObjectURL
+
+  const view = renderWithAuth(<AuthedImage path={FIRST_PATH} alt="first.png" />, ctx)
+  const switchToSecond = () =>
+    view.rerender(
+      <AuthContext.Provider value={ctx}>
+        <AuthedImage path={SECOND_PATH} alt="second.png" />
+      </AuthContext.Provider>,
+    )
+
+  return { container: view.container, switchToSecond, pending }
+}
+
 beforeEach(() => {
   clearAuthedImageCache()
 
@@ -254,5 +289,41 @@ describe('AuthedImage', () => {
 
     expect(fileBlob).toHaveBeenCalledTimes(2)
     expect(callCount).toBe(2)
+  })
+
+  test('a slow path change shows the loading placeholder instead of the previous image', async () => {
+    // @ts-expect-error removing for test
+    globalThis.IntersectionObserver = undefined
+
+    const { container, switchToSecond } = renderSlowPathSwitch()
+
+    await waitFor(() => {
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:test-url/1')
+    })
+
+    switchToSecond()
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('[data-state="loading"]')).toBeTruthy()
+  })
+
+  test('the url resolved for the new path replaces the previous image', async () => {
+    // @ts-expect-error removing for test
+    globalThis.IntersectionObserver = undefined
+
+    const { container, switchToSecond, pending } = renderSlowPathSwitch()
+
+    await waitFor(() => {
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:test-url/1')
+    })
+
+    switchToSecond()
+    pending.resolve()
+
+    await waitFor(() => {
+      const img = container.querySelector('img')
+      expect(img?.getAttribute('src')).toBe('blob:test-url/2')
+      expect(img?.getAttribute('alt')).toBe('second.png')
+    })
   })
 })

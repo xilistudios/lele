@@ -131,12 +131,12 @@ func TestHistoryView_ReflectsEveryMutation(t *testing.T) {
 			contains: "thinking",
 		},
 		{
-			name: "AttachFilesToLastAssistant mutates the last message",
+			name: "AddAttachmentMessage appends a file row",
 			seed: []providers.Message{user("one"), assistant("two")},
 			mutate: func(_ *testing.T, sm *SessionManager) {
-				sm.AttachFilesToLastAssistant(key, []providers.MessageAttachment{{Path: "/tmp/a.png"}})
+				sm.AddAttachmentMessage(key, "file", []providers.MessageAttachment{{Path: "/tmp/a.png"}})
 			},
-			wantLen:  2,
+			wantLen:  3,
 			contains: "two",
 		},
 		{
@@ -267,8 +267,8 @@ func TestHistoryView_PublishContract(t *testing.T) {
 			sm.AppendAssistantChunk(key, "partial")
 			sm.AddFullMessage(key, assistant("final"))
 		}},
-		{"AttachFilesToLastAssistant", func(_ *testing.T, sm *SessionManager) {
-			sm.AttachFilesToLastAssistant(key, []providers.MessageAttachment{{Path: "/tmp/a.png"}})
+		{"AddAttachmentMessage", func(_ *testing.T, sm *SessionManager) {
+			sm.AddAttachmentMessage(key, "file", []providers.MessageAttachment{{Path: "/tmp/a.png"}})
 		}},
 		{"RemoveLastMessage", func(_ *testing.T, sm *SessionManager) { sm.RemoveLastMessage(key) }},
 		{"TruncateHistory", func(_ *testing.T, sm *SessionManager) { sm.TruncateHistory(key, 2) }},

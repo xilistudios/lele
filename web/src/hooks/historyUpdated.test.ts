@@ -312,3 +312,100 @@ describe('handleHistoryUpdated — attachments-only optimistic users', () => {
     expect(getStreaming().some((m) => m.optimistic)).toBe(true)
   })
 })
+
+describe('handleHistoryUpdated — attachments-only assistant display bubbles', () => {
+  const PERSISTED = '/data/lele/attachments/20261123/aa11_photo.png'
+  const OTHER = '/data/lele/attachments/20261123/bb22_photo.png'
+
+  const image = (path: string) => ({
+    name: path.split('/').pop() ?? 'photo.png',
+    path,
+    mime_type: 'image/png',
+    kind: 'image',
+  })
+
+  const liveBubble = () =>
+    msg('ack-file-1', 'assistant', '', { attachments: [image(PERSISTED)] })
+
+  const persistedBase = (path: string) =>
+    toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'tool',
+          content: '',
+          tool_call_id: 'file:ab12cd34ef56ab78',
+          attachments: [image(path)],
+        },
+      ],
+      's1',
+    )
+
+  test('keeps the live bubble while the cache has no matching row (no flicker)', () => {
+    const { ctx, getStreaming } = makeCtx([liveBubble()], persistedBase(OTHER))
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-file-1')).toBe(true)
+  })
+
+  test('keeps the live bubble when the cache is empty', () => {
+    const { ctx, getStreaming } = makeCtx([liveBubble()], [])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-file-1')).toBe(true)
+  })
+
+  test('drops the live bubble once the cache holds the matching row', () => {
+    const { ctx, getStreaming } = makeCtx([liveBubble()], persistedBase(PERSISTED))
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-file-1')).toBe(false)
+  })
+
+  test('registers the live id as stable under the attachment identity before dropping it', async () => {
+    const { lookupStableId, clearStableIdRegistry } = await import('./stableIdRegistry')
+    clearStableIdRegistry()
+
+    const { ctx } = makeCtx([liveBubble()], persistedBase(PERSISTED))
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(lookupStableId('assistant', PERSISTED)).toBe('ack-file-1')
+  })
+
+  test('a caption-carrying live bubble is confirmed by its text, not by the path', () => {
+    const live = msg('ack-file-2', 'assistant', 'ventas del trimestre', {
+      attachments: [image(PERSISTED)],
+    })
+    const base = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'tool',
+          content: 'ventas del trimestre',
+          tool_call_id: 'file:0011223344556677',
+          attachments: [image(PERSISTED)],
+        },
+      ],
+      's1',
+    )
+
+    const { ctx, getStreaming } = makeCtx([live], base)
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-file-2')).toBe(false)
+  })
+
+  test('a completed assistant row with neither text, reasoning nor attachments is still dropped', () => {
+    const done = msg('ack-empty', 'assistant', '', { streaming: false })
+    const { ctx, getStreaming } = makeCtx([done], [])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-empty')).toBe(false)
+  })
+})
