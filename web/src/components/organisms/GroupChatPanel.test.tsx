@@ -50,6 +50,17 @@ describe('GroupChatPanel', () => {
     expect(drawer.getAttribute('aria-modal')).toBe('true')
   })
 
+  test('goes full-screen on mobile and keeps its desktop width', () => {
+    const view = renderPanel()
+    const classes = (
+      view.getByRole('dialog', { name: i18n.t('groups.title') }).getAttribute('class') ?? ''
+    ).split(/\s+/)
+
+    for (const token of ['w-96', 'max-md:w-full', 'max-md:max-w-full']) {
+      expect(classes).toContain(token)
+    }
+  })
+
   test('the close action is reachable by its accessible name', () => {
     const view = renderPanel()
     const close = view.getByRole('button', { name: i18n.t('common.close') })

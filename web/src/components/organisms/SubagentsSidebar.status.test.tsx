@@ -50,6 +50,15 @@ describe('SubagentsSidebar status badges', () => {
     expect(view.getByText('failed')).not.toBeNull()
   })
 
+  test('goes full-screen on mobile', () => {
+    const view = renderSidebar([subagent()])
+
+    const classes = (view.getByRole('dialog').getAttribute('class') ?? '').split(/\s+/)
+    for (const token of ['max-md:w-full', 'max-md:max-w-full']) {
+      expect(classes).toContain(token)
+    }
+  })
+
   test('uses a distinct color class per status family', () => {
     const view = renderSidebar(
       DISTINGUISHABLE_STATUSES.map((status, i) =>
