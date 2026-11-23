@@ -186,6 +186,13 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("TOPSECRET"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	rootSkill := filepath.Join(workspace, "skills", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(rootSkill), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootSkill, []byte("---\nname: root\ndescription: root\n---\nROOTSKILL"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	sl := newSkillLoader(t, workspace, skillFixture{Dir: "pdf-tools", Name: "pdf-toolkit"})
 
@@ -194,7 +201,14 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 		input string
 	}{
 		{name: "empty", input: ""},
+		{name: "dot", input: "."},
 		{name: "dot-dot", input: ".."},
+		{name: "hidden", input: ".hidden"},
+		{name: "underscore-prefix", input: "__x"},
+		{name: "space", input: "a b"},
+		{name: "leading-hyphen", input: "-leading"},
+		{name: "trailing-hyphen", input: "trailing-"},
+		{name: "double-hyphen", input: "double--hyphen"},
 		{name: "parent-dir", input: "../secret"},
 		{name: "slash", input: "a/b"},
 		{name: "backslash", input: `a\b`},
@@ -211,6 +225,9 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 			}
 			if strings.Contains(content, "TOPSECRET") {
 				t.Errorf("LoadSkill(%q) leaked secret file content", tc.input)
+			}
+			if strings.Contains(content, "ROOTSKILL") {
+				t.Errorf("LoadSkill(%q) read the skills root SKILL.md", tc.input)
 			}
 		})
 	}
@@ -256,21 +273,40 @@ func newSummaryLoader(t *testing.T, names ...string) *SkillsLoader {
 type skillFixture struct {
 	Dir  string
 	Name string
+	Body string
 }
 
-func newSkillLoader(t *testing.T, workspace string, fixtures ...skillFixture) *SkillsLoader {
+func writeSkillFixtures(t *testing.T, root string, fixtures []skillFixture) {
 	t.Helper()
 	for _, f := range fixtures {
-		skillDir := filepath.Join(workspace, "skills", f.Dir)
+		skillDir := filepath.Join(root, f.Dir)
 		if err := os.MkdirAll(skillDir, 0755); err != nil {
 			t.Fatal(err)
 		}
-		content := "---\nname: " + f.Name + "\ndescription: desc of " + f.Name + "\n---\nbody of " + f.Name
+		body := f.Body
+		if body == "" {
+			body = "body of " + f.Name
+		}
+		content := "---\nname: " + f.Name + "\ndescription: desc of " + f.Name + "\n---\n" + body
 		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func newSkillLoader(t *testing.T, workspace string, fixtures ...skillFixture) *SkillsLoader {
+	t.Helper()
+	writeSkillFixtures(t, filepath.Join(workspace, "skills"), fixtures)
 	return NewSkillsLoader(workspace, "", "")
+}
+
+func newTwoRootSkillLoader(t *testing.T, workspaceFixtures, globalFixtures []skillFixture) *SkillsLoader {
+	t.Helper()
+	workspace := t.TempDir()
+	global := t.TempDir()
+	writeSkillFixtures(t, filepath.Join(workspace, "skills"), workspaceFixtures)
+	writeSkillFixtures(t, global, globalFixtures)
+	return NewSkillsLoader(workspace, global, "")
 }
 
 func TestSkillsLoader_LoadSkillResolvesFrontmatterName(t *testing.T) {
@@ -339,6 +375,102 @@ func TestSkillsLoader_LoadSkillsForContextResolvesFrontmatterName(t *testing.T) 
 	}
 	if !strings.Contains(content, "### Skill: pdf-toolkit") || !strings.Contains(content, "body of pdf-toolkit") {
 		t.Fatalf("LoadSkillsForContext = %q, want the skill body under its name", content)
+	}
+}
+
+func catalogNames(list []SkillInfo) []string {
+	names := make([]string, 0, len(list))
+	for _, s := range list {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+func catalogEntry(list []SkillInfo, name string) (SkillInfo, bool) {
+	for _, s := range list {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return SkillInfo{}, false
+}
+
+func TestSkillsLoader_CatalogListsBothSkillsWhenOnlyFoldersCollide(t *testing.T) {
+	sl := newTwoRootSkillLoader(t,
+		[]skillFixture{{Dir: "bar", Name: "baz", Body: "workspace baz body"}},
+		[]skillFixture{{Dir: "bar", Name: "bar", Body: "global bar body"}},
+	)
+
+	listed := sl.ListSkills()
+	names := catalogNames(listed)
+	if len(names) != 2 {
+		t.Fatalf("ListSkills() = %v, want both baz and bar", names)
+	}
+	assert.ElementsMatch(t, []string{"bar", "baz"}, names)
+
+	if content, ok := sl.LoadSkill("bar"); !ok || !strings.Contains(content, "global bar body") {
+		t.Fatalf("LoadSkill(bar) = (%q, %t), want the global bar body", content, ok)
+	}
+	if content, ok := sl.LoadSkill("BAR"); !ok || !strings.Contains(content, "global bar body") {
+		t.Fatalf("LoadSkill(BAR) = (%q, %t), want the global bar body", content, ok)
+	}
+	if content, ok := sl.LoadSkill("baz"); !ok || !strings.Contains(content, "workspace baz body") {
+		t.Fatalf("LoadSkill(baz) = (%q, %t), want the workspace baz body", content, ok)
+	}
+}
+
+func TestSkillsLoader_WorkspaceSkillShadowsGlobalSkillName(t *testing.T) {
+	sl := newTwoRootSkillLoader(t,
+		[]skillFixture{{Dir: "dup", Name: "dup", Body: "workspace dup body"}},
+		[]skillFixture{
+			{Dir: "dup", Name: "dup", Body: "global dup body"},
+			{Dir: "only-global", Name: "only-global"},
+		},
+	)
+
+	listed := sl.ListSkills()
+	names := catalogNames(listed)
+	if len(names) != 2 {
+		t.Fatalf("ListSkills() = %v, want dup listed once plus only-global", names)
+	}
+	assert.ElementsMatch(t, []string{"dup", "only-global"}, names)
+
+	entry, ok := catalogEntry(listed, "dup")
+	if !ok || entry.Source != "workspace" {
+		t.Fatalf("dup entry = %+v, want the workspace skill to shadow the global one", entry)
+	}
+	if content, ok := sl.LoadSkill("dup"); !ok || !strings.Contains(content, "workspace dup body") {
+		t.Fatalf("LoadSkill(dup) = (%q, %t), want the workspace body", content, ok)
+	}
+	if content, ok := sl.LoadSkill("only-global"); !ok || !strings.Contains(content, "body of only-global") {
+		t.Fatalf("LoadSkill(only-global) = (%q, %t), want the global-only skill", content, ok)
+	}
+}
+
+func TestSkillsLoader_SkillVisible(t *testing.T) {
+	sl := newSummaryLoader(t, "alpha", "beta")
+	if err := sl.GetConfigManager().SetDisabled("beta"); err != nil {
+		t.Fatal(err)
+	}
+
+	testcases := []struct {
+		name   string
+		filter []string
+		skill  string
+		want   bool
+	}{
+		{name: "no-filter-enabled", filter: nil, skill: "alpha", want: true},
+		{name: "filter-allows", filter: []string{"alpha", "beta"}, skill: "alpha", want: true},
+		{name: "filter-excludes", filter: []string{"beta"}, skill: "alpha", want: false},
+		{name: "filter-trims-whitespace", filter: []string{" alpha "}, skill: "alpha", want: true},
+		{name: "disabled", filter: nil, skill: "beta", want: false},
+		{name: "disabled-even-when-allowed", filter: []string{"beta"}, skill: "beta", want: false},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sl.SkillVisible(tc.filter, tc.skill))
+		})
 	}
 }
 

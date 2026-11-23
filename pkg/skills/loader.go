@@ -132,9 +132,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 			if !dir.IsDir() {
 				continue
 			}
-			if _, shadowed := claimed[dir.Name()]; shadowed {
-				continue
-			}
 			skillFile := filepath.Join(root.path, dir.Name(), "SKILL.md")
 			if _, err := os.Stat(skillFile); err != nil {
 				continue
@@ -152,7 +149,11 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 				slog.Warn("invalid skill from "+root.source, "name", info.Name, "error", err)
 				continue
 			}
-			claimed[dir.Name()] = struct{}{}
+			claim := skillClaimKey(info.Name)
+			if _, shadowed := claimed[claim]; shadowed {
+				continue
+			}
+			claimed[claim] = struct{}{}
 			skills = append(skills, info)
 		}
 	}
@@ -162,6 +163,10 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	}
 
 	return skills
+}
+
+func skillClaimKey(name string) string {
+	return strings.ToLower(normalizeSkillName(name))
 }
 
 func (sl *SkillsLoader) isSkillEnabled(name string) bool {
@@ -178,34 +183,43 @@ func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
 
 	for _, root := range sl.skillRoots() {
 		skillFile := filepath.Join(root.path, name, "SKILL.md")
-		if content, err := os.ReadFile(skillFile); err == nil {
-			return sl.stripFrontmatter(string(content)), true
+		content, err := os.ReadFile(skillFile)
+		if err != nil {
+			continue
 		}
+		body := string(content)
+		if declared := sl.metadataFromContent(body, name).Name; declared != "" && !strings.EqualFold(declared, name) {
+			return sl.loadSkillByCatalogName(name)
+		}
+		return sl.stripFrontmatter(body), true
 	}
 
 	return sl.loadSkillByCatalogName(name)
 }
 
 func (sl *SkillsLoader) loadSkillByCatalogName(name string) (string, bool) {
-	for _, s := range sl.ListSkills() {
-		dir := filepath.Base(filepath.Dir(s.Path))
-		if !strings.EqualFold(s.Name, name) && !strings.EqualFold(dir, name) {
-			continue
+	catalog := sl.ListSkills()
+	matches := []func(SkillInfo) bool{
+		func(s SkillInfo) bool { return strings.EqualFold(s.Name, name) },
+		func(s SkillInfo) bool { return strings.EqualFold(filepath.Base(filepath.Dir(s.Path)), name) },
+	}
+	for _, match := range matches {
+		for _, s := range catalog {
+			if !match(s) {
+				continue
+			}
+			content, err := os.ReadFile(s.Path)
+			if err != nil {
+				continue
+			}
+			return sl.stripFrontmatter(string(content)), true
 		}
-		content, err := os.ReadFile(s.Path)
-		if err != nil {
-			continue
-		}
-		return sl.stripFrontmatter(string(content)), true
 	}
 	return "", false
 }
 
 func isLoadableSkillName(name string) bool {
-	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
-		return false
-	}
-	return true
+	return namePattern.MatchString(name)
 }
 
 func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
@@ -328,6 +342,10 @@ func SkillAllowed(filter []string, name string) bool {
 	return false
 }
 
+func (sl *SkillsLoader) SkillVisible(filter []string, name string) bool {
+	return SkillAllowed(filter, name) && sl.isSkillEnabled(name)
+}
+
 func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 	content, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -339,11 +357,13 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 		return nil
 	}
 
-	frontmatter := sl.extractFrontmatter(string(content))
+	return sl.metadataFromContent(string(content), filepath.Base(filepath.Dir(skillPath)))
+}
+
+func (sl *SkillsLoader) metadataFromContent(content, fallbackName string) *SkillMetadata {
+	frontmatter := sl.extractFrontmatter(content)
 	if frontmatter == "" {
-		return &SkillMetadata{
-			Name: filepath.Base(filepath.Dir(skillPath)),
-		}
+		return &SkillMetadata{Name: fallbackName}
 	}
 
 	var jsonMeta struct {

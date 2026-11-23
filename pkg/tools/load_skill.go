@@ -3,12 +3,16 @@ package tools
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
 const LoadSkillName = "load_skill"
+
+const subagentUnloadNote = "A subagent run has no session pins to unload; the skill is not pinned for this run."
 
 type LoadSkillTool struct {
 	loader  *skills.SkillsLoader
@@ -84,7 +88,11 @@ func (t *LoadSkillTool) Execute(ctx context.Context, args map[string]interface{}
 	_, sessionKey := AgentToolContextFromCtx(ctx)
 
 	unload, _ := args["unload"].(bool)
+	subagent := SubagentScopeFromCtx(ctx)
 	if unload {
+		if subagent {
+			return NewToolResult(subagentUnloadNote)
+		}
 		return t.executeUnload(sessionKey, names)
 	}
 
@@ -93,7 +101,7 @@ func (t *LoadSkillTool) Execute(ctx context.Context, args map[string]interface{}
 		return ErrorResult(missingSkillsMessage(missing))
 	}
 
-	if SubagentScopeFromCtx(ctx) {
+	if subagent {
 		for _, name := range candidates {
 			t.usage.Inc(t.agentID, name)
 		}
@@ -117,28 +125,39 @@ func (t *LoadSkillTool) Execute(ctx context.Context, args map[string]interface{}
 }
 
 func (t *LoadSkillTool) collect(names []string) (candidates []string, bodies map[string]string, missing []string) {
-	visible := make(map[string]skills.SkillInfo)
+	index := make(map[string]skills.SkillInfo)
 	for _, s := range t.loader.VisibleSkills(t.filter) {
-		visible[s.Name] = s
+		index[skillLookupKey(s.Name)] = s
+		index[skillLookupKey(filepath.Base(filepath.Dir(s.Path)))] = s
 	}
 
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
-		if _, ok := visible[name]; !ok {
-			missing = append(missing, name)
-			continue
-		}
-		body, ok := t.loader.LoadSkill(name)
+		info, ok := index[skillLookupKey(name)]
 		if !ok {
 			missing = append(missing, name)
 			continue
 		}
+		if _, duplicate := seen[info.Name]; duplicate {
+			continue
+		}
+		body, ok := t.loader.LoadSkill(info.Name)
+		if !ok {
+			missing = append(missing, name)
+			continue
+		}
+		seen[info.Name] = struct{}{}
 		if bodies == nil {
 			bodies = make(map[string]string, len(names))
 		}
-		bodies[name] = body
-		candidates = append(candidates, name)
+		bodies[info.Name] = body
+		candidates = append(candidates, info.Name)
 	}
 	return candidates, bodies, missing
+}
+
+func skillLookupKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 func (t *LoadSkillTool) loadedResult(sessionKey string, loaded []string, bodies map[string]string, missing, already, rejected []string, subagent bool) *ToolResult {
@@ -185,7 +204,7 @@ func (t *LoadSkillTool) executeUnload(sessionKey string, names []string) *ToolRe
 	if t.unpin == nil {
 		return ErrorResult("load_skill is not configured (missing session pin owner)")
 	}
-	removed, absent := t.unpin(sessionKey, names)
+	removed, absent := t.unpin(sessionKey, t.canonicalPinNames(sessionKey, names))
 
 	var parts []string
 	if len(removed) > 0 {
@@ -198,6 +217,28 @@ func (t *LoadSkillTool) executeUnload(sessionKey string, names []string) *ToolRe
 		parts = append(parts, fmt.Sprintf("Not pinned in this session: %s.", quoteNames(names)))
 	}
 	return NewToolResult(strings.Join(parts, " "))
+}
+
+func (t *LoadSkillTool) canonicalPinNames(sessionKey string, names []string) []string {
+	index := make(map[string]string)
+	if t.pinned != nil {
+		for _, name := range t.pinned(sessionKey) {
+			index[skillLookupKey(name)] = name
+		}
+	}
+
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		canonical, ok := index[skillLookupKey(name)]
+		if !ok {
+			canonical = name
+		}
+		if slices.Contains(out, canonical) {
+			continue
+		}
+		out = append(out, canonical)
+	}
+	return out
 }
 
 func missingSkillsMessage(missing []string) string {

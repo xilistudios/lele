@@ -334,3 +334,37 @@ func containsName(names []string, want string) bool {
 	}
 	return false
 }
+func TestLoadedSkills_FilteredPinNeitherRendersNorExcludes(t *testing.T) {
+	cb := newSevenSkillBuilder(t)
+	cb.PinSkills("", []string{"zeta"})
+
+	if prompt := cb.BuildSystemPromptForSession("", ""); !strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("precondition: pinned skill must render: %s", prompt)
+	}
+
+	cb.SetSkillsFilter([]string{"alpha"})
+
+	if prompt := cb.BuildSystemPromptForSession("", ""); strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("a pin the agent's skills filter excludes must not render: %s", prompt)
+	}
+	if names := cb.SkillsInContext(""); containsName(names, "zeta") {
+		t.Fatalf("SkillsInContext = %v, must not report a pin it cannot render", names)
+	}
+}
+func TestLoadedSkills_DeletedSkillDoesNotRender(t *testing.T) {
+	cb := newSevenSkillBuilder(t)
+	cb.PinSkills("", []string{"zeta"})
+
+	if prompt := cb.BuildSystemPromptForSession("", ""); !strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("precondition: pinned skill must render: %s", prompt)
+	}
+
+	vanished := filepath.Join(cb.SkillsLoader().WorkspaceDir(), "skills", "zeta")
+	if err := os.RemoveAll(vanished); err != nil {
+		t.Fatalf("Failed to remove the skill directory: %v", err)
+	}
+
+	if prompt := cb.BuildSystemPromptForSession("", ""); strings.Contains(prompt, "# Loaded Skills") {
+		t.Fatalf("a pin whose skill vanished must not render: %s", prompt)
+	}
+}

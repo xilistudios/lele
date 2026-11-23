@@ -313,9 +313,10 @@ tools cover the rest of the catalog:
 - `list_skills` paginates the catalog (20 per page, `page_size` up to 100);
   an out-of-range `page` is clamped to the last page. Entries carry a
   `(used N times)` marker once the skill has been loaded at least once.
-- Both listings exclude what is already in **this session's** context: the
-  top-5 window plus the skills pinned by this session. An exclusion is only
-  reported for a skill that will actually render, so a skill disabled or
+- `list_skills` excludes what is already in **this session's** context: the
+  top-5 window plus the skills pinned by this session. `search_skill` does not
+  exclude anything, it always searches the whole visible catalog. An exclusion
+  is only reported for a skill that will actually render, so a skill disabled or
   deleted since it was loaded neither renders nor hides from `list_skills`.
 - `load_skill` pins the loaded skill to the **calling session** and returns the
   bodies in the tool result (the system prompt is fixed at turn start, so a
@@ -331,9 +332,11 @@ tools cover the rest of the catalog:
   never touches the usage counters — they record how often a skill was loaded,
   not how long it stays pinned. Unloading something that is not pinned is
   reported, not an error.
-- Subagent runs receive the bodies and the usage count but never pin: a
-  subagent prompt renders no pins, so pinning there would inflate the session
-  that spawned it while telling the subagent nothing. The result says so.
+- Subagent runs receive the bodies and the usage count but never pin and never
+  unpin: a subagent prompt renders no pins, so pinning there would inflate the
+  session that spawned it while telling the subagent nothing, and an `unload`
+  call answers that a subagent run has no session pins, leaving the pins of the
+  session that spawned it untouched. The load result says so.
 
 ### Allowlist
 

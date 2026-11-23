@@ -368,13 +368,9 @@ func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
 	if len(pinned) == 0 {
 		return nil
 	}
-	visible := make(map[string]struct{})
-	for _, s := range cb.skillsLoader.VisibleSkills(filter) {
-		visible[s.Name] = struct{}{}
-	}
 	out := make([]string, 0, len(pinned))
 	for _, name := range pinned {
-		if _, ok := visible[name]; ok {
+		if cb.skillsLoader.SkillVisible(filter, name) {
 			out = append(out, name)
 		}
 	}

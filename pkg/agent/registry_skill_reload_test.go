@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -245,5 +246,174 @@ func TestReload_PromptToolsSectionFollowsAllowlist(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "- `read_file` -") {
 		t.Fatalf("the prompt lost the allowlisted tool: %s", prompt)
+	}
+}
+func TestLoadSkill_MixedCaseNamePinsCanonically(t *testing.T) {
+	cfg, _ := newSkillReloadFixture(t, "first", nil)
+	registry := NewAgentRegistry(cfg)
+	agent, ok := registry.GetAgent("skill-agent")
+	if !ok {
+		t.Fatal("expected the agent to be registered")
+	}
+
+	res := loadSkillInto(t, agent, "s1", "ZETA")
+	if res.IsError {
+		t.Fatalf("mixed-case load failed: %s", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, "### Skill: zeta") {
+		t.Fatalf("result must report the canonical skill name: %s", res.ForLLM)
+	}
+	if got := agent.ContextBuilder.PinnedSkills("s1"); !slices.Equal(got, []string{"zeta"}) {
+		t.Fatalf("pinned = %v, want the canonical name", got)
+	}
+
+	prompt := agent.ContextBuilder.BuildSystemPromptForSession("s1", "")
+	if !strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("the canonical pin never reached the prompt: %s", prompt)
+	}
+	if strings.Contains(prompt, "### Skill: ZETA") {
+		t.Fatalf("the prompt kept the caller casing: %s", prompt)
+	}
+}
+
+func TestSubagentUnloadKeepsOwnerSessionPins(t *testing.T) {
+	cfg, _ := newSkillReloadFixture(t, "first", nil)
+	registry := NewAgentRegistry(cfg)
+	agent, ok := registry.GetAgent("skill-agent")
+	if !ok {
+		t.Fatal("expected the agent to be registered")
+	}
+	if res := loadSkillInto(t, agent, "s1", "zeta"); res.IsError {
+		t.Fatalf("precondition: the owner session must pin zeta: %s", res.ForLLM)
+	}
+
+	loadTool, ok := agent.Tools.Get(tools.LoadSkillName)
+	if !ok {
+		t.Fatal("load_skill tool not registered on the agent")
+	}
+	subagentCtx := tools.WithSubagentScope(tools.WithAgentToolContext(context.Background(), agent.ID, "s1"))
+	res := loadTool.Execute(subagentCtx, map[string]interface{}{"skill": "zeta", "unload": true})
+	if res.IsError {
+		t.Fatalf("a subagent unload must not fail: %s", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, "no session pins to unload") {
+		t.Fatalf("result must explain that a subagent run has no pins: %s", res.ForLLM)
+	}
+
+	if got := agent.ContextBuilder.PinnedSkills("s1"); !slices.Equal(got, []string{"zeta"}) {
+		t.Fatalf("owner session pins = %v, want zeta still pinned", got)
+	}
+	if prompt := agent.ContextBuilder.BuildSystemPromptForSession("s1", ""); !strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("the owner session lost the pinned skill: %s", prompt)
+	}
+}
+
+func newSpawnSkillReloadFixture(t *testing.T, name string) (*config.Config, string) {
+	t.Helper()
+	workspace := t.TempDir()
+	for _, skillName := range []string{"alpha", "beta", "zeta"} {
+		writeTestSkill(t, workspace, skillName, "the "+skillName+" skill")
+	}
+	cfg := testCfg(t, []config.AgentConfig{spawnSkillAgent(name, workspace)})
+	cfg.Agents.Defaults.Workspace = workspace
+	return cfg, workspace
+}
+
+func spawnSkillAgent(name, workspace string) config.AgentConfig {
+	return config.AgentConfig{
+		ID:        "skill-agent",
+		Default:   true,
+		Name:      name,
+		Workspace: workspace,
+		Tools:     []string{"spawn", "load_skill", "list_skills", "search_skill"},
+		Subagents: &config.SubagentsConfig{AllowAgents: []string{"skill-agent"}},
+	}
+}
+
+func TestReload_SpawnAgentSubagentCloneGetsReboundTools(t *testing.T) {
+	cfg, workspace := newSpawnSkillReloadFixture(t, "first")
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+
+	sm, ok := al.toolCoordinator.GetSubagents()["skill-agent"]
+	if !ok {
+		t.Fatal("expected a subagent manager for the spawn agent")
+	}
+	if _, ok := sm.GetToolRegistry().Get(tools.LoadSkillName); !ok {
+		t.Fatal("load_skill missing from the pre-reload subagent clone")
+	}
+	beforeRegistry := sm.GetToolRegistry()
+
+	first, _ := al.registry.GetAgent("skill-agent")
+	reloadedCfg := testCfg(t, []config.AgentConfig{spawnSkillAgent("second", workspace)})
+	reloadedCfg.Agents.Defaults.Workspace = workspace
+	al.ReloadRegistry(reloadedCfg)
+
+	second, _ := al.registry.GetAgent("skill-agent")
+	if second == first {
+		t.Fatal("precondition: a name change must recreate the instance")
+	}
+	if sm.GetToolRegistry() == beforeRegistry {
+		t.Fatal("the spawn agent's subagent clone was never refreshed")
+	}
+
+	agentTool, ok := second.Tools.Get(tools.LoadSkillName)
+	if !ok {
+		t.Fatal("load_skill missing from the reloaded agent")
+	}
+	cloneTool, ok := sm.GetToolRegistry().Get(tools.LoadSkillName)
+	if !ok {
+		t.Fatal("load_skill missing from the refreshed subagent clone")
+	}
+	if cloneTool != agentTool {
+		t.Fatal("the spawn agent's subagent clone still holds the pre-reload skill tool")
+	}
+
+	ctx := tools.WithAgentToolContext(context.Background(), second.ID, "s1")
+	if res := cloneTool.Execute(ctx, map[string]interface{}{"skill": "zeta"}); res.IsError {
+		t.Fatalf("subagent skill tool failed: %s", res.ForLLM)
+	}
+	if prompt := second.ContextBuilder.BuildSystemPromptForSession("s1", ""); !strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("the clone's load never reached the surviving builder: %s", prompt)
+	}
+}
+func TestReload_UnchangedSpawnAgentReclonesSubagentTools(t *testing.T) {
+	cfg, _ := newSpawnSkillReloadFixture(t, "first")
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+
+	sm, ok := al.toolCoordinator.GetSubagents()["skill-agent"]
+	if !ok {
+		t.Fatal("expected a subagent manager for the spawn agent")
+	}
+	agent, _ := al.registry.GetAgent("skill-agent")
+	if _, ok := agent.Tools.Get("spawn"); !ok {
+		t.Fatal("precondition: the spawn agent must carry spawn for this reload path")
+	}
+	agentTool, ok := agent.Tools.Get(tools.LoadSkillName)
+	if !ok {
+		t.Fatal("load_skill missing from the spawn agent")
+	}
+
+	sm.SetTools(tools.NewToolRegistry())
+
+	al.ReloadRegistry(cfg)
+
+	survived, _ := al.registry.GetAgent("skill-agent")
+	if survived != agent {
+		t.Fatal("precondition: an unchanged agent config must keep the same instance")
+	}
+	cloneTool, ok := sm.GetToolRegistry().Get(tools.LoadSkillName)
+	if !ok {
+		t.Fatal("the reload did not re-clone the spawn agent's subagent tools")
+	}
+	if cloneTool != agentTool {
+		t.Fatal("the subagent clone does not hold the surviving agent's skill tool")
+	}
+
+	ctx := tools.WithAgentToolContext(context.Background(), agent.ID, "s1")
+	if res := cloneTool.Execute(ctx, map[string]interface{}{"skill": "zeta"}); res.IsError {
+		t.Fatalf("subagent skill tool failed: %s", res.ForLLM)
+	}
+	if prompt := agent.ContextBuilder.BuildSystemPromptForSession("s1", ""); !strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("the clone's load never reached the surviving builder: %s", prompt)
 	}
 }

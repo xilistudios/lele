@@ -73,8 +73,9 @@ load_skill
 
 Unloading never changes the usage counters — those record how often a skill was
 loaded, not how long it stays pinned. Subagents receive the full instructions in
-their own result when they load a skill, but a subagent never pins into the
-session that spawned it.
+their own result when they load a skill, but a subagent neither pins into the
+session that spawned it nor unpins from it: an `unload` call inside a subagent
+run leaves the owner session's pins untouched.
 
 ## Authoring Approach
 

@@ -91,17 +91,100 @@ func TestLoadSkillTool_PartialMissingStillLoadsTheRest(t *testing.T) {
 }
 
 func TestLoadSkillTool_RejectsFilteredDisabledAndTraversal(t *testing.T) {
-	loader := newSkillToolLoader(t, "weather", "github")
+	loader := newSkillToolLoader(t, "weather", "github", "daily")
+	usage := skills.NewUsageStore(filepath.Join(t.TempDir(), "usage.json"))
 	if err := loader.GetConfigManager().SetDisabled("github"); err != nil {
 		t.Fatal(err)
 	}
-	tool := NewLoadSkillTool(loader, nil, "coder", []string{"weather"}, nil, nil, nil)
+	var pinned []string
+	pin := func(_ string, names []string) ([]string, []string, []string) {
+		pinned = append(pinned, names...)
+		return names, nil, nil
+	}
+	tool := NewLoadSkillTool(loader, usage, "coder", []string{"weather", "github"}, pin, nil, nil)
 
-	for _, name := range []string{"github", "../weather", "weather/../github"} {
+	allowed := tool.Execute(context.Background(), map[string]interface{}{"skill": "weather"})
+	if allowed.IsError {
+		t.Fatalf("an allowed and enabled skill must load: %s", allowed.ForLLM)
+	}
+	if !strings.Contains(allowed.ForLLM, "Instructions for weather.") {
+		t.Fatalf("the positive control lost the body: %s", allowed.ForLLM)
+	}
+	if !slices.Equal(pinned, []string{"weather"}) {
+		t.Fatalf("pin got %v, want only the allowed skill", pinned)
+	}
+
+	for _, name := range []string{"daily", "github", "../weather", "weather/../github"} {
 		res := tool.Execute(context.Background(), map[string]interface{}{"skill": name})
 		if !res.IsError {
-			t.Errorf("skill %q must be rejected (filtered, disabled or traversal), got: %s", name, res.ForLLM)
+			t.Errorf("skill %q must be refused (filtered, disabled or traversal), got: %s", name, res.ForLLM)
+			continue
 		}
+		if !strings.Contains(res.ForLLM, "not found or not available") {
+			t.Errorf("skill %q must be reported as unavailable, got: %s", name, res.ForLLM)
+		}
+	}
+	if !slices.Equal(pinned, []string{"weather"}) {
+		t.Fatalf("a refused load must never pin: %v", pinned)
+	}
+}
+
+func TestLoadSkillTool_ResolvesNamesCaseInsensitively(t *testing.T) {
+	loader := newSkillToolLoader(t, "weather")
+	usage := skills.NewUsageStore(filepath.Join(t.TempDir(), "usage.json"))
+	var pinned []string
+	pin := func(_ string, names []string) ([]string, []string, []string) {
+		pinned = append(pinned, names...)
+		return names, nil, nil
+	}
+	tool := NewLoadSkillTool(loader, usage, "coder", nil, pin, nil, nil)
+
+	for _, name := range []string{"Weather", "WEATHER", "wEaThEr"} {
+		res := tool.Execute(context.Background(), map[string]interface{}{"skill": name})
+		if res.IsError {
+			t.Fatalf("load %q failed: %s", name, res.ForLLM)
+		}
+		if !strings.Contains(res.ForLLM, "### Skill: weather") {
+			t.Fatalf("load %q must report the canonical skill name: %s", name, res.ForLLM)
+		}
+	}
+
+	if !slices.Equal(pinned, []string{"weather", "weather", "weather"}) {
+		t.Fatalf("pin got %v, want the canonical name pinned", pinned)
+	}
+	if got := usage.CountsFor("coder")["weather"]; got != 3 {
+		t.Fatalf("usage[weather] = %d, want the canonical name counted", got)
+	}
+	if got := usage.CountsFor("coder")["Weather"]; got != 0 {
+		t.Fatalf("usage recorded the caller casing (%d), want the canonical name", got)
+	}
+}
+
+func TestLoadSkillTool_LoadsMixedCaseBatchOnce(t *testing.T) {
+	loader := newSkillToolLoader(t, "weather", "github")
+	var pinned []string
+	pin := func(_ string, names []string) ([]string, []string, []string) {
+		pinned = append(pinned, names...)
+		return names, nil, nil
+	}
+	tool := NewLoadSkillTool(loader, nil, "coder", nil, pin, nil, nil)
+
+	res := tool.Execute(context.Background(), map[string]interface{}{
+		"skills": []interface{}{"Weather", "GitHub", "WEATHER"},
+	})
+	if res.IsError {
+		t.Fatalf("mixed-case batch failed: %s", res.ForLLM)
+	}
+	for _, want := range []string{"### Skill: weather", "### Skill: github"} {
+		if !strings.Contains(res.ForLLM, want) {
+			t.Fatalf("result missing %q: %s", want, res.ForLLM)
+		}
+	}
+	if strings.Contains(res.ForLLM, "### Skill: Weather") || strings.Contains(res.ForLLM, "### Skill: GitHub") {
+		t.Fatalf("result kept the caller casing: %s", res.ForLLM)
+	}
+	if !slices.Equal(pinned, []string{"weather", "github"}) {
+		t.Fatalf("pin got %v, want each canonical name once", pinned)
 	}
 }
 
@@ -225,6 +308,55 @@ func TestLoadSkillTool_UnloadWithoutNamesIsError(t *testing.T) {
 	res := tool.Execute(context.Background(), map[string]interface{}{"unload": true})
 	if !res.IsError {
 		t.Fatalf("unload without a skill name must be rejected, got: %s", res.ForLLM)
+	}
+}
+
+func TestLoadSkillTool_UnloadCanonicalisesTheName(t *testing.T) {
+	loader := newSkillToolLoader(t, "weather")
+	var unpinned []string
+	unpin := func(_ string, names []string) ([]string, []string) {
+		unpinned = append(unpinned, names...)
+		return names, nil
+	}
+	pinned := func(string) []string { return []string{"weather"} }
+	tool := NewLoadSkillTool(loader, nil, "coder", nil, pinAll, unpin, pinned)
+
+	res := tool.Execute(context.Background(), map[string]interface{}{"skill": "Weather", "unload": true})
+	if res.IsError {
+		t.Fatalf("unload failed: %s", res.ForLLM)
+	}
+	if !slices.Equal(unpinned, []string{"weather"}) {
+		t.Fatalf("unpin got %v, want the canonical pinned name", unpinned)
+	}
+}
+
+func TestLoadSkillTool_SubagentUnloadLeavesOwnerPins(t *testing.T) {
+	loader := newSkillToolLoader(t, "weather")
+	unpinCalled := false
+	unpin := func(string, []string) ([]string, []string) {
+		unpinCalled = true
+		return []string{"weather"}, nil
+	}
+	tool := NewLoadSkillTool(loader, nil, "coder", nil, pinAll, unpin, nil)
+
+	subagentCtx := WithSubagentScope(WithAgentToolContext(context.Background(), "coder", "chat-a"))
+	res := tool.Execute(subagentCtx, map[string]interface{}{"skill": "weather", "unload": true})
+	if res.IsError {
+		t.Fatalf("a subagent unload must not fail: %s", res.ForLLM)
+	}
+	if unpinCalled {
+		t.Fatal("a subagent unload must never reach the owner session's pins")
+	}
+	if !strings.Contains(res.ForLLM, "no session pins to unload") {
+		t.Fatalf("result must explain that a subagent run has no pins: %s", res.ForLLM)
+	}
+
+	ownerCtx := WithAgentToolContext(context.Background(), "coder", "chat-a")
+	if res := tool.Execute(ownerCtx, map[string]interface{}{"skill": "weather", "unload": true}); res.IsError {
+		t.Fatalf("the owner session must still be able to unload: %s", res.ForLLM)
+	}
+	if !unpinCalled {
+		t.Fatal("the owner session's unload never reached the pin owner")
 	}
 }
 
