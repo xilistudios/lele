@@ -216,6 +216,13 @@ function submitMessage(view: ReturnType<typeof renderWithProviders>, text: strin
   fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
 }
 
+function sentCancelScopes(ws: MockWebSocket): Array<string | undefined> {
+  return ws.sent
+    .map((raw) => JSON.parse(raw) as { event?: string; data?: { scope?: string } })
+    .filter((payload) => payload.event === 'cancel')
+    .map((payload) => payload.data?.scope)
+}
+
 function queuedRows(view: ReturnType<typeof renderWithProviders>): string[] {
   return Array.from(view.container.querySelectorAll('[data-testid="queued-message"]')).map(
     (row) => row.textContent ?? '',
@@ -659,6 +666,22 @@ describe('cola de mensajes del composer', () => {
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', '/compact']))
   })
 
+  test('el boton de parar pide una parada de sesion completa', async () => {
+    const { view, ws } = await openChat()
+
+    submitMessage(view, 'first message')
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
+    await act(async () => {
+      ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
+    })
+
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Cancelar' }))
+    })
+
+    expect(sentCancelScopes(ws)).toEqual(['session'])
+  })
+
   test('envia ya una entrada de la cola cuando el agente esta libre', async () => {
     const { view, ws } = await openChat()
 
@@ -722,10 +745,7 @@ describe('cola de mensajes del composer', () => {
       expect(remaining[0]).toContain('leave me')
     })
 
-    const cancelSent = ws.sent
-      .map((raw) => JSON.parse(raw) as { event?: string })
-      .some((payload) => payload.event === 'cancel')
-    expect(cancelSent).toBe(true)
+    expect(sentCancelScopes(ws)).toEqual(['turn'])
 
     await act(async () => {
       ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })

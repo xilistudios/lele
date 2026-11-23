@@ -490,6 +490,30 @@ describe('cancel.ack stops active groups', () => {
 
     expect(state.processingSessionKey).toBeNull()
   })
+
+  test('a turn-scoped cancel.ack leaves running groups alone', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g1',
+        status: 'started',
+        participants: 'agent-a,agent-b',
+        session_key: sessionKey,
+      },
+    })
+
+    state.processingSessionKey = sessionKey
+
+    dispatchMessageEvent(ctx, {
+      event: 'cancel.ack',
+      data: { session_key: sessionKey, scope: 'turn' },
+    })
+
+    expect(state.groups.get('g1')?.status).toBe('started')
+    expect(state.processingSessionKey).toBeNull()
+  })
 })
 
 describe('handleGroupTool', () => {
