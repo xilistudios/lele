@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import type { SettingsTab } from '../../lib/settingsTabs'
@@ -45,6 +46,15 @@ type Props = {
 export function SettingsTabs({ activeTab, onTabChange }: Props) {
   const { t } = useTranslation()
   const { groupsEnabled } = useAppLogicContext()
+  const stripRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const button = stripRef.current?.querySelector<HTMLButtonElement>(
+      `[data-testid="settings-tab-${activeTab}"]`,
+    )
+    if (!button || typeof button.scrollIntoView !== 'function') return
+    button.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeTab])
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
@@ -69,7 +79,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
       data-testid="settings-tabs"
       className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
     >
-      <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
+      <div ref={stripRef} className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
         {tabs.map((tab) => {
           const Icon = TAB_ICONS[tab.id]
           return (
