@@ -354,10 +354,15 @@ export function useAppLogic(
     ],
   )
 
-  const handleCancel = useCallback(() => {
-    const sessionKey = sessionsHook.currentSessionKey
-    wsSend('cancel', sessionKey ? { session_key: sessionKey } : {})
-  }, [wsSend, sessionsHook.currentSessionKey])
+  const requestCancel = useCallback(
+    (scope: 'turn' | 'session') => {
+      const sessionKey = sessionsHook.currentSessionKey
+      wsSend('cancel', sessionKey ? { session_key: sessionKey, scope } : { scope })
+    },
+    [wsSend, sessionsHook.currentSessionKey],
+  )
+
+  const handleCancel = useCallback(() => requestCancel('session'), [requestCancel])
 
   const handleSelectSession = useCallback(
     async (sessionKey: string, options?: { parentSessionKey?: string | null }) => {
@@ -704,14 +709,14 @@ export function useAppLogic(
           attachments: msg.attachments,
           sessionKey: msg.sessionKey,
         }
-        handleCancel()
+        requestCancel('turn')
         return
       }
       void handleSend(msg.content, msg.attachments).then((ok) => {
         if (!ok) restoreQueued(msg)
       })
     },
-    [queueHook.takeQueuedMessage, handleCancel, handleSend, restoreQueued],
+    [queueHook.takeQueuedMessage, requestCancel, handleSend, restoreQueued],
   )
 
   return {

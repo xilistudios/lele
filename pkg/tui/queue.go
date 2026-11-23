@@ -148,7 +148,7 @@ func (m *Model) forceSendNextQueued() tea.Cmd {
 		}
 		m.flushLastPress = time.Time{}
 		if m.agentLoop != nil && m.agentLoop.GetProvidable() != nil {
-			m.agentLoop.GetProvidable().StopAgent(m.currentKey)
+			m.agentLoop.GetProvidable().InterruptAgent(m.currentKey)
 		}
 		m.clearStreamingState()
 		m.processing = false

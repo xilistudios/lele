@@ -188,6 +188,16 @@ type WSErrorPayload struct {
 	Message string `json:"message"`
 }
 
+type WSCancelPayload struct {
+	SessionKey string `json:"session_key,omitempty"`
+	Scope      string `json:"scope,omitempty"`
+}
+
+const (
+	CancelScopeSession = "session"
+	CancelScopeTurn    = "turn"
+)
+
 type WSStatusPayload struct {
 	Agents   []map[string]interface{} `json:"agents"`
 	Channels []map[string]interface{} `json:"channels"`

@@ -25,7 +25,9 @@ export function handleCancelAck(ctx: MessageEventContext, data: Record<string, u
 
   ctx.setStreamingMessages(stopAllStreaming)
 
-  ctx.markActiveGroupsStopped()
+  if (data.scope !== 'turn') {
+    ctx.markActiveGroupsStopped()
+  }
 }
 
 export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string, unknown>) {

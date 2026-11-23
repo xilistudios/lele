@@ -41,6 +41,7 @@ type AgentProvidable interface {
 	GetConfigSnapshot() *config.Config
 	GetStatus(sessionKey string) string
 	StopAgent(sessionKey string) string
+	InterruptAgent(sessionKey string) string
 	CompactSession(sessionKey string) string
 	ToggleVerbose(sessionKey string) string
 	GetVerboseLevel(sessionKey string) string

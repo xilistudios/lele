@@ -1120,12 +1120,23 @@ The server sends `v: 1` on all outbound events (`welcome`, `ack`s, `error`, stre
 
 #### `cancel`
 
+Interrupts work on the client's own session. The optional `scope` picks how much is interrupted:
+
+- `"session"` (default when `scope` is omitted) is a hard stop: the in-flight turn plus every subagent task, group run and background process owned by the session.
+- `"turn"` interrupts only the in-flight turn; detached work (subagents, group runs, background processes) keeps running.
+
+Any other `scope` value is rejected with an `error` event whose `code` is `payload_error` and no work is interrupted. The resulting `cancel.ack` echoes the effective `scope`.
+
 ```json
 {
   "event": "cancel",
-  "data": {}
+  "data": {
+    "scope": "turn"
+  }
 }
 ```
+
+A `cancel` without `data` behaves as `{"scope": "session"}`.
 
 #### `ping`
 

@@ -492,6 +492,18 @@ func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 	return formatStopAgentResponse(subagentCount, groupCount, procCount)
 }
 
+func (ap *agentProvidableImpl) InterruptAgent(sessionKey string) string {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	cancelled := ap.al.cancelSession(resolvedKey)
+	logger.InfoCF("agent", "InterruptAgent completed", map[string]interface{}{
+		"session_key":  sessionKey,
+		"resolved_key": resolvedKey,
+		"cancelled":    cancelled,
+	})
+
+	return "⏹️ Turno interrumpido."
+}
+
 func formatStopAgentResponse(subagentCount, groupCount, procCount int) string {
 	var parts []string
 	if subagentCount > 0 {
