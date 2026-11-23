@@ -24,7 +24,7 @@ func newSkillToolLoader(t *testing.T, names ...string) *skills.SkillsLoader {
 			t.Fatal(err)
 		}
 	}
-	return skills.NewSkillsLoader(workspace, "", "")
+	return skills.NewSkillsLoader(workspace, "", "", "", "")
 }
 
 func TestSearchSkillTool_RanksAndReportsMatches(t *testing.T) {

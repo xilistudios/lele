@@ -45,7 +45,7 @@ func newTwoRootSkillToolLoader(t *testing.T, workspaceFixtures, globalFixtures [
 			}
 		}
 	}
-	return skills.NewSkillsLoader(workspace, global, "")
+	return skills.NewSkillsLoader(workspace, global, "", "", "")
 }
 
 func TestLoadSkillTool_LoadsContentAndRecordsUsage(t *testing.T) {

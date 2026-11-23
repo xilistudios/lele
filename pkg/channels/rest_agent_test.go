@@ -323,7 +323,7 @@ func TestHandleAgentCatalog_Skills(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, ".lele", "workspace.json"), []byte(cfgJSON), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	ts.channel.skillsLoader = skills.NewSkillsLoader(workspace, "", "")
+	ts.channel.skillsLoader = skills.NewSkillsLoader(workspace, "", "", "", "")
 
 	resp, err := http.DefaultClient.Do(newAuthedRequest(t, http.MethodGet,
 		ts.server.URL+"/api/v1/agents/main/catalog", ts.token))
