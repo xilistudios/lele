@@ -9,7 +9,7 @@ export type ClientCommand =
       event: 'message'
       data: { content: string; session_key?: string; agent_id?: string; attachments?: string[] }
     }
-  | { event: 'cancel'; data: { session_key?: string } }
+  | { event: 'cancel'; data: { session_key?: string; scope?: 'turn' | 'session' } }
   | { event: 'ping'; data: Record<string, never> }
   | { event: 'typing'; data: { session_key?: string } }
 

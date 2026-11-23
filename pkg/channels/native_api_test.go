@@ -295,6 +295,10 @@ func (m *nativeTestAgentLoop) StopAgent(sessionKey string) string {
 	return "stopped"
 }
 
+func (m *nativeTestAgentLoop) InterruptAgent(sessionKey string) string {
+	return "interrupted"
+}
+
 func (m *nativeTestAgentLoop) CompactSession(sessionKey string) string {
 	return "compacted"
 }

@@ -558,22 +558,46 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 }
 
 func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, eventID string) {
+	scope := CancelScopeSession
+	if len(data) > 0 {
+		var payload WSCancelPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			n.sendError(client, "payload_error", "invalid cancel payload")
+			return
+		}
+		if payload.Scope != "" {
+			scope = payload.Scope
+		}
+	}
+	if scope != CancelScopeSession && scope != CancelScopeTurn {
+		n.sendError(client, "payload_error", "invalid cancel scope: "+scope)
+		return
+	}
+
 	logger.InfoCF("native", "Cancel request received", map[string]interface{}{
 		"client_id":   client.ID,
 		"session_key": client.SessionKey,
+		"scope":       scope,
 	})
 
-	result := n.agentLoop.StopAgent(client.SessionKey)
+	var result string
+	if scope == CancelScopeTurn {
+		result = n.agentLoop.InterruptAgent(client.SessionKey)
+	} else {
+		result = n.agentLoop.StopAgent(client.SessionKey)
+	}
 
 	logger.InfoCF("native", "Cancel request processed", map[string]interface{}{
 		"client_id":   client.ID,
 		"session_key": client.SessionKey,
+		"scope":       scope,
 		"result":      result,
 	})
 
 	n.emitNativeEvent(client.SessionKey, "cancel.ack", map[string]interface{}{
 		"status":      "cancelled",
 		"session_key": client.SessionKey,
+		"scope":       scope,
 	}, "")
 }
 
