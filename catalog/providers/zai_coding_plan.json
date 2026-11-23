@@ -18,6 +18,19 @@
       "tool_call": true
     },
     {
+      "id": "glm-5.4",
+      "name": "GLM-5.4",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "glm-5.3",
       "name": "GLM-5.3",
       "context_window": 1000000,

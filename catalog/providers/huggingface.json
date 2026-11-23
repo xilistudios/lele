@@ -172,6 +172,20 @@
       "tool_call": true
     },
     {
+      "id": "zai-org/GLM-4.6V",
+      "name": "GLM-4.6V",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "zai-org/GLM-4.6V-Flash",
       "name": "GLM-4.6V-Flash",
       "context_window": 131072,
@@ -413,6 +427,19 @@
       "tool_call": true
     },
     {
+      "id": "zai-org/GLM-4.5",
+      "name": "GLM-4.5",
+      "context_window": 131072,
+      "max_output": 98304,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "zai-org/GLM-4.5-Air",
       "name": "GLM-4.5-Air",
       "context_window": 131072,
@@ -488,20 +515,6 @@
         "high"
       ],
       "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
-      "name": "Qwen3 235B-A22B Instruct 2507",
-      "context_window": 262144,
-      "max_output": 16384,
-      "tool_call": true
-    },
-    {
-      "id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-      "name": "Qwen3-Coder 30B-A3B Instruct",
-      "context_window": 262144,
-      "max_output": 65536,
       "tool_call": true
     }
   ]
