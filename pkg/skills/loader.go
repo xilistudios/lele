@@ -62,15 +62,17 @@ type SkillsLoader struct {
 	workspaceSkills string
 	globalSkills    string
 	builtinSkills   string
+	directorySkills string
 	configMgr       *WorkspaceConfigManager
 }
 
-func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string) *SkillsLoader {
+func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string, directorySkills string) *SkillsLoader {
 	loader := &SkillsLoader{
 		workspace:       workspace,
 		workspaceSkills: filepath.Join(workspace, "skills"),
 		globalSkills:    globalSkills,
 		builtinSkills:   builtinSkills,
+		directorySkills: directorySkills,
 	}
 
 	if workspace != "" {

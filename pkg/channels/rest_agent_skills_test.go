@@ -72,13 +72,13 @@ func newSkillsTestServer(t *testing.T) (*nativeTestServer, *skillsTestLoop, map[
 	writeTestSkill(t, beta, "other-beta-skill", "beta private 2")
 
 	ts := newNativeTestServer(t)
-	ts.channel.skillsLoader = skills.NewSkillsLoader(defaultWorkspace, "", "")
+	ts.channel.skillsLoader = skills.NewSkillsLoader(defaultWorkspace, "", "", "")
 
 	loop := &skillsTestLoop{
 		nativeTestAgentLoop: ts.loop,
 		loaders: map[string]*skills.SkillsLoader{
-			"alpha": skills.NewSkillsLoader(alpha, "", ""),
-			"beta":  skills.NewSkillsLoader(beta, "", ""),
+			"alpha": skills.NewSkillsLoader(alpha, "", "", ""),
+			"beta":  skills.NewSkillsLoader(beta, "", "", ""),
 		},
 		extraAgents: map[string]bool{"builderless": true},
 	}
@@ -154,7 +154,7 @@ func TestAgentCatalogSkills_FallsBackToChannelLoader(t *testing.T) {
 	ts := newNativeTestServer(t)
 	defaultWorkspace := t.TempDir()
 	writeTestSkill(t, defaultWorkspace, "default-only", "lives in the default workspace")
-	ts.channel.skillsLoader = skills.NewSkillsLoader(defaultWorkspace, "", "")
+	ts.channel.skillsLoader = skills.NewSkillsLoader(defaultWorkspace, "", "", "")
 
 	status, payload := getAgentCatalog(t, ts, "main")
 	if status != http.StatusOK {
@@ -170,7 +170,7 @@ func TestAgentCatalogSkills_DeletableFalseForGlobalSkills(t *testing.T) {
 
 	globalDir := t.TempDir()
 	writeTestSkill(t, globalDir, "shared-global", "shared with everyone")
-	loop.loaders["gamma"] = skills.NewSkillsLoader(dirs["alpha"], filepath.Join(globalDir, "skills"), "")
+	loop.loaders["gamma"] = skills.NewSkillsLoader(dirs["alpha"], filepath.Join(globalDir, "skills"), "", "")
 	loop.extraAgents["gamma"] = true
 
 	status, payload := getAgentCatalog(t, ts, "gamma")
@@ -298,7 +298,7 @@ func TestAgentSkillRemove_RefusesGlobalSkill(t *testing.T) {
 
 	globalDir := t.TempDir()
 	writeTestSkill(t, globalDir, "shared-global", "shared")
-	loop.loaders["alpha"] = skills.NewSkillsLoader(dirs["alpha"], filepath.Join(globalDir, "skills"), "")
+	loop.loaders["alpha"] = skills.NewSkillsLoader(dirs["alpha"], filepath.Join(globalDir, "skills"), "", "")
 
 	if status := removeAgentSkill(t, ts, "alpha", "shared-global"); status != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", status)
@@ -319,7 +319,7 @@ func TestAgentSkillRemove_UnknownSkillIs404(t *testing.T) {
 func TestInstallTarget(t *testing.T) {
 	agentWorkspace := t.TempDir()
 	globalDir := filepath.Join(t.TempDir(), "skills")
-	loader := skills.NewSkillsLoader(agentWorkspace, globalDir, "")
+	loader := skills.NewSkillsLoader(agentWorkspace, globalDir, "", "")
 
 	t.Run("default is workspace", func(t *testing.T) {
 		installer, scope, bad := installTarget(loader, "")
@@ -361,14 +361,14 @@ func TestInstallTarget(t *testing.T) {
 	})
 
 	t.Run("workspace scope without a workspace is rejected", func(t *testing.T) {
-		_, _, bad := installTarget(skills.NewSkillsLoader("", globalDir, ""), "workspace")
+		_, _, bad := installTarget(skills.NewSkillsLoader("", globalDir, "", ""), "workspace")
 		if bad == "" {
 			t.Fatal("expected error when the agent has no workspace")
 		}
 	})
 
 	t.Run("global scope without a global dir is rejected", func(t *testing.T) {
-		_, _, bad := installTarget(skills.NewSkillsLoader(agentWorkspace, "", ""), "global")
+		_, _, bad := installTarget(skills.NewSkillsLoader(agentWorkspace, "", "", ""), "global")
 		if bad == "" {
 			t.Fatal("expected error when no global skills dir is configured")
 		}

@@ -479,7 +479,7 @@ func newScopedSkillsFixture(t *testing.T) scopedSkillsFixture {
 	workspace := t.TempDir()
 	globalDir := filepath.Join(t.TempDir(), "skills")
 	builtinDir := filepath.Join(t.TempDir(), "skills")
-	ts.channel.skillsLoader = skills.NewSkillsLoader(workspace, globalDir, builtinDir)
+	ts.channel.skillsLoader = skills.NewSkillsLoader(workspace, globalDir, builtinDir, "")
 
 	return scopedSkillsFixture{ts: ts, workspace: workspace, globalDir: globalDir, builtinDir: builtinDir}
 }
@@ -615,7 +615,7 @@ func TestHandleSkillInstall_UnknownScopeIs400(t *testing.T) {
 func TestHandleSkillInstall_GlobalScopeInvalidatesEveryAgentPrompt(t *testing.T) {
 	ts, loop, dirs := newSkillsTestServer(t)
 	globalDir := filepath.Join(t.TempDir(), "skills")
-	ts.channel.skillsLoader = skills.NewSkillsLoader(dirs["default"], globalDir, "")
+	ts.channel.skillsLoader = skills.NewSkillsLoader(dirs["default"], globalDir, "", "")
 
 	fanout := &fanoutSkillsTestLoop{skillsTestLoop: loop, ids: []string{"alpha", "beta"}}
 	ts.channel.agentLoop = fanout
