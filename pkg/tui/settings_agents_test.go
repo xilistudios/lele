@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -271,11 +272,14 @@ func TestFindAgent(t *testing.T) {
 func TestLoadAgentDetailDefaults(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentDetail("")
-	if len(m.modalItems) != 11 {
-		t.Fatalf("expected 11 defaults rows, got %d", len(m.modalItems))
+	if !strings.Contains(m.modalItems[defaultsFieldModel], "test-model") {
+		t.Errorf("model row should show value: %q", m.modalItems[defaultsFieldModel])
 	}
-	if !strings.Contains(m.modalItems[1], "test-model") {
-		t.Errorf("model row should show value: %q", m.modalItems[1])
+	if !strings.Contains(m.modalItems[defaultsFieldMemoryMaxLines], "500") {
+		t.Errorf("memory row should show the configured cap: %q", m.modalItems[defaultsFieldMemoryMaxLines])
+	}
+	if !strings.Contains(m.modalItems[defaultsFieldWorkspace], "Workspace:") {
+		t.Errorf("workspace row should be present: %q", m.modalItems[defaultsFieldWorkspace])
 	}
 }
 
@@ -633,12 +637,22 @@ func TestDefaultsDetailRowIndexAlignment(t *testing.T) {
 		defaultsFieldMaxTokens:             "MaxTokens:",
 		defaultsFieldTemperature:           "Temperature:",
 		defaultsFieldThinkingLevel:         "Thinking:",
+		defaultsFieldWorkspace:             "Workspace:",
+		defaultsFieldRestrictToWorkspace:   "RestrictToWorkspace:",
+		defaultsFieldModelFallbacks:        "ModelFallbacks:",
+		defaultsFieldImageModel:            "ImageModel:",
+		defaultsFieldImageModelFallbacks:   "ImageModelFallbacks:",
 		defaultsFieldMaxToolIterations:     "MaxToolIterations:",
 		defaultsFieldMaxReadLines:          "MaxReadLines:",
 		defaultsFieldMemoryMaxLines:        "MemoryMaxLines:",
 		defaultsFieldSubagentTimeout:       "SubagentTimeout:",
 		defaultsFieldSubagentMaxConcurrent: "SubagentMaxConcurrent:",
+		defaultsFieldSubagentMaxRetries:    "SubagentMaxRetries:",
+		defaultsFieldSubagentMaxIterations: "SubagentMaxIterations:",
+		defaultsFieldSubagentRetention:     "SubagentRetention:",
 		defaultsFieldLLMLoopTimeout:        "LLMLoopTimeout:",
+		defaultsFieldPromptCacheEnabled:    "PromptCache:",
+		defaultsFieldPromptCacheTTL:        "PromptCacheTTL:",
 	}
 	if len(m.modalItems) != len(wantPrefix) {
 		t.Fatalf("defaults view has %d rows but %d field constants defined: %v",
@@ -887,5 +901,144 @@ func TestAddAgentFlowRendersErrors(t *testing.T) {
 	view := m.renderActiveModal()
 	if !strings.Contains(view, m.formError) {
 		t.Fatalf("modal dispatch must show the add-agent validation error %q", m.formError)
+	}
+}
+
+func TestDefaultsEditableRowsPersist(t *testing.T) {
+	cases := []struct {
+		name  string
+		row   int
+		field string
+		input string
+		want  string
+		read  func(*config.Config) string
+	}{
+		{
+			name: "workspace", row: defaultsFieldWorkspace, field: "defaultWorkspace",
+			input: "/tmp/agent-ws", want: "/tmp/agent-ws",
+			read: func(c *config.Config) string { return c.Agents.Defaults.Workspace },
+		},
+		{
+			name: "model fallbacks", row: defaultsFieldModelFallbacks, field: "defaultModelFallbacks",
+			input: "openai:gpt-4o, anthropic:claude", want: "openai:gpt-4o|anthropic:claude",
+			read: func(c *config.Config) string { return strings.Join(c.Agents.Defaults.ModelFallbacks, "|") },
+		},
+		{
+			name: "image model fallbacks", row: defaultsFieldImageModelFallbacks, field: "defaultImageModelFallbacks",
+			input: "openai:gpt-image-1", want: "openai:gpt-image-1",
+			read: func(c *config.Config) string { return strings.Join(c.Agents.Defaults.ImageModelFallbacks, "|") },
+		},
+		{
+			name: "memory max lines", row: defaultsFieldMemoryMaxLines, field: "defaultMemoryMaxLines",
+			input: "120", want: "120",
+			read: func(c *config.Config) string { return strconv.Itoa(c.Agents.Defaults.MemoryMaxLines) },
+		},
+		{
+			name: "subagent max retries", row: defaultsFieldSubagentMaxRetries, field: "defaultSubagentMaxRetries",
+			input: "5", want: "5",
+			read: func(c *config.Config) string { return strconv.Itoa(c.Agents.Defaults.SubagentMaxRetries) },
+		},
+		{
+			name: "subagent max iterations", row: defaultsFieldSubagentMaxIterations, field: "defaultSubagentMaxIterations",
+			input: "9", want: "9",
+			read: func(c *config.Config) string { return strconv.Itoa(c.Agents.Defaults.SubagentMaxIterations) },
+		},
+		{
+			name: "subagent retention", row: defaultsFieldSubagentRetention, field: "defaultSubagentRetention",
+			input: "15", want: "15",
+			read: func(c *config.Config) string { return strconv.Itoa(c.Agents.Defaults.SubagentRetentionMinutes) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newAgentsTestModel(t)
+			m.loadAgentDetail("")
+
+			m.modalSelectedIdx = tc.row
+			m.handleDefaultsEditEnter()
+			if m.settingsEditField != tc.field {
+				t.Fatalf("row %d opened %q, want %q", tc.row, m.settingsEditField, tc.field)
+			}
+
+			m.handleAgentSettingsInput(tc.input)
+
+			reloaded, err := config.LoadConfig(config.DefaultConfigPath())
+			if err != nil {
+				t.Fatalf("reloading config: %v", err)
+			}
+			if got := tc.read(reloaded); got != tc.want {
+				t.Errorf("persisted value = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultsToggleRowsPersist(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.cfg.Agents.Defaults.RestrictToWorkspace = true
+	m.loadAgentDetail("")
+
+	m.modalSelectedIdx = defaultsFieldRestrictToWorkspace
+	m.handleDefaultsEditEnter()
+	if m.cfg.Agents.Defaults.RestrictToWorkspace {
+		t.Fatal("restrict_to_workspace should be toggled off")
+	}
+
+	m.modalSelectedIdx = defaultsFieldPromptCacheEnabled
+	m.handleDefaultsEditEnter()
+	if !m.cfg.Agents.Defaults.PromptCache.Enabled {
+		t.Fatal("prompt cache should be toggled on")
+	}
+
+	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
+	if err != nil {
+		t.Fatalf("reloading config: %v", err)
+	}
+	if reloaded.Agents.Defaults.RestrictToWorkspace {
+		t.Error("restrict_to_workspace toggle was not persisted")
+	}
+	if !reloaded.Agents.Defaults.PromptCache.Enabled {
+		t.Error("prompt_cache.enabled toggle was not persisted")
+	}
+}
+
+func TestDefaultsPromptCacheTTLSelector(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.modalMode = ModalSettingsAgentEdit
+	m.loadAgentDetail("")
+
+	m.modalSelectedIdx = defaultsFieldPromptCacheTTL
+	m.handleDefaultsEditEnter()
+	if !m.settingsSelectorActive {
+		t.Fatal("prompt cache TTL should open a selector")
+	}
+
+	m.settingsSelectorIdx = len(m.settingsSelectorValues) - 1
+	m.handleSelectorConfirm()
+	if got := m.cfg.Agents.Defaults.PromptCache.NormalizedTTL(); got != "1h" {
+		t.Fatalf("TTL = %q, want 1h", got)
+	}
+}
+
+func TestDefaultsImageModelSelector(t *testing.T) {
+	m := newModelSelectorTestModel(t)
+	m.modalMode = ModalSettingsAgentEdit
+	m.loadAgentDetail("")
+
+	m.modalSelectedIdx = defaultsFieldImageModel
+	m.handleDefaultsEditEnter()
+	if !m.settingsSelectorActive {
+		t.Fatal("image model should open a model selector")
+	}
+	if m.settingsSelectorField != "defaultImageModel" {
+		t.Fatalf("selector field = %q, want defaultImageModel", m.settingsSelectorField)
+	}
+
+	want := m.settingsSelectorValues[0]
+	m.settingsSelectorIdx = 0
+	m.handleSelectorConfirm()
+	if m.cfg.Agents.Defaults.ImageModel != want {
+		t.Fatalf("image model = %q, want %q", m.cfg.Agents.Defaults.ImageModel, want)
 	}
 }

@@ -18,13 +18,7 @@ func (m *Model) renderTUISettings(modalTitle string) string {
 		var sb strings.Builder
 		sb.WriteString(TitleStyle.Render(modalTitle) + "\n\n")
 
-		label := ""
-		switch m.settingsEditField {
-		case "maxMessages":
-			label = i18n.T("tui.settings.maxMessages")
-		case "streamThrottle":
-			label = i18n.T("tui.settings.streamThrottle")
-		}
+		label := settingsFieldLabel(m.settingsEditField)
 		m.textInput.Width = 40
 		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 
@@ -54,6 +48,10 @@ func (m *Model) systemSettingsTitle() string {
 		return i18n.T("tui.settings.goal")
 	case sysSubViewName(sysGroupUpdates):
 		return i18n.T("tui.settings.updates")
+	case sysSubViewName(sysGroupGateway):
+		return i18n.T("tui.settings.gateway")
+	case sysSubViewName(sysGroupKeyring):
+		return i18n.T("tui.settings.keyring")
 	}
 	return i18n.T("tui.settings.system")
 }
@@ -62,7 +60,7 @@ func (m *Model) renderSystemSettingsEdit(title string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
 
-	label := m.settingsEditField
+	label := settingsFieldLabel(m.settingsEditField)
 	m.textInput.Width = 40
 	sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 
@@ -88,20 +86,7 @@ func (m *Model) renderAgentEditInput() string {
 		sb.WriteString(ModalItemActive.Render("  "+m.formError) + "\n")
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.settings.confirmDeleteHint")))
 	} else {
-		label := m.settingsEditField
-		fieldLabels := map[string]string{
-			"agentName":                   "Name",
-			"agentDescription":            "Description",
-			"agentWorkspace":              "Workspace",
-			"agentModel":                  i18n.T("tui.model"),
-			"agentTemperature":            "Temperature",
-			"agentSubagentsMaxConcurrent": "Subagents MaxConcurrent",
-			"newAgentID":                  "Agent ID",
-			"confirmDelete":               "",
-		}
-		if l, ok := fieldLabels[m.settingsEditField]; ok && l != "" {
-			label = l
-		}
+		label := settingsFieldLabel(m.settingsEditField)
 		m.textInput.Width = 60
 		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 		if m.formError != "" {

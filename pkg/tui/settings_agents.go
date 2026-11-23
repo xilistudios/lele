@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -31,12 +32,22 @@ const (
 	defaultsFieldMaxTokens
 	defaultsFieldTemperature
 	defaultsFieldThinkingLevel
+	defaultsFieldWorkspace
+	defaultsFieldRestrictToWorkspace
+	defaultsFieldModelFallbacks
+	defaultsFieldImageModel
+	defaultsFieldImageModelFallbacks
 	defaultsFieldMaxToolIterations
 	defaultsFieldMaxReadLines
 	defaultsFieldMemoryMaxLines
 	defaultsFieldSubagentTimeout
 	defaultsFieldSubagentMaxConcurrent
+	defaultsFieldSubagentMaxRetries
+	defaultsFieldSubagentMaxIterations
+	defaultsFieldSubagentRetention
 	defaultsFieldLLMLoopTimeout
+	defaultsFieldPromptCacheEnabled
+	defaultsFieldPromptCacheTTL
 )
 
 func thinkingLevelSelectorOptions() (labels, values []string) {
@@ -80,12 +91,22 @@ func (m *Model) loadAgentDetail(agentID string) {
 			fmt.Sprintf("MaxTokens: %d", d.MaxTokens),
 			fmt.Sprintf("Temperature: %s", formatFloatPtr(d.Temperature)),
 			fmt.Sprintf("Thinking: %s", thinkingLevelStr(d.ThinkingLevel)),
+			fmt.Sprintf("Workspace: %s", valueOr(d.Workspace, "default")),
+			fmt.Sprintf("RestrictToWorkspace: %s", boolStatus(d.RestrictToWorkspace)),
+			fmt.Sprintf("ModelFallbacks: %s", valueOr(strings.Join(d.ModelFallbacks, ", "), "none")),
+			fmt.Sprintf("ImageModel: %s", valueOr(d.ImageModel, "default")),
+			fmt.Sprintf("ImageModelFallbacks: %s", valueOr(strings.Join(d.ImageModelFallbacks, ", "), "none")),
 			fmt.Sprintf("MaxToolIterations: %d", d.MaxToolIterations),
 			fmt.Sprintf("MaxReadLines: %d", d.MaxReadLines),
 			fmt.Sprintf("MemoryMaxLines: %d", d.MemoryMaxLines),
 			fmt.Sprintf("SubagentTimeout: %dm", d.SubagentTimeoutMinutes),
 			fmt.Sprintf("SubagentMaxConcurrent: %d", d.SubagentMaxConcurrent),
+			fmt.Sprintf("SubagentMaxRetries: %d", d.SubagentMaxRetries),
+			fmt.Sprintf("SubagentMaxIterations: %d", d.SubagentMaxIterations),
+			fmt.Sprintf("SubagentRetention: %dm", d.SubagentRetentionMinutes),
 			fmt.Sprintf("LLMLoopTimeout: %dm", d.LLMLoopTimeoutMinutes),
+			fmt.Sprintf("PromptCache: %s", boolStatus(d.PromptCache.Enabled)),
+			fmt.Sprintf("PromptCacheTTL: %s", d.PromptCache.NormalizedTTL()),
 		}
 		return
 	}
@@ -201,14 +222,7 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		if agent.Model != nil {
 			modelStr = agent.Model.Primary
 		}
-		labels, values := m.modelSelectorOptions(modelStr)
-		if len(values) == 0 {
-			labels = []string{"(default)"}
-			values = []string{""}
-		}
-		labels = append(labels, "(custom...)")
-		values = append(values, "__custom__")
-		m.startSettingsSelector("agentModel", modelStr, labels, values)
+		m.startModelFieldSelector("agentModel", modelStr)
 	case agentFieldTemperature:
 		m.settingsEditField = "agentTemperature"
 		tempStr := ""
@@ -260,18 +274,9 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 			m.startSettingsSelector("defaultProvider", d.Provider, labels, values)
 		}
 	case defaultsFieldModel:
-		labels, values := m.modelSelectorOptions(d.Model)
-		if len(values) == 0 {
-			labels = []string{"(default)"}
-			values = []string{""}
-		}
-		labels = append(labels, "(custom...)")
-		values = append(values, "__custom__")
-		m.startSettingsSelector("defaultModel", d.Model, labels, values)
+		m.startModelFieldSelector("defaultModel", d.Model)
 	case defaultsFieldMaxTokens:
-		m.settingsEditField = "defaultMaxTokens"
-		m.textInput.SetValue(strconv.Itoa(d.MaxTokens))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultMaxTokens", d.MaxTokens)
 	case defaultsFieldTemperature:
 		m.settingsEditField = "defaultTemperature"
 		m.textInput.SetValue(formatFloatPtr(d.Temperature))
@@ -283,32 +288,67 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 		}
 		labels, values := thinkingLevelSelectorOptions()
 		m.startSettingsSelector("defaultThinkingLevel", current, labels, values)
+	case defaultsFieldWorkspace:
+		m.settingsEditField = "defaultWorkspace"
+		m.textInput.SetValue(d.Workspace)
+		m.textInput.Focus()
+	case defaultsFieldRestrictToWorkspace:
+		d.RestrictToWorkspace = !d.RestrictToWorkspace
+		m.persistDefaultsEdit()
+	case defaultsFieldModelFallbacks:
+		m.settingsEditField = "defaultModelFallbacks"
+		m.textInput.SetValue(strings.Join(d.ModelFallbacks, ", "))
+		m.textInput.Focus()
+	case defaultsFieldImageModel:
+		m.startModelFieldSelector("defaultImageModel", d.ImageModel)
+	case defaultsFieldImageModelFallbacks:
+		m.settingsEditField = "defaultImageModelFallbacks"
+		m.textInput.SetValue(strings.Join(d.ImageModelFallbacks, ", "))
+		m.textInput.Focus()
 	case defaultsFieldMaxToolIterations:
-		m.settingsEditField = "defaultMaxToolIterations"
-		m.textInput.SetValue(strconv.Itoa(d.MaxToolIterations))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultMaxToolIterations", d.MaxToolIterations)
 	case defaultsFieldMaxReadLines:
-		m.settingsEditField = "defaultMaxReadLines"
-		m.textInput.SetValue(strconv.Itoa(d.MaxReadLines))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultMaxReadLines", d.MaxReadLines)
 	case defaultsFieldMemoryMaxLines:
-		m.settingsEditField = "defaultMemoryMaxLines"
-		m.textInput.SetValue(strconv.Itoa(d.MemoryMaxLines))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultMemoryMaxLines", d.MemoryMaxLines)
 	case defaultsFieldSubagentTimeout:
-		m.settingsEditField = "defaultSubagentTimeout"
-		m.textInput.SetValue(strconv.Itoa(d.SubagentTimeoutMinutes))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultSubagentTimeout", d.SubagentTimeoutMinutes)
 	case defaultsFieldSubagentMaxConcurrent:
-		m.settingsEditField = "defaultSubagentMaxConcurrent"
-		m.textInput.SetValue(strconv.Itoa(d.SubagentMaxConcurrent))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultSubagentMaxConcurrent", d.SubagentMaxConcurrent)
+	case defaultsFieldSubagentMaxRetries:
+		m.startNumberEdit("defaultSubagentMaxRetries", d.SubagentMaxRetries)
+	case defaultsFieldSubagentMaxIterations:
+		m.startNumberEdit("defaultSubagentMaxIterations", d.SubagentMaxIterations)
+	case defaultsFieldSubagentRetention:
+		m.startNumberEdit("defaultSubagentRetention", d.SubagentRetentionMinutes)
 	case defaultsFieldLLMLoopTimeout:
-		m.settingsEditField = "defaultLLMLoopTimeout"
-		m.textInput.SetValue(strconv.Itoa(d.LLMLoopTimeoutMinutes))
-		m.textInput.Focus()
+		m.startNumberEdit("defaultLLMLoopTimeout", d.LLMLoopTimeoutMinutes)
+	case defaultsFieldPromptCacheEnabled:
+		d.PromptCache.Enabled = !d.PromptCache.Enabled
+		m.persistDefaultsEdit()
+	case defaultsFieldPromptCacheTTL:
+		labels := []string{"5m", "1h"}
+		m.startSettingsSelector("defaultPromptCacheTTL", d.PromptCache.NormalizedTTL(), labels, labels)
 	}
 	return nil
+}
+
+func (m *Model) startModelFieldSelector(field, current string) {
+	labels, values := m.modelSelectorOptions(current)
+	if len(values) == 0 {
+		labels = []string{"(default)"}
+		values = []string{""}
+	}
+	labels = append(labels, "(custom...)")
+	values = append(values, "__custom__")
+	m.startSettingsSelector(field, current, labels, values)
+}
+
+func (m *Model) persistDefaultsEdit() {
+	m.formError = ""
+	m.saveConfigToDisk()
+	m.applyAgentReload()
+	m.loadAgentDetail("")
 }
 
 func (m *Model) handleAgentSettingsInput(value string) {
@@ -400,9 +440,8 @@ func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 			agent.ThinkingLevel = &level
 		}
 	case "agentSubagentsMaxConcurrent":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		if agent.Subagents == nil {
@@ -426,9 +465,8 @@ func (m *Model) handleDefaultsFieldEdit(value string) {
 	case "defaultModel":
 		d.Model = value
 	case "defaultMaxTokens":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.MaxTokens = v
@@ -454,48 +492,72 @@ func (m *Model) handleDefaultsFieldEdit(value string) {
 		} else {
 			d.ThinkingLevel = &level
 		}
+	case "defaultWorkspace":
+		d.Workspace = value
+	case "defaultModelFallbacks":
+		d.ModelFallbacks = parseCSVList(value)
+	case "defaultImageModel":
+		d.ImageModel = value
+	case "defaultImageModelFallbacks":
+		d.ImageModelFallbacks = parseCSVList(value)
 	case "defaultMaxToolIterations":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.MaxToolIterations = v
 	case "defaultMaxReadLines":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.MaxReadLines = v
 	case "defaultMemoryMaxLines":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.MemoryMaxLines = v
 	case "defaultSubagentTimeout":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.SubagentTimeoutMinutes = v
 	case "defaultSubagentMaxConcurrent":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.SubagentMaxConcurrent = v
+	case "defaultSubagentMaxRetries":
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
+			return
+		}
+		d.SubagentMaxRetries = v
+	case "defaultSubagentMaxIterations":
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
+			return
+		}
+		d.SubagentMaxIterations = v
+	case "defaultSubagentRetention":
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
+			return
+		}
+		d.SubagentRetentionMinutes = v
 	case "defaultLLMLoopTimeout":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		d.LLMLoopTimeoutMinutes = v
+	case "defaultPromptCacheTTL":
+		d.PromptCache.TTL = value
+	default:
+		return
 	}
 
 	m.formError = ""
