@@ -143,9 +143,9 @@ describe('ChatPage layout contract', () => {
     contains(listWrapperOf(container), 'max-h-[60%]')
   })
 
-  test('the composer wrapper is pinned', () => {
+  test('the composer wrapper is pinned to the bottom', () => {
     const container = renderChatPage()
-    contains(composerWrapperOf(container), 'shrink-0', 'border-t')
+    contains(composerWrapperOf(container), 'shrink-0', 'border-t', 'mt-auto')
   })
 
   test('the composer is available while reading a subagent session', () => {

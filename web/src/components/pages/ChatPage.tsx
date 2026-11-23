@@ -46,7 +46,7 @@ export function ChatPage() {
             <MessageList />
           </div>
 
-          <div className="shrink-0 border-t border-border px-4 py-3 md:px-6 md:py-4">
+          <div className="mt-auto shrink-0 border-t border-border px-4 py-3 md:px-6 md:py-4">
             <div className="mx-auto max-w-3xl">
               {chatMode === 'group' && !parentSessionKey ? <GroupComposer /> : <ChatComposer />}
             </div>
