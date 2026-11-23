@@ -96,7 +96,10 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 }
 
 func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
+	cb.initialMu.Lock()
 	cb.tools = registry
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
 }
 
 func (cb *ContextBuilder) SetVisionSupported(v bool) {

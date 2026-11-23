@@ -280,6 +280,12 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 			instance.Sessions = old.Sessions
 			instance.ContextBuilder = old.ContextBuilder
 			old.ContextBuilder.SetSkillsFilter(ac.Skills)
+			old.ContextBuilder.SetToolsRegistry(instance.Tools)
+			old.ContextBuilder.SetVisionSupported(instance.SupportsImages)
+			old.ContextBuilder.SetVideoSupported(instance.SupportsVideo)
+			registerSkillTools(instance.Tools, old.ContextBuilder, id, ac.Skills)
+			applyToolsAllowlist(instance.Tools, ac.Tools, id)
+			syncSkillsDiscovery(instance.Tools, old.ContextBuilder)
 			if ac.Subagents != nil && len(ac.Subagents.AllowAgents) > 0 {
 				available := resolveAvailableSubagents(ac, cfg)
 				old.ContextBuilder.SetAvailableSubagents(available)

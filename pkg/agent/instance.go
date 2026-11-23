@@ -234,18 +234,13 @@ func NewAgentInstance(
 
 	skillUsage := skills.NewUsageStore(filepath.Join(config.GetLeleDir(), "skills_usage.json"))
 	contextBuilder.SetSkillUsage(agentID, skillUsage)
-	toolsRegistry.Register(tools.NewSearchSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter))
-	toolsRegistry.Register(tools.NewListSkillsTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.SkillsInContext))
-	toolsRegistry.Register(tools.NewLoadSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.PinSkills, contextBuilder.UnpinSkills, contextBuilder.PinnedSkills))
+	registerSkillTools(toolsRegistry, contextBuilder, agentID, skillsFilter)
 
 	if agentCfg != nil {
 		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, agentID)
 	}
 
-	_, hasListSkills := toolsRegistry.Get(tools.ListSkillsName)
-	_, hasSearchSkill := toolsRegistry.Get(tools.SearchSkillName)
-	_, hasLoadSkill := toolsRegistry.Get(tools.LoadSkillName)
-	contextBuilder.SetSkillsDiscovery(hasListSkills, hasSearchSkill, hasLoadSkill)
+	syncSkillsDiscovery(toolsRegistry, contextBuilder)
 
 	if subagents != nil && len(subagents.AllowAgents) > 0 {
 		available := resolveAvailableSubagents(agentCfg, cfg)
@@ -410,6 +405,20 @@ func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config)
 		}
 	}
 	return result
+}
+
+func registerSkillTools(reg *tools.ToolRegistry, cb *ContextBuilder, agentID string, filter []string) {
+	usage := cb.SkillUsageStore()
+	reg.Register(tools.NewSearchSkillTool(cb.SkillsLoader(), usage, agentID, filter))
+	reg.Register(tools.NewListSkillsTool(cb.SkillsLoader(), usage, agentID, filter, cb.SkillsInContext))
+	reg.Register(tools.NewLoadSkillTool(cb.SkillsLoader(), usage, agentID, filter, cb.PinSkills, cb.UnpinSkills, cb.PinnedSkills))
+}
+
+func syncSkillsDiscovery(reg *tools.ToolRegistry, cb *ContextBuilder) {
+	_, hasList := reg.Get(tools.ListSkillsName)
+	_, hasSearch := reg.Get(tools.SearchSkillName)
+	_, hasLoad := reg.Get(tools.LoadSkillName)
+	cb.SetSkillsDiscovery(hasList, hasSearch, hasLoad)
 }
 
 func applyToolsAllowlist(registry *tools.ToolRegistry, allowed []string, agentID string) {
