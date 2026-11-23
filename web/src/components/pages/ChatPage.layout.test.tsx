@@ -138,6 +138,11 @@ describe('ChatPage layout contract', () => {
     contains(listWrapperOf(container), 'flex-1', 'min-h-0', 'overflow-hidden')
   })
 
+  test('the message list wrapper never takes more than 60% of the column', () => {
+    const container = renderChatPage()
+    contains(listWrapperOf(container), 'max-h-[60%]')
+  })
+
   test('the composer wrapper is pinned', () => {
     const container = renderChatPage()
     contains(composerWrapperOf(container), 'shrink-0', 'border-t')
