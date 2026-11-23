@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { type RefObject, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SortMode } from '../../hooks/useChatFilters'
 
@@ -7,6 +7,7 @@ interface ChatSearchBarProps {
   onQueryChange: (value: string) => void
   sortMode: SortMode
   onSortChange: (mode: SortMode) => void
+  inputRef?: RefObject<HTMLInputElement>
   className?: string
   inputClassName?: string
 }
@@ -16,6 +17,7 @@ export const ChatSearchBar = memo(function ChatSearchBar({
   onQueryChange,
   sortMode,
   onSortChange,
+  inputRef,
   className = '',
   inputClassName = '',
 }: ChatSearchBarProps) {
@@ -26,6 +28,7 @@ export const ChatSearchBar = memo(function ChatSearchBar({
       <div className="relative flex-1">
         <SearchIcon />
         <input
+          ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}

@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import i18n from '../../test/i18n'
 import { ToolCallDisplay } from './ToolCallDisplay'
 
@@ -9,7 +10,9 @@ const ACTION = '🔍 Reviewing goal result...'
 
 const GENERIC_ICON_START = 'M14.7 6.3a1 1 0 0 0 0 1.4'
 
-function renderGoal(overrides: Record<string, string | undefined> = {}) {
+type ToolCallProps = Partial<ComponentProps<typeof ToolCallDisplay>>
+
+function renderGoal(overrides: ToolCallProps = {}) {
   return render(
     <ToolCallDisplay
       toolName="goal"
@@ -41,11 +44,24 @@ describe('ToolCallDisplay for tool "goal"', () => {
     expect(paths).toContain('M12 6v6l4 2')
   })
 
-  test('tints the icon with the accent color token', () => {
-    const { container } = renderGoal()
+  test('exposes the goal summary as an expandable control', () => {
+    const onToggleExpand = mock(() => {})
+    const view = renderGoal({ onToggleExpand })
 
-    const iconBox = container.querySelector('div.rounded-md')
-    expect(iconBox?.className).toContain('text-accent-primary')
+    const toggle = view.getByRole('button', { name: new RegExp(LABEL) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.textContent).toContain(ACTION)
+
+    fireEvent.click(toggle)
+    expect(onToggleExpand).toHaveBeenCalledTimes(1)
+  })
+
+  test('reports the expanded state to assistive technology', () => {
+    const view = renderGoal({ expanded: true })
+
+    expect(
+      view.getByRole('button', { name: new RegExp(LABEL) }).getAttribute('aria-expanded'),
+    ).toBe('true')
   })
 
   test('resolves the goal label in every shipped locale', () => {

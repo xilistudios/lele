@@ -1,14 +1,15 @@
 import { type ChangeEvent, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { IconButton } from '../atoms/IconButton'
+import { IconButton, type IconButtonVariant } from '../atoms/IconButton'
 
 type Props = {
   className?: string
   onUpload: (files: File[]) => Promise<string[]>
   onAttach: (paths: string[]) => void
+  variant?: IconButtonVariant
 }
 
-export function AttachmentInput({ className, onUpload, onAttach }: Props) {
+export function AttachmentInput({ className, onUpload, onAttach, variant }: Props) {
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
@@ -50,11 +51,12 @@ export function AttachmentInput({ className, onUpload, onAttach }: Props) {
         onClick={() => fileInputRef.current?.click()}
         title={t('chat.attachFiles')}
         ariaLabel={t('chat.attachFiles')}
+        variant={variant}
         className={className}
       >
         <svg
-          width="14"
-          height="14"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

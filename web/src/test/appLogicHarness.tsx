@@ -1,12 +1,13 @@
 import '../test/setup'
 import '../test/i18n'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { type ReactNode, createElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { useAppLogic } from '../hooks/useAppLogic'
 import type { ApiClient } from '../lib/api'
 import { saveCurrentSessionKey } from '../lib/storage'
+import { waitUntil } from './waitUntil'
 
 export type SentEvent = { event: string; data: Record<string, unknown> }
 
@@ -87,17 +88,4 @@ export function renderAppLogic(options: RenderAppLogicOptions = {}) {
   return { ...rendered, sent, waitUntilReady, sessionKey }
 }
 
-export async function waitUntil(
-  predicate: () => boolean,
-  what = 'condition',
-  timeoutMs = 4000,
-): Promise<void> {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    })
-  }
-  throw new Error(`waitUntil: ${what} never became true`)
-}
+export { waitUntil }

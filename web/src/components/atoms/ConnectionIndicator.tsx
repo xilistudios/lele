@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePopoverPosition } from '../../hooks/usePopoverPosition'
-import { IconButton } from './IconButton'
-import { ServerIcon } from './Icons'
 
 type Props = {
   status: 'disconnected' | 'connecting' | 'connected'
@@ -53,27 +51,17 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
   const horizontalClass = position.horizontal === 'right-align' ? 'right-0' : 'left-0'
 
   return (
-    <div ref={ref} className={`relative ${!isOpen ? 'group' : ''}`}>
-      <IconButton
+    <div ref={ref} className="relative">
+      <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
-        ariaLabel={t('connection.statusAria', { status })}
+        aria-label={t('connection.statusAria', { status })}
+        aria-expanded={isOpen}
+        data-testid="connection-status-dot"
+        className="flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-surface-hover"
       >
-        <div className="relative">
-          <ServerIcon />
-          <span
-            className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border border-border ${config.dot}`}
-            aria-hidden="true"
-          />
-        </div>
-      </IconButton>
-
-      <span
-        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
-          isOpen ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'
-        }`}
-      >
-        {t('common.status')}
-      </span>
+        <span className={`h-2.5 w-2.5 rounded-full ${config.dot}`} aria-hidden="true" />
+      </button>
 
       <div
         className={`absolute z-50 w-[180px] rounded-lg border border-border bg-background-secondary px-3 py-2 shadow-lg transition-all duration-fast ${verticalClass} ${horizontalClass} ${origin} ${

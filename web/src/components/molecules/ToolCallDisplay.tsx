@@ -295,9 +295,41 @@ export function parseCommandArgs(args?: string): CommandArgs | null {
   }
 }
 
+const CARD_SHELL =
+  'border border-border bg-background-secondary/50 overflow-hidden transition-all duration-fast'
+
+const CARD_SHAPE = {
+  pill: 'rounded-full hover:bg-background-secondary',
+  expanded: 'rounded-2xl',
+}
+
+function ToolIcon({ config }: { config: IconConfig }) {
+  return (
+    <div
+      data-testid="tool-icon"
+      className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-background-tertiary ${config.color}`}
+    >
+      <svg
+        className="h-3.5 w-3.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        aria-hidden="true"
+      >
+        {config.icon
+          .split(' M')
+          .map((path, i) =>
+            i === 0 ? <path key={path} d={path} /> : <path key={`M${path}`} d={`M${path}`} />,
+          )}
+      </svg>
+    </div>
+  )
+}
+
 function ToolBadge({ text }: { text: string }) {
   return (
-    <span className="inline-flex flex-shrink-0 items-center rounded-md border border-border bg-background-tertiary px-1.5 py-0.5 text-2xs font-medium text-text-tertiary">
+    <span className="inline-flex flex-shrink-0 items-center rounded-full bg-background-tertiary px-2 py-0.5 text-2xs font-medium text-text-tertiary">
       {text}
     </span>
   )
@@ -337,28 +369,9 @@ export function ToolCallDisplay({
       : commandArgs.command
     return (
       <div className="group" data-testid="command-applied-card">
-        <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
-          <div className="flex w-full items-center gap-2 px-3 py-1.5 text-left">
-            <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                {iconConfig.icon
-                  .split(' M')
-                  .map((path, i) =>
-                    i === 0 ? (
-                      <path key={path} d={path} />
-                    ) : (
-                      <path key={`M${path}`} d={`M${path}`} />
-                    ),
-                  )}
-              </svg>
-            </div>
+        <div className={`${CARD_SHELL} rounded-full`}>
+          <div className="flex w-full items-center gap-2 py-1 pl-1 pr-3 text-left">
+            <ToolIcon config={iconConfig} />
 
             <span className="text-xs text-text-secondary flex-shrink-0">{label}</span>
 
@@ -381,28 +394,9 @@ export function ToolCallDisplay({
   if (isFileOp) {
     return (
       <div className="group">
-        <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
-          <div className="flex w-full items-center gap-2 px-3 py-1.5 text-left">
-            <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                {iconConfig.icon
-                  .split(' M')
-                  .map((path, i) =>
-                    i === 0 ? (
-                      <path key={path} d={path} />
-                    ) : (
-                      <path key={`M${path}`} d={`M${path}`} />
-                    ),
-                  )}
-              </svg>
-            </div>
+        <div className={`${CARD_SHELL} rounded-full`}>
+          <div className="flex w-full items-center gap-2 py-1 pl-1 pr-3 text-left">
+            <ToolIcon config={iconConfig} />
 
             {argsSummary ? (
               <span className="min-w-0 flex items-center gap-1 text-xs">
@@ -414,7 +408,7 @@ export function ToolCallDisplay({
             )}
 
             {toolStatus === 'error' && (
-              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium bg-state-error/10 text-state-error border border-state-error/30 ml-auto">
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium bg-state-error/10 text-state-error border border-state-error/30 ml-auto">
                 {t('toolCalls.error')}
               </span>
             )}
@@ -428,38 +422,15 @@ export function ToolCallDisplay({
 
   return (
     <div className="group">
-      <div
-        className={`rounded-lg border border-border bg-background-secondary/50 overflow-hidden transition-colors ${
-          expanded ? '' : 'hover:bg-background-secondary'
-        }`}
-      >
-        <div className="flex w-full items-center gap-2 px-3 py-1.5">
+      <div className={`${CARD_SHELL} ${expanded ? CARD_SHAPE.expanded : CARD_SHAPE.pill}`}>
+        <div className="flex w-full items-center gap-2 py-1 pl-1 pr-2.5">
           <button
             type="button"
             className="flex min-w-0 flex-1 items-center gap-2 text-left"
             aria-expanded={expanded}
             onClick={onToggleExpand}
           >
-            <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                {iconConfig.icon
-                  .split(' M')
-                  .map((path, i) =>
-                    i === 0 ? (
-                      <path key={path} d={path} />
-                    ) : (
-                      <path key={`M${path}`} d={`M${path}`} />
-                    ),
-                  )}
-              </svg>
-            </div>
+            <ToolIcon config={iconConfig} />
 
             <span className="text-sm text-text-secondary">{label}</span>
 
@@ -470,13 +441,13 @@ export function ToolCallDisplay({
             )}
 
             {toolStatus === 'error' && (
-              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium bg-state-error/10 text-state-error border border-state-error/30">
+              <span className="inline-flex items-center gap-1 rounded-full border border-state-error/30 bg-state-error/10 px-2 py-0.5 text-2xs font-medium text-state-error">
                 {t('toolCalls.error')}
               </span>
             )}
 
             <svg
-              className={`h-3 w-3 flex-shrink-0 text-text-tertiary transition-transform ml-auto ${
+              className={`ml-auto h-3 w-3 flex-shrink-0 text-text-tertiary transition-transform duration-fast ${
                 expanded ? 'rotate-90' : ''
               }`}
               viewBox="0 0 24 24"
@@ -493,7 +464,7 @@ export function ToolCallDisplay({
             <button
               type="button"
               aria-label={t('toolCalls.openSubagent')}
-              className="flex-shrink-0 p-0.5 rounded-md hover:bg-background-secondary transition-colors cursor-pointer"
+              className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-background-tertiary"
               onClick={() => onNavigateToSession(subagentSessionKey)}
             >
               <svg

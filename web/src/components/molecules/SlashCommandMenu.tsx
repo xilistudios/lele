@@ -30,7 +30,7 @@ function CommandRow({ command, active, rowId, onSelect, onHover, index }: RowPro
         onSelect(command)
       }}
       onMouseEnter={() => onHover?.(index)}
-      className={`flex cursor-pointer items-baseline gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${
+      className={`flex cursor-pointer items-baseline gap-2 rounded-full px-3 py-1.5 text-xs transition-colors ${
         active ? 'bg-background-tertiary text-accent-primary' : 'text-text-primary'
       }`}
     >
@@ -60,7 +60,7 @@ export function SlashCommandMenu({ items, activeIndex, onSelect, onHover }: Prop
       aria-label={hint}
       title={hint}
       tabIndex={-1}
-      className="mx-2 mb-1 max-h-48 max-md:max-h-[min(12rem,25dvh)] overflow-y-auto rounded-lg border border-border bg-background-secondary shadow-lg"
+      className="mx-2 mb-1 max-h-48 max-md:max-h-[min(12rem,25dvh)] overflow-y-auto rounded-2xl border border-border bg-background-secondary shadow-lg"
       data-testid="slash-command-menu"
     >
       {items.map((command, index) => (

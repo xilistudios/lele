@@ -280,3 +280,36 @@ describe('ChatComposer — token speed chip', () => {
     expect(view.queryByText(/tok\/s/)).toBeNull()
   })
 })
+
+describe('ChatComposer — agent pill', () => {
+  const AGENTS = [
+    { id: 'main', name: 'Main Agent' },
+    { id: 'ui-engineer', name: 'UI Engineer' },
+  ]
+
+  beforeEach(() => {
+    mockAuthCtxReturn = baseAuthCtx()
+    mockChatPageCtxReturn = { ...baseChatPageCtx(), hasConversation: true }
+    mockSlashCommandsReturn = { commands: [], loading: false, error: null }
+  })
+
+  test('lets the user switch agent once the conversation has started', async () => {
+    const onSelectAgent = mock(() => {})
+    mockAppCtxReturn = {
+      ...baseAppCtx(mock(() => Promise.resolve(true))),
+      agents: AGENTS,
+      currentAgent: AGENTS[0],
+      onSelectAgent,
+    }
+
+    const { getByLabelText, getByText } = renderComposer()
+    const trigger = getByLabelText('Agente') as HTMLButtonElement
+
+    expect(trigger.disabled).toBe(false)
+
+    fireEvent.click(trigger)
+    fireEvent.click(await waitFor(() => getByText('UI Engineer')))
+
+    expect(onSelectAgent).toHaveBeenCalledWith('ui-engineer')
+  })
+})

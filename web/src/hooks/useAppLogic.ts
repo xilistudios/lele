@@ -301,12 +301,9 @@ export function useAppLogic(
         return false
       }
 
-      const accepted = await messagesHook.sendMessage(
-        content,
-        attachments,
-        sessionKey,
-        currentAgentId,
-      )
+      const agentHint = parentSessionKey ? null : currentAgentId
+
+      const accepted = await messagesHook.sendMessage(content, attachments, sessionKey, agentHint)
       if (!accepted) {
         return false
       }
@@ -322,6 +319,7 @@ export function useAppLogic(
     [
       sessionsHook.currentSessionKey,
       currentAgentId,
+      parentSessionKey,
       messagesHook.sendMessage,
       messagesHook.setPendingAttachments,
       touchSession,

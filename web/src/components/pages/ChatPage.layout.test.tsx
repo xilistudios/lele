@@ -143,6 +143,14 @@ describe('ChatPage layout contract', () => {
     contains(composerWrapperOf(container), 'shrink-0', 'border-t')
   })
 
+  test('the composer is available while reading a subagent session', () => {
+    const container = renderChatPage({ parentSessionKey: 'parent-session' })
+    const wrapper = composerWrapperOf(container)
+
+    expect(wrapper).not.toBeNull()
+    expect(wrapper?.querySelector('textarea')).not.toBeNull()
+  })
+
   test('the chat header is pinned', () => {
     const container = renderChatPage()
     contains(headerOf(container), 'shrink-0', 'border-b')
