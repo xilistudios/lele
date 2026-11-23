@@ -109,6 +109,7 @@ type skillRoot struct {
 
 func (sl *SkillsLoader) skillRoots() []skillRoot {
 	roots := []skillRoot{
+		{path: sl.directorySkills, source: "directory"},
 		{path: sl.workspaceSkills, source: "workspace"},
 		{path: sl.globalSkills, source: "global"},
 		{path: sl.builtinSkills, source: "builtin"},

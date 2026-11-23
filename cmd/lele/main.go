@@ -70,7 +70,11 @@ func main() {
 		globalDir := filepath.Dir(getConfigPath())
 		globalSkillsDir := filepath.Join(globalDir, "skills")
 		builtinSkillsDir := filepath.Join(globalDir, "lele", "skills")
-		skillsLoader := skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, "")
+		directorySkillsDir := ""
+		if wd, err := os.Getwd(); err == nil {
+			directorySkillsDir = filepath.Join(wd, ".lele", "skills")
+		}
+		skillsLoader := skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir)
 
 		switch subcommand {
 		case "list":

@@ -195,8 +195,12 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	workspacePath := cfg.WorkspacePath()
 	globalSkillsDir := filepath.Join(leleDir, "skills")
 	builtinSkillsDir := filepath.Join(leleDir, "lele", "skills")
+	directorySkillsDir := ""
+	if wd, err := os.Getwd(); err == nil {
+		directorySkillsDir = filepath.Join(wd, ".lele", "skills")
+	}
 
-	skillsLoader := skills.NewSkillsLoader(workspacePath, globalSkillsDir, builtinSkillsDir, "")
+	skillsLoader := skills.NewSkillsLoader(workspacePath, globalSkillsDir, builtinSkillsDir, directorySkillsDir)
 	skillInstaller := skills.NewSkillInstaller(workspacePath)
 
 	return &NativeChannel{

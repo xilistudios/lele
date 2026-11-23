@@ -83,13 +83,20 @@ func getGlobalConfigDir() string {
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = ""
+	}
 	builtinSkillsDir := filepath.Join(wd, "skills")
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
+	directorySkillsDir := ""
+	if wd != "" {
+		directorySkillsDir = filepath.Join(wd, ".lele", "skills")
+	}
 
 	return &ContextBuilder{
 		workspace:       workspace,
-		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, ""),
+		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir),
 		memory:          NewMemoryStore(workspace),
 		skillsDiscovery: &skillsDiscoveryPerms{List: true, Search: true, Load: true},
 	}
