@@ -1030,11 +1030,12 @@ The listing ranking comes from counters the client keeps, not from the
   second `lele` process) keep each other's counts — including when they write
   at the same moment. The lock is best-effort like the rest of the file: a
   sidecar older than 10 s is reclaimed, and a lock that cannot be taken within
-  100 ms is logged and the write proceeds unlocked.
+  1 s is logged and the increment stays pending, so it goes out with the next
+  increment instead of being written unlocked.
 - **Best-effort by contract:** usage tracking never breaks a tool call. A
   missing or corrupt file starts from empty counts with a single warning, a
-  failed write is a logged warning, and a manager with no known `LeleDir`
-  keeps its counters in memory only.
+  failed write is a logged warning and a delayed increment, and a manager with
+  no known `LeleDir` keeps its counters in memory only.
 
 ### Allowlist
 

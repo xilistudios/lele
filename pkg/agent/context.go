@@ -32,6 +32,12 @@ type mcpDiscoveryPerms struct {
 	Get  bool
 }
 
+type skillsDiscoveryPerms struct {
+	List   bool
+	Search bool
+	Load   bool
+}
+
 type ContextBuilder struct {
 	workspace          string
 	skillsLoader       *skills.SkillsLoader
@@ -42,6 +48,8 @@ type ContextBuilder struct {
 	mcpServers []tools.MCPServerInfo
 
 	mcpDiscovery mcpDiscoveryPerms
+
+	skillsDiscovery *skillsDiscoveryPerms
 
 	harnessContext      string
 	harnessContextValid bool
@@ -80,9 +88,10 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 
 	return &ContextBuilder{
-		workspace:    workspace,
-		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
-		memory:       NewMemoryStore(workspace),
+		workspace:       workspace,
+		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
+		memory:          NewMemoryStore(workspace),
+		skillsDiscovery: &skillsDiscoveryPerms{List: true, Search: true, Load: true},
 	}
 }
 
@@ -138,6 +147,56 @@ func (cb *ContextBuilder) SetMCPDiscovery(list, get bool) {
 	}
 	cb.mcpDiscovery = next
 	cb.initialContext = ""
+}
+
+func (cb *ContextBuilder) SetSkillsDiscovery(list, search, load bool) {
+	next := skillsDiscoveryPerms{List: list, Search: search, Load: load}
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	if cb.skillsDiscovery != nil && *cb.skillsDiscovery == next {
+		return
+	}
+	cb.skillsDiscovery = &next
+	cb.initialContext = ""
+}
+
+func (cb *ContextBuilder) resolvedSkillsDiscovery() skillsDiscoveryPerms {
+	if cb.skillsDiscovery == nil {
+		return skillsDiscoveryPerms{List: true, Search: true, Load: true}
+	}
+	return *cb.skillsDiscovery
+}
+
+func skillsSection(summary string, perms skillsDiscoveryPerms) string {
+	const loadHint = "`load_skill` with {\"skill\": \"<name>\"} — or \"skills\": [\"<a>\", \"<b>\"] for several — "
+
+	var sb strings.Builder
+	sb.WriteString("# Skills\n\n")
+	sb.WriteString("The skills below are the ones this agent uses most.")
+	switch {
+	case perms.List && perms.Search && perms.Load:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first) or " +
+			"`search_skill` to find skills by keyword, and " + loadHint +
+			"to load their full instructions into the context.")
+	case perms.List && perms.Search:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first) or " +
+			"`search_skill` to find skills by keyword.")
+	case perms.List && perms.Load:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first), and " + loadHint +
+			"to load their full instructions into the context.")
+	case perms.Search && perms.Load:
+		sb.WriteString(" The catalog has more: use `search_skill` to find skills by keyword, and " + loadHint +
+			"to load their full instructions into the context.")
+	case perms.List:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first).")
+	case perms.Search:
+		sb.WriteString(" The catalog has more: use `search_skill` to find skills by keyword.")
+	case perms.Load:
+		sb.WriteString(" " + loadHint + "brings the full instructions of a skill you know by name into the context.")
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(summary)
+	return sb.String()
 }
 
 func mcpServersSection(servers []tools.MCPServerInfo, perms mcpDiscoveryPerms) string {
@@ -273,11 +332,7 @@ func (cb *ContextBuilder) GetInitialContext() string {
 
 	skillsSummary := cb.skillsLoader.BuildTopSkillsSummary(cb.skillsFilter, cb.skillUsage.CountsFor(cb.skillUsageAgent), maxContextSkills)
 	if skillsSummary != "" {
-		parts = append(parts, fmt.Sprintf(`# Skills
-
-The skills below are the ones this agent uses most. The catalog has more: use `+"`list_skills`"+` to browse it (most used first) or `+"`search_skill`"+` to find skills by keyword, and `+"`load_skill`"+` with {"skill": "<name>"} — or "skills": ["<a>", "<b>"] for several — to load their full instructions into the context.
-
-%s`, skillsSummary))
+		parts = append(parts, skillsSection(skillsSummary, cb.resolvedSkillsDiscovery()))
 	}
 
 	if len(cb.loadedSkills) > 0 {
@@ -317,7 +372,7 @@ func (cb *ContextBuilder) getIdentity() string {
 
 	toolsSection := cb.buildToolsSection()
 
-	return fmt.Sprintf(`# lele
+	return fmt.Sprintf(`# lele 🦞
 
 You are lele, a helpful AI assistant.
 

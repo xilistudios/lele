@@ -34,7 +34,9 @@ lele skills list-builtin
 
 To keep the system prompt small, the agent only sees the **5 most used skills**
 for its agent ID (usage is tracked per agent in `~/.lele/skills_usage.json`).
-Two tools cover the rest of the catalog:
+Until enough usage accumulates the window is filled in alphabetical order, so a
+fresh install shows the first five skills by name rather than the busiest ones.
+Three tools cover the rest of the catalog:
 
 - `list_skills` — browses the catalog paginated (20 per page, `page` argument),
   ordered by usage frequency (most used first), excluding the skills already

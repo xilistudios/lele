@@ -187,26 +187,32 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sl := NewSkillsLoader(workspace, "", "")
+	sl := newSkillLoader(t, workspace, skillFixture{Dir: "pdf-tools", Name: "pdf-toolkit"})
 
-	cases := []string{
-		"../secret",
-		"../secret.txt",
-		"../../secret",
-		"..\\secret",
-		"foo/../bar",
-		"sub/dir",
-		"",
+	testcases := []struct {
+		name  string
+		input string
+	}{
+		{name: "empty", input: ""},
+		{name: "dot-dot", input: ".."},
+		{name: "parent-dir", input: "../secret"},
+		{name: "slash", input: "a/b"},
+		{name: "backslash", input: `a\b`},
+		{name: "encoded-slash", input: "..%2f"},
+		{name: "nested", input: "sub/dir"},
+		{name: "escape", input: "foo/../bar"},
 	}
 
-	for _, name := range cases {
-		content, ok := sl.LoadSkill(name)
-		if ok {
-			t.Errorf("LoadSkill(%q) should return false, got content %q", name, content)
-		}
-		if strings.Contains(content, "TOPSECRET") {
-			t.Errorf("LoadSkill(%q) leaked secret file content", name)
-		}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			content, ok := sl.LoadSkill(tc.input)
+			if ok {
+				t.Errorf("LoadSkill(%q) should return false, got content %q", tc.input, content)
+			}
+			if strings.Contains(content, "TOPSECRET") {
+				t.Errorf("LoadSkill(%q) leaked secret file content", tc.input)
+			}
+		})
 	}
 }
 
@@ -245,6 +251,95 @@ func newSummaryLoader(t *testing.T, names ...string) *SkillsLoader {
 		}
 	}
 	return NewSkillsLoader(workspace, "", "")
+}
+
+type skillFixture struct {
+	Dir  string
+	Name string
+}
+
+func newSkillLoader(t *testing.T, workspace string, fixtures ...skillFixture) *SkillsLoader {
+	t.Helper()
+	for _, f := range fixtures {
+		skillDir := filepath.Join(workspace, "skills", f.Dir)
+		if err := os.MkdirAll(skillDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + f.Name + "\ndescription: desc of " + f.Name + "\n---\nbody of " + f.Name
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return NewSkillsLoader(workspace, "", "")
+}
+
+func TestSkillsLoader_LoadSkillResolvesFrontmatterName(t *testing.T) {
+	sl := newSkillLoader(t, t.TempDir(), skillFixture{Dir: "pdf-tools", Name: "pdf-toolkit"})
+
+	listed := sl.ListSkills()
+	if len(listed) != 1 || listed[0].Name != "pdf-toolkit" {
+		t.Fatalf("ListSkills() = %v, want the single frontmatter name pdf-toolkit", listed)
+	}
+
+	content, ok := sl.LoadSkill("pdf-toolkit")
+	if !ok {
+		t.Fatal("LoadSkill must resolve the name that ListSkills advertises")
+	}
+	if !strings.Contains(content, "body of pdf-toolkit") {
+		t.Fatalf("LoadSkill returned %q, want the skill body", content)
+	}
+	if strings.Contains(content, "description:") {
+		t.Errorf("LoadSkill leaked the frontmatter: %q", content)
+	}
+}
+
+func TestSkillsLoader_LoadSkillMatchesNamesCaseInsensitively(t *testing.T) {
+	sl := newSkillLoader(t, t.TempDir(),
+		skillFixture{Dir: "pdf-tools", Name: "pdf-toolkit"},
+		skillFixture{Dir: "plain-skill", Name: "plain-skill"},
+	)
+
+	testcases := []struct {
+		name string
+		in   string
+		body string
+	}{
+		{name: "frontmatter-name-upper", in: "PDF-Toolkit", body: "body of pdf-toolkit"},
+		{name: "frontmatter-name-all-caps", in: "PDF-TOOLKIT", body: "body of pdf-toolkit"},
+		{name: "directory-name", in: "PDF-Tools", body: "body of pdf-toolkit"},
+		{name: "lowercase-directory", in: "PLAIN-SKILL", body: "body of plain-skill"},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			content, ok := sl.LoadSkill(tc.in)
+			if !ok {
+				t.Fatalf("LoadSkill(%q) failed, want the skill body", tc.in)
+			}
+			if !strings.Contains(content, tc.body) {
+				t.Errorf("LoadSkill(%q) = %q, want %q", tc.in, content, tc.body)
+			}
+		})
+	}
+}
+
+func TestSkillsLoader_LoadSkillUnknownName(t *testing.T) {
+	sl := newSkillLoader(t, t.TempDir(), skillFixture{Dir: "pdf-tools", Name: "pdf-toolkit"})
+	if content, ok := sl.LoadSkill("ghost"); ok {
+		t.Fatalf("LoadSkill(ghost) = %q, want false", content)
+	}
+}
+
+func TestSkillsLoader_LoadSkillsForContextResolvesFrontmatterName(t *testing.T) {
+	sl := newSkillLoader(t, t.TempDir(), skillFixture{Dir: "pdf-tools", Name: "pdf-toolkit"})
+
+	content := sl.LoadSkillsForContext([]string{"pdf-toolkit"})
+	if content == "" {
+		t.Fatal("LoadSkillsForContext dropped a skill advertised by its frontmatter name")
+	}
+	if !strings.Contains(content, "### Skill: pdf-toolkit") || !strings.Contains(content, "body of pdf-toolkit") {
+		t.Fatalf("LoadSkillsForContext = %q, want the skill body under its name", content)
+	}
 }
 
 func summaryNames(t *testing.T, summary string) []string {

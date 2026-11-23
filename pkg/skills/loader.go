@@ -99,109 +99,61 @@ func (sl *SkillsLoader) GlobalSkillsDir() string {
 	return sl.globalSkills
 }
 
+type skillRoot struct {
+	path   string
+	source string
+}
+
+func (sl *SkillsLoader) skillRoots() []skillRoot {
+	roots := []skillRoot{
+		{path: sl.workspaceSkills, source: "workspace"},
+		{path: sl.globalSkills, source: "global"},
+		{path: sl.builtinSkills, source: "builtin"},
+	}
+	present := make([]skillRoot, 0, len(roots))
+	for _, root := range roots {
+		if root.path != "" {
+			present = append(present, root)
+		}
+	}
+	return present
+}
+
 func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	skills := make([]SkillInfo, 0)
+	claimed := make(map[string]struct{})
 
-	if sl.workspaceSkills != "" {
-		if dirs, err := os.ReadDir(sl.workspaceSkills); err == nil {
-			for _, dir := range dirs {
-				if dir.IsDir() {
-					skillFile := filepath.Join(sl.workspaceSkills, dir.Name(), "SKILL.md")
-					if _, err := os.Stat(skillFile); err == nil {
-						info := SkillInfo{
-							Name:   dir.Name(),
-							Path:   skillFile,
-							Source: "workspace",
-						}
-						metadata := sl.getSkillMetadata(skillFile)
-						if metadata != nil {
-							info.Description = metadata.Description
-							info.Name = metadata.Name
-						}
-						if err := info.validate(); err != nil {
-							slog.Warn("invalid skill from workspace", "name", info.Name, "error", err)
-							continue
-						}
-						skills = append(skills, info)
-					}
-				}
-			}
+	for _, root := range sl.skillRoots() {
+		dirs, err := os.ReadDir(root.path)
+		if err != nil {
+			continue
 		}
-	}
-
-	if sl.globalSkills != "" {
-		if dirs, err := os.ReadDir(sl.globalSkills); err == nil {
-			for _, dir := range dirs {
-				if dir.IsDir() {
-					skillFile := filepath.Join(sl.globalSkills, dir.Name(), "SKILL.md")
-					if _, err := os.Stat(skillFile); err == nil {
-						exists := false
-						for _, s := range skills {
-							if s.Name == dir.Name() && s.Source == "workspace" {
-								exists = true
-								break
-							}
-						}
-						if exists {
-							continue
-						}
-
-						info := SkillInfo{
-							Name:   dir.Name(),
-							Path:   skillFile,
-							Source: "global",
-						}
-						metadata := sl.getSkillMetadata(skillFile)
-						if metadata != nil {
-							info.Description = metadata.Description
-							info.Name = metadata.Name
-						}
-						if err := info.validate(); err != nil {
-							slog.Warn("invalid skill from global", "name", info.Name, "error", err)
-							continue
-						}
-						skills = append(skills, info)
-					}
-				}
+		for _, dir := range dirs {
+			if !dir.IsDir() {
+				continue
 			}
-		}
-	}
-
-	if sl.builtinSkills != "" {
-		if dirs, err := os.ReadDir(sl.builtinSkills); err == nil {
-			for _, dir := range dirs {
-				if dir.IsDir() {
-					skillFile := filepath.Join(sl.builtinSkills, dir.Name(), "SKILL.md")
-					if _, err := os.Stat(skillFile); err == nil {
-						exists := false
-						for _, s := range skills {
-							if s.Name == dir.Name() && (s.Source == "workspace" || s.Source == "global") {
-								exists = true
-								break
-							}
-						}
-						if exists {
-							continue
-						}
-
-						info := SkillInfo{
-							Name:   dir.Name(),
-							Path:   skillFile,
-							Source: "builtin",
-						}
-						metadata := sl.getSkillMetadata(skillFile)
-						if metadata != nil {
-							info.Description = metadata.Description
-							info.Name = metadata.Name
-						}
-						if err := info.validate(); err != nil {
-							slog.Warn("invalid skill from builtin", "name", info.Name, "error", err)
-							continue
-						}
-						skills = append(skills, info)
-					}
-				}
+			if _, shadowed := claimed[dir.Name()]; shadowed {
+				continue
 			}
+			skillFile := filepath.Join(root.path, dir.Name(), "SKILL.md")
+			if _, err := os.Stat(skillFile); err != nil {
+				continue
+			}
+			info := SkillInfo{
+				Name:   dir.Name(),
+				Path:   skillFile,
+				Source: root.source,
+			}
+			if metadata := sl.getSkillMetadata(skillFile); metadata != nil {
+				info.Description = metadata.Description
+				info.Name = metadata.Name
+			}
+			if err := info.validate(); err != nil {
+				slog.Warn("invalid skill from "+root.source, "name", info.Name, "error", err)
+				continue
+			}
+			claimed[dir.Name()] = struct{}{}
+			skills = append(skills, info)
 		}
 	}
 
@@ -220,32 +172,40 @@ func (sl *SkillsLoader) isSkillEnabled(name string) bool {
 }
 
 func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
-	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+	if !isLoadableSkillName(name) {
 		return "", false
 	}
 
-	if sl.workspaceSkills != "" {
-		skillFile := filepath.Join(sl.workspaceSkills, name, "SKILL.md")
+	for _, root := range sl.skillRoots() {
+		skillFile := filepath.Join(root.path, name, "SKILL.md")
 		if content, err := os.ReadFile(skillFile); err == nil {
 			return sl.stripFrontmatter(string(content)), true
 		}
 	}
 
-	if sl.globalSkills != "" {
-		skillFile := filepath.Join(sl.globalSkills, name, "SKILL.md")
-		if content, err := os.ReadFile(skillFile); err == nil {
-			return sl.stripFrontmatter(string(content)), true
-		}
-	}
+	return sl.loadSkillByCatalogName(name)
+}
 
-	if sl.builtinSkills != "" {
-		skillFile := filepath.Join(sl.builtinSkills, name, "SKILL.md")
-		if content, err := os.ReadFile(skillFile); err == nil {
-			return sl.stripFrontmatter(string(content)), true
+func (sl *SkillsLoader) loadSkillByCatalogName(name string) (string, bool) {
+	for _, s := range sl.ListSkills() {
+		dir := filepath.Base(filepath.Dir(s.Path))
+		if !strings.EqualFold(s.Name, name) && !strings.EqualFold(dir, name) {
+			continue
 		}
+		content, err := os.ReadFile(s.Path)
+		if err != nil {
+			continue
+		}
+		return sl.stripFrontmatter(string(content)), true
 	}
-
 	return "", false
+}
+
+func isLoadableSkillName(name string) bool {
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return false
+	}
+	return true
 }
 
 func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {

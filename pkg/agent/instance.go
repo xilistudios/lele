@@ -242,6 +242,11 @@ func NewAgentInstance(
 		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, agentID)
 	}
 
+	_, hasListSkills := toolsRegistry.Get(tools.ListSkillsName)
+	_, hasSearchSkill := toolsRegistry.Get(tools.SearchSkillName)
+	_, hasLoadSkill := toolsRegistry.Get(tools.LoadSkillName)
+	contextBuilder.SetSkillsDiscovery(hasListSkills, hasSearchSkill, hasLoadSkill)
+
 	if subagents != nil && len(subagents.AllowAgents) > 0 {
 		available := resolveAvailableSubagents(agentCfg, cfg)
 		contextBuilder.SetAvailableSubagents(available)

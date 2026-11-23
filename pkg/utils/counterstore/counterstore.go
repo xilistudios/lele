@@ -39,7 +39,7 @@ func MergeAndSave(path, label string, pending map[string]map[string]uint64) (map
 	release, lockErr := filelock.Acquire(path)
 	defer release()
 	if lockErr != nil {
-		warn(label, "could not lock the usage file, saving without the lock", path, lockErr)
+		return nil, fmt.Errorf("lock %s: %w", path, lockErr)
 	}
 
 	merged := Load(path, label)
