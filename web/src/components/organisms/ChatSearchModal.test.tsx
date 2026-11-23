@@ -1,11 +1,11 @@
 import '../../test/setup'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import { useState } from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import '../../test/i18n'
 import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
 import type { ChatSession } from '../../lib/types'
+import i18n from '../../test/i18n'
 import { ChatSearchModal } from './ChatSearchModal'
 
 const sessions = [
@@ -15,7 +15,9 @@ const sessions = [
 
 type Handles = { selected: string[]; closed: number }
 
-function renderHarness(handles: Handles = { selected: [], closed: 0 }) {
+const triggerLabel = 'open search'
+
+function renderHarness(handles: Handles = { selected: [], closed: 0 }, initiallyOpen = true) {
   const logicValue = {
     sessions,
     currentSessionKey: null,
@@ -25,12 +27,12 @@ function renderHarness(handles: Handles = { selected: [], closed: 0 }) {
   } as unknown as AppLogicContextValue
 
   function Harness() {
-    const [open, setOpen] = useState(true)
+    const [open, setOpen] = useState(initiallyOpen)
     return (
       <AppLogicContext.Provider value={logicValue}>
         <MemoryRouter>
           <button type="button" onClick={() => setOpen(true)}>
-            reopen
+            {triggerLabel}
           </button>
           <ChatSearchModal
             isOpen={open}
@@ -64,10 +66,23 @@ describe('ChatSearchModal — dialog shell', () => {
   })
 
   test('focuses the search field and locks page scroll while open', () => {
-    const { getByPlaceholderText } = renderHarness()
+    const { getByRole } = renderHarness()
 
-    expect(document.activeElement).toBe(getByPlaceholderText(/buscar/i))
+    expect(document.activeElement).toBe(getByRole('textbox'))
     expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  test('gives focus back to the control that opened it', () => {
+    const view = renderHarness({ selected: [], closed: 0 }, false)
+    const trigger = view.getByRole('button', { name: triggerLabel }) as HTMLButtonElement
+
+    trigger.focus()
+    fireEvent.click(trigger)
+    expect(document.activeElement).toBe(view.getByRole('textbox'))
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(document.activeElement).toBe(trigger)
   })
 })
 
@@ -88,17 +103,17 @@ describe('ChatSearchModal — closing', () => {
   })
 
   test('the close button closes the dialog', () => {
-    const { getByLabelText, handles } = renderHarness()
+    const { getByRole, handles } = renderHarness()
 
-    fireEvent.click(getByLabelText(/cerrar panel/i))
+    fireEvent.click(getByRole('button', { name: i18n.t('chat.closePanel') }))
 
     expect(handles.closed).toBe(1)
   })
 
   test('selecting a chat opens it and closes the dialog', () => {
-    const { getByText, handles } = renderHarness()
+    const { getByRole, handles } = renderHarness()
 
-    fireEvent.click(getByText('Second chat'))
+    fireEvent.click(getByRole('button', { name: /Second chat/ }))
 
     expect(handles.selected).toEqual(['native:two'])
     expect(handles.closed).toBe(1)
@@ -107,13 +122,11 @@ describe('ChatSearchModal — closing', () => {
 
 describe('ChatSearchModal — keyboard containment', () => {
   test('Tab from the last control wraps to the first', () => {
-    const { getByRole, getByText } = renderHarness()
+    const { getByRole } = renderHarness()
 
     const dialog = getByRole('dialog')
     const first = getByRole('textbox')
-    const controls = dialog.querySelectorAll<HTMLElement>('button, input')
-    const last = controls[controls.length - 1]
-    expect(last).toBe(getByText(/administrar chats/i))
+    const last = within(dialog).getByRole('button', { name: i18n.t('chat.manageChats') })
 
     last.focus()
     fireEvent.keyDown(document, { key: 'Tab' })
@@ -122,16 +135,14 @@ describe('ChatSearchModal — keyboard containment', () => {
   })
 
   test('Shift+Tab from the first control wraps to the last', () => {
-    const { getByRole, getByText } = renderHarness()
+    const { getByRole } = renderHarness()
 
     const dialog = getByRole('dialog')
-    const controls = dialog.querySelectorAll<HTMLElement>('button, input')
-    const last = controls[controls.length - 1]
+    const last = within(dialog).getByRole('button', { name: i18n.t('chat.manageChats') })
 
     getByRole('textbox').focus()
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
 
     expect(document.activeElement).toBe(last)
-    expect(last).toBe(getByText(/administrar chats/i))
   })
 })

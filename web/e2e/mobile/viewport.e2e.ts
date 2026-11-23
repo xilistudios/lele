@@ -642,8 +642,12 @@ test('a session folder never squeezes the model chip', async ({ page }, testInfo
 
   expect(strip.overlaps).toEqual([])
   const chip = strip.chip
+  expect(chip).not.toBeNull()
+  if (!chip) return
+
   const send = strip.send
-  if (!chip || !send) return
+  expect(send).not.toBeNull()
+  if (!send) return
 
   const model = controlByLabel(strip, 'Model')
   if (strip.viewport <= 360) {

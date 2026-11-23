@@ -210,7 +210,7 @@ export const GroupChatPanel = memo(function GroupChatPanel({
         <IconButton
           onClick={handleClose}
           className="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors"
-          aria-label={t('common.close')}
+          ariaLabel={t('common.close')}
         >
           <CloseIcon size={16} />
         </IconButton>

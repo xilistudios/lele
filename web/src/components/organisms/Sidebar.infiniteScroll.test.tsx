@@ -1,6 +1,6 @@
 import '../../test/setup'
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import { createElement, useState } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import '../../test/i18n'
@@ -85,8 +85,8 @@ function renderSidebar(list: unknown[], chatMode: ChatMode = 'agent') {
   )
 }
 
-const historyRows = (container: HTMLElement) =>
-  container.querySelectorAll('[data-testid="sidebar-history-section"] nav [role="button"]')
+const sessionControls = (view: ReturnType<typeof render>) =>
+  within(view.container).queryAllByRole('button', { name: /^Session \d+$/ })
 
 beforeEach(() => {
   localStorage.clear()
@@ -101,33 +101,33 @@ afterEach(() => {
 describe('Sidebar — chat history pagination', () => {
   test('renders only the first page of sessions', () => {
     installFakeObserver()
-    const { container } = renderSidebar(sessions(40))
+    const view = renderSidebar(sessions(40))
 
-    expect(historyRows(container).length).toBe(15)
+    expect(sessionControls(view).length).toBe(15)
   })
 
   test('reveals one more page when the sentinel becomes visible', () => {
     const observer = installFakeObserver()
-    const { container } = renderSidebar(sessions(40))
+    const view = renderSidebar(sessions(40))
 
     act(() => observer.latest()([{ isIntersecting: true }]))
-    expect(historyRows(container).length).toBe(30)
+    expect(sessionControls(view).length).toBe(30)
   })
 
   test('stops at the last session and hides the sentinel', () => {
     const observer = installFakeObserver()
-    const { container } = renderSidebar(sessions(20))
+    const view = renderSidebar(sessions(20))
 
     act(() => observer.latest()([{ isIntersecting: true }]))
-    expect(historyRows(container).length).toBe(20)
-    expect(container.querySelector('[data-testid="sidebar-history-sentinel"]')).toBeNull()
+    expect(sessionControls(view).length).toBe(20)
+    expect(view.container.querySelector('[data-testid="sidebar-history-sentinel"]')).toBeNull()
   })
 
   test('a short history needs no pagination', () => {
     installFakeObserver()
-    const { container } = renderSidebar(sessions(3))
+    const view = renderSidebar(sessions(3))
 
-    expect(historyRows(container).length).toBe(3)
+    expect(sessionControls(view).length).toBe(3)
     expect(observerCount()).toBe(0)
   })
 
@@ -158,25 +158,25 @@ describe('Sidebar — chat history pagination', () => {
               mobileOpen: false,
               onClose: () => undefined,
             }),
-            createElement('button', {
-              type: 'button',
-              'data-testid': 'switch-mode',
-              onClick: () => setMode('group'),
-            }),
+            createElement(
+              'button',
+              { type: 'button', onClick: () => setMode('group') },
+              'switch mode',
+            ),
           ),
         ),
       )
     }
 
-    const { container, getByTestId } = render(
+    const view = render(
       createElement(AuthContext.Provider, { value: authValue }, createElement(Harness)),
     )
 
     act(() => observer.latest()([{ isIntersecting: true }]))
-    expect(historyRows(container).length).toBe(30)
+    expect(sessionControls(view).length).toBe(30)
 
-    act(() => fireEvent.click(getByTestId('switch-mode')))
-    expect(historyRows(container).length).toBe(15)
+    act(() => fireEvent.click(view.getByRole('button', { name: 'switch mode' })))
+    expect(sessionControls(view).length).toBe(15)
   })
 })
 

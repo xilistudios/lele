@@ -1,8 +1,8 @@
 import '../../test/setup'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import '../../test/i18n'
+import i18n from '../../test/i18n'
 import { ToolsSidebar } from './ToolsSidebar'
 
 function LocationProbe() {
@@ -10,11 +10,16 @@ function LocationProbe() {
   return <div data-testid="location">{location.pathname}</div>
 }
 
+const drawerName = i18n.t('chat.tools')
+
+const statusLabel = (status: 'connected' | 'connecting' | 'disconnected') =>
+  i18n.t('connection.statusAria', { status })
+
 function renderDrawer(
   isOpen = true,
   connectionStatus: 'connected' | 'connecting' | 'disconnected' = 'connected',
 ) {
-  return render(
+  const view = render(
     <MemoryRouter initialEntries={['/']}>
       <ToolsSidebar
         isOpen={isOpen}
@@ -25,6 +30,8 @@ function renderDrawer(
       <LocationProbe />
     </MemoryRouter>,
   )
+
+  return { ...view, drawer: () => view.queryByRole('dialog', { name: drawerName }) }
 }
 
 afterEach(cleanup)
@@ -32,49 +39,49 @@ afterEach(cleanup)
 describe('ToolsSidebar', () => {
   test('renders nothing while closed', () => {
     const view = renderDrawer(false)
-    expect(view.queryByTestId('tools-sidebar')).toBeNull()
+    expect(view.drawer()).toBeNull()
   })
 
   test('opens with the four tooling destinations', async () => {
     const view = renderDrawer()
 
-    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+    await waitFor(() => expect(view.drawer()).not.toBeNull())
 
-    const panel = view.getByTestId('tools-sidebar')
     for (const label of [
-      'Habilidades',
-      'Tareas programadas',
-      'Procesos en Segundo Plano',
-      'Secretos',
+      i18n.t('sidebar.skills'),
+      i18n.t('sidebar.cron'),
+      i18n.t('sidebar.backgroundExecs'),
+      i18n.t('sidebar.secrets'),
     ]) {
-      expect(panel.textContent).toContain(label)
+      expect(view.getByRole('button', { name: label })).not.toBeNull()
     }
   })
 
   test('each row navigates to its page', async () => {
     const view = renderDrawer()
-    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+    await waitFor(() => expect(view.drawer()).not.toBeNull())
 
-    fireEvent.click(view.getByLabelText('Tareas programadas'))
+    fireEvent.click(view.getByRole('button', { name: i18n.t('sidebar.cron') }))
     expect(view.getByTestId('location').textContent).toBe('/cron')
 
-    fireEvent.click(view.getByLabelText('Secretos'))
+    fireEvent.click(view.getByRole('button', { name: i18n.t('sidebar.secrets') }))
     expect(view.getByTestId('location').textContent).toBe('/secrets')
   })
 
   test('the connection status lives in the drawer footer', async () => {
     const view = renderDrawer()
-    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+    await waitFor(() => expect(view.drawer()).not.toBeNull())
 
-    const panel = view.getByTestId('tools-sidebar')
-    expect(panel.querySelector('button[aria-label^="Estado de conexión"]')).not.toBeNull()
+    expect(
+      view.drawer()?.contains(view.getByRole('button', { name: statusLabel('connected') })),
+    ).toBe(true)
   })
 
   test('the footer status is a bare dot, not an icon', async () => {
     const view = renderDrawer()
-    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+    await waitFor(() => expect(view.drawer()).not.toBeNull())
 
-    const trigger = view.getByTestId('connection-status-dot')
+    const trigger = view.getByRole('button', { name: statusLabel('connected') })
     expect(trigger.querySelector('svg')).toBeNull()
     expect(trigger.children.length).toBe(1)
     expect(trigger.firstElementChild?.className).toContain('rounded-full')
@@ -84,10 +91,10 @@ describe('ToolsSidebar', () => {
     const colors = new Map<string, string>()
     for (const status of ['connected', 'connecting', 'disconnected'] as const) {
       const view = renderDrawer(true, status)
-      await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+      await waitFor(() => expect(view.drawer()).not.toBeNull())
       colors.set(
         status,
-        view.getByTestId('connection-status-dot').firstElementChild?.className ?? '',
+        view.getByRole('button', { name: statusLabel(status) }).firstElementChild?.className ?? '',
       )
       cleanup()
     }
@@ -108,7 +115,7 @@ describe('ToolsSidebar', () => {
         />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+    await waitFor(() => expect(view.queryByRole('dialog', { name: drawerName })).not.toBeNull())
 
     act(() => {
       fireEvent.keyDown(document, { key: 'Escape' })
@@ -129,12 +136,13 @@ describe('ToolsSidebar', () => {
         />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+    const drawer = await waitFor(() => {
+      const found = view.queryByRole('dialog', { name: drawerName })
+      if (!found) throw new Error('drawer not open')
+      return found
+    })
 
-    const closeBtn = view
-      .getByTestId('tools-sidebar')
-      .querySelector('button[aria-label="Cerrar"]') as HTMLButtonElement
-    fireEvent.click(closeBtn)
+    fireEvent.click(within(drawer).getByRole('button', { name: i18n.t('common.close') }))
     expect(closed).toBe(1)
   })
 })

@@ -155,7 +155,7 @@ export function SearchableSelect({
     cancelEnterFrame()
     cancelExitTimer()
     setQuery('')
-    setListHeight(null)
+    if (!isMounted) setListHeight(null)
     setIsOpenUp(resolveOpenUp())
     setIsMounted(true)
     setIsShown(false)
@@ -166,7 +166,7 @@ export function SearchableSelect({
         searchRef.current?.focus()
       })
     })
-  }, [cancelEnterFrame, cancelExitTimer, disabled, resolveOpenUp])
+  }, [cancelEnterFrame, cancelExitTimer, disabled, isMounted, resolveOpenUp])
 
   useEffect(() => {
     if (!isMounted) return undefined

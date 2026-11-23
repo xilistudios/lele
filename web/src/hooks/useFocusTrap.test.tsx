@@ -4,7 +4,10 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { useRef, useState } from 'react'
 import { useFocusTrap } from './useFocusTrap'
 
-function Harness({ startActive = true }: { startActive?: boolean }) {
+function Harness({
+  startActive = true,
+  hidden = false,
+}: { startActive?: boolean; hidden?: boolean }) {
   const [active, setActive] = useState(startActive)
   const containerRef = useRef<HTMLDivElement>(null)
   useFocusTrap(containerRef, active)
@@ -19,6 +22,8 @@ function Harness({ startActive = true }: { startActive?: boolean }) {
         <button type="button" aria-label="inside last">
           last
         </button>
+        {hidden && <input type="hidden" name="token" />}
+        {hidden && <button type="button" aria-label="inside disabled" disabled />}
       </div>
     </div>
   )
@@ -48,12 +53,26 @@ describe('useFocusTrap', () => {
   })
 
   test('Tab is left alone once the trap is inactive', () => {
-    const { getByLabelText, getByText } = render(<Harness />)
+    const { getByLabelText, getByRole } = render(<Harness />)
     const last = getByLabelText('inside last')
 
-    fireEvent.click(getByText('toggle'))
+    fireEvent.click(getByRole('button', { name: 'toggle' }))
     ;(last as HTMLElement).focus()
     fireEvent.keyDown(document, { key: 'Tab' })
+
+    expect(document.activeElement).toBe(last)
+  })
+
+  test('hidden and disabled controls never take the wrap endpoints', () => {
+    const { getByLabelText } = render(<Harness hidden />)
+    const first = getByLabelText('inside first')
+    const last = getByLabelText('inside last')
+    ;(last as HTMLElement).focus()
+    fireEvent.keyDown(document, { key: 'Tab' })
+
+    expect(document.activeElement).toBe(first)
+    ;(first as HTMLElement).focus()
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
 
     expect(document.activeElement).toBe(last)
   })

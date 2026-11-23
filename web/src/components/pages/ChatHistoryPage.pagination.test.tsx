@@ -1,13 +1,14 @@
 import '../../test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { act, cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import { createElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import '../../test/i18n'
 import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import { createApiClient } from '../../lib/api'
 import type { ChatSession } from '../../lib/types'
+import i18n from '../../test/i18n'
+import { waitUntil } from '../../test/waitUntil'
 import { CHAT_PAGE_SIZE, ChatHistoryPage } from './ChatHistoryPage'
 
 const originalFetch = globalThis.fetch
@@ -143,10 +144,16 @@ function renderPage(sessions: ChatSession[]) {
   )
 }
 
-function renderedChatCount(container: HTMLElement): number {
-  const main = container.querySelector('main')
-  const text = main?.textContent ?? ''
-  return ALL_SESSIONS.filter((s) => text.includes(s.name ?? '')).length
+type RenderedView = ReturnType<typeof renderPage>
+
+const settle = (predicate: () => boolean, what: string) => waitUntil(predicate, what, 20_000)
+
+function sessionCount(view: RenderedView, name: RegExp): number {
+  return within(view.getByRole('main')).queryAllByRole('button', { name }).length
+}
+
+function renderedChatCount(view: RenderedView): number {
+  return sessionCount(view, /^Chat \d{3}/)
 }
 
 beforeEach(() => {
@@ -170,9 +177,9 @@ describe('ChatHistoryPage pagination', () => {
 
     const view = renderPage(ALL_SESSIONS)
 
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE))
+    await settle(() => renderedChatCount(view) === CHAT_PAGE_SIZE, 'the first page renders')
     expect(requests).toEqual([{ offset: 0, limit: CHAT_PAGE_SIZE }])
-    expect(renderedChatCount(view.container)).toBeLessThan(ALL_SESSIONS.length)
+    expect(renderedChatCount(view)).toBeLessThan(ALL_SESSIONS.length)
   })
 
   test('scrolling the sentinel reveals the next page', async () => {
@@ -181,11 +188,14 @@ describe('ChatHistoryPage pagination', () => {
     installIntersectionObserver()
 
     const view = renderPage(ALL_SESSIONS)
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE))
+    await settle(() => renderedChatCount(view) === CHAT_PAGE_SIZE, 'the first page renders')
 
     scrollSentinelIntoView()
 
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE * 2))
+    await settle(
+      () => renderedChatCount(view) === CHAT_PAGE_SIZE * 2,
+      'the second page is revealed',
+    )
   })
 
   test('loads the next server page when the revealed window runs out of sessions', async () => {
@@ -195,15 +205,109 @@ describe('ChatHistoryPage pagination', () => {
 
     const view = renderPage([])
 
-    await waitFor(() => expect(requests).toContainEqual({ offset: 0, limit: CHAT_PAGE_SIZE }))
-    await waitFor(() =>
-      expect(requests).toContainEqual({ offset: CHAT_PAGE_SIZE, limit: CHAT_PAGE_SIZE }),
+    await settle(
+      () => requests.some((request) => request.offset === 0),
+      'the first page is requested',
+    )
+    await settle(
+      () => requests.some((request) => request.offset === CHAT_PAGE_SIZE),
+      'the next page is prefetched',
     )
 
-    await waitFor(() => expect(hasLiveSentinel()).toBe(true))
+    await settle(hasLiveSentinel, 'the sentinel is observed')
     scrollSentinelIntoView()
 
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE * 2))
+    await settle(() => renderedChatCount(view) === CHAT_PAGE_SIZE * 2, 'both pages are rendered')
+  })
+
+  test('keeps a load-more action available while searching', async () => {
+    const requests: PageRequest[] = []
+    installSessionServer(requests, ALL_SESSIONS.slice(0, 45))
+    installIntersectionObserver()
+
+    const view = renderPage([])
+    await settle(() => renderedChatCount(view) === CHAT_PAGE_SIZE, 'the first page renders')
+
+    fireEvent.change(view.getByRole('textbox'), { target: { value: 'Chat 04' } })
+    expect(renderedChatCount(view)).toBe(0)
+
+    const loadMore = view.getByRole('button', {
+      name: i18n.t('chat.loadMore', { loaded: 40, total: 45 }),
+    })
+    fireEvent.click(loadMore)
+
+    await settle(() => renderedChatCount(view) === 5, 'the last page is loaded')
+    expect(requests).toContainEqual({ offset: 40, limit: CHAT_PAGE_SIZE })
+  })
+
+  test('ignores a page that was requested for a previous kind', async () => {
+    const requests: PageRequest[] = []
+    let releaseStalePage = () => {}
+    const stalePage = new Promise<void>((resolve) => {
+      releaseStalePage = resolve
+    })
+
+    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      const offset = Number(url.searchParams.get('offset') ?? '0')
+      const kind = url.searchParams.get('kind')
+      requests.push({ offset, limit: Number(url.searchParams.get('limit') ?? CHAT_PAGE_SIZE) })
+
+      if (kind === 'heartbeat') {
+        return new Response(JSON.stringify({ sessions: [], total: 0, has_more: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (offset > 0) await stalePage
+      const sessions = ALL_SESSIONS.slice(offset, offset + CHAT_PAGE_SIZE)
+      return new Response(
+        JSON.stringify({ sessions, total: ALL_SESSIONS.length, has_more: true }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }) as unknown as typeof fetch
+
+    installIntersectionObserver()
+    const view = renderPage([])
+    await settle(
+      () => requests.some((request) => request.offset === CHAT_PAGE_SIZE),
+      'the prefetch is in flight',
+    )
+
+    fireEvent.click(view.getByRole('button', { name: i18n.t('chat.filterKind.heartbeat') }))
+    await settle(() => renderedChatCount(view) === 0, 'the kind switch clears the list')
+
+    releaseStalePage()
+
+    await settle(() => requests.length >= 3, 'the stale page resolved')
+    expect(renderedChatCount(view)).toBe(0)
+    expect(view.getByText(i18n.t('chat.totalSessions', { count: 0 }))).not.toBeNull()
+  })
+
+  test('never renders a fetched row that belongs to another kind', async () => {
+    const requests: PageRequest[] = []
+    const mixed: ChatSession[] = Array.from({ length: 10 }, (_, i) => ({
+      key: `native:client-1:b${String(i).padStart(3, '0')}`,
+      name: `Beat ${String(i).padStart(3, '0')}`,
+      kind: 'heartbeat' as const,
+      created: '2026-01-01T00:00:00.000Z',
+      updated: new Date(2026, 0, 2, 0, 0, i).toISOString(),
+    }))
+    installSessionServer(requests, [...ALL_SESSIONS.slice(0, 10), ...mixed])
+    installIntersectionObserver()
+
+    const view = renderPage([])
+    await settle(() => renderedChatCount(view) === 10, 'the chat rows render')
+    expect(sessionCount(view, /^Beat \d{3}/)).toBe(10)
+
+    fireEvent.click(view.getByRole('button', { name: i18n.t('chat.filterKind.heartbeat') }))
+
+    await settle(
+      () => sessionCount(view, /^Beat \d{3}/) === 10,
+      'the heartbeat rows survive the kind switch',
+    )
+    expect(renderedChatCount(view)).toBe(0)
   })
 
   test('stops requesting pages once every session is loaded', async () => {
@@ -213,14 +317,14 @@ describe('ChatHistoryPage pagination', () => {
 
     const view = renderPage([])
 
-    await waitFor(() => expect(requests).toHaveLength(2))
+    await settle(() => requests.length === 2, 'both pages are requested')
     expect(requests).toContainEqual({ offset: 0, limit: CHAT_PAGE_SIZE })
     expect(requests).toContainEqual({ offset: CHAT_PAGE_SIZE, limit: CHAT_PAGE_SIZE })
 
-    await waitFor(() => expect(hasLiveSentinel()).toBe(true))
+    await settle(hasLiveSentinel, 'the sentinel is observed')
     scrollSentinelIntoView()
 
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(25))
+    await settle(() => renderedChatCount(view) === 25, 'every session renders')
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(requests).toHaveLength(2)
   })

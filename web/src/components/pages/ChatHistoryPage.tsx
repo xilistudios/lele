@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -41,6 +41,11 @@ export function ChatHistoryPage() {
   const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
+  const kindRef = useRef<KindTab>(activeKind)
+
+  useEffect(() => {
+    kindRef.current = activeKind
+  }, [activeKind])
 
   useEffect(() => {
     void refreshKey
@@ -73,19 +78,22 @@ export function ChatHistoryPage() {
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return
+    const requestedKind = activeKind
+    const kindParam = requestedKind === 'all' ? undefined : requestedKind
     setLoadingMore(true)
     try {
-      const kindParam = activeKind === 'all' ? undefined : activeKind
       const data = await api.sessions(undefined, kindParam, true, {
         offset: allFetchedSessions.length,
         limit: CHAT_PAGE_SIZE,
       })
+      if (kindRef.current !== requestedKind) return
       if (data?.sessions?.length) {
         setAllFetchedSessions((prev) => [...prev, ...data.sessions])
       }
       setHasMore(data?.has_more ?? false)
       setTotal(data?.total ?? 0)
     } catch (err) {
+      if (kindRef.current !== requestedKind) return
       setLoadError((err as Error).message)
     } finally {
       setLoadingMore(false)
@@ -98,6 +106,7 @@ export function ChatHistoryPage() {
     const byKey = new Map<string, ChatSession>()
     for (const s of kindFiltered) byKey.set(s.key, s)
     for (const s of allFetchedSessions) {
+      if (activeKind !== 'all' && s.kind !== activeKind) continue
       if (!byKey.has(s.key)) byKey.set(s.key, s)
     }
     return Array.from(byKey.values())
@@ -233,10 +242,6 @@ export function ChatHistoryPage() {
                 {t('common.retry', 'Retry')}
               </button>
             </div>
-          ) : filteredSessions.length === 0 ? (
-            <div className="flex h-64 items-center justify-center text-sm text-text-tertiary">
-              {t('chat.noSearchResults')}
-            </div>
           ) : (
             <div className="mx-auto max-w-4xl">
               {loadError && (
@@ -254,22 +259,36 @@ export function ChatHistoryPage() {
                   </button>
                 </div>
               )}
-              <ChatListView
-                groups={visibleGroups}
-                selectedKey={currentSessionKey}
-                processingSessions={processingSessions}
-                onSelect={handleSelect}
-                onDelete={handleDelete}
-                onClear={handleClear}
-              />
+              {filteredSessions.length === 0 ? (
+                <div className="flex h-64 items-center justify-center text-sm text-text-tertiary">
+                  {t('chat.noSearchResults')}
+                </div>
+              ) : (
+                <ChatListView
+                  groups={visibleGroups}
+                  selectedKey={currentSessionKey}
+                  processingSessions={processingSessions}
+                  onSelect={handleSelect}
+                  onDelete={handleDelete}
+                  onClear={handleClear}
+                />
+              )}
               {(hasMoreToReveal || hasMore || loadingMore) && (
                 <div ref={sentinelRef} className="flex justify-center py-6">
-                  {loadingMore && (
+                  {loadingMore ? (
                     <span className="flex items-center gap-2 text-sm text-text-tertiary">
                       <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-focus border-t-transparent" />
                       {t('chat.loadingMore')}
                     </span>
-                  )}
+                  ) : searching && hasMore ? (
+                    <button
+                      type="button"
+                      onClick={() => void loadMore()}
+                      className="rounded-lg border border-border bg-background-secondary px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      {t('chat.loadMore', { loaded: allSessions.length, total })}
+                    </button>
+                  ) : null}
                 </div>
               )}
             </div>

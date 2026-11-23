@@ -64,6 +64,16 @@ Object.assign(globalThis, {
   sessionStorage: dom.window.sessionStorage,
 })
 
+Object.assign(globalThis, {
+  Node: dom.window.Node,
+  Element: dom.window.Element,
+  HTMLElement: dom.window.HTMLElement,
+  HTMLInputElement: dom.window.HTMLInputElement,
+  HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
+  HTMLButtonElement: dom.window.HTMLButtonElement,
+  HTMLDialogElement: dom.window.HTMLDialogElement,
+})
+
 dom.window.requestAnimationFrame = (cb: FrameRequestCallback) => setTimeout(cb, 16)
 dom.window.cancelAnimationFrame = (id: number) => clearTimeout(id)
 

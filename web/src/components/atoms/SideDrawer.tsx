@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 
 const ANIMATION_DURATION_MS = 300
 
@@ -20,9 +20,18 @@ export function SideDrawer({
   widthClassName = 'w-80',
   testId,
 }: SideDrawerProps) {
-  const { t } = useTranslation()
   const [mounted, setMounted] = useState(isOpen)
   const [shown, setShown] = useState(isOpen)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const invokerRef = useRef<HTMLElement | null>(null)
+
+  useFocusTrap(dialogRef, mounted && isOpen)
+
+  useEffect(() => {
+    if (!isOpen) return
+    const active = document.activeElement
+    invokerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
+  }, [isOpen])
 
   useEffect(() => {
     if (isOpen) {
@@ -48,6 +57,27 @@ export function SideDrawer({
   }, [mounted, isOpen])
 
   useEffect(() => {
+    if (!mounted || !isOpen) return
+    const dialog = dialogRef.current
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus()
+  }, [mounted, isOpen])
+
+  useEffect(() => {
+    if (isOpen) return
+    const invoker = invokerRef.current
+    invokerRef.current = null
+    const active = document.activeElement
+    const dialog = dialogRef.current
+    const focusMovedElsewhere =
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      !(dialog?.contains(active) ?? false)
+
+    if (focusMovedElsewhere) return
+    if (invoker?.isConnected) invoker.focus()
+  }, [isOpen])
+
+  useEffect(() => {
     if (!isOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -63,20 +93,26 @@ export function SideDrawer({
 
   return (
     <>
-      <button
-        type="button"
+      <div
+        aria-hidden="true"
         className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${backdropState}`}
         onClick={onClose}
-        aria-label={t('common.close')}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onClose()
+        }}
       />
 
-      <aside
+      <dialog
+        ref={dialogRef}
+        open
+        aria-modal="true"
+        tabIndex={-1}
         data-testid={testId}
         aria-label={ariaLabel}
-        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full ${widthClassName} max-w-[90vw] safe-area-y border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${panelState}`}
+        className={`m-0 bg-background-secondary fixed right-0 top-0 z-50 h-full max-h-none ${widthClassName} max-w-[90vw] safe-area-y border-l border-border p-0 shadow-lg flex flex-col outline-none transition-transform duration-300 ease-out ${panelState}`}
       >
         {children}
-      </aside>
+      </dialog>
     </>
   )
 }

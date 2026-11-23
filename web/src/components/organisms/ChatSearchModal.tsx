@@ -28,6 +28,7 @@ export function ChatSearchModal({ isOpen, onClose }: ChatSearchModalProps) {
 
   const dialogRef = useRef<HTMLDialogElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const invokerRef = useRef<HTMLElement | null>(null)
 
   const [mounted, setMounted] = useState(isOpen)
   const [closing, setClosing] = useState(false)
@@ -54,11 +55,20 @@ export function ChatSearchModal({ isOpen, onClose }: ChatSearchModalProps) {
     if (!mounted || closing) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active !== document.body) invokerRef.current = active
     searchInputRef.current?.focus()
     return () => {
       document.body.style.overflow = previousOverflow
     }
   }, [mounted, closing])
+
+  useEffect(() => {
+    if (!closing) return
+    const invoker = invokerRef.current
+    invokerRef.current = null
+    if (invoker?.isConnected) invoker.focus()
+  }, [closing])
 
   useEffect(() => {
     if (!mounted || closing) return
