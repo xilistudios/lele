@@ -46,14 +46,19 @@ type Props = {
 export function SettingsTabs({ activeTab, onTabChange }: Props) {
   const { t } = useTranslation()
   const { groupsEnabled } = useAppLogicContext()
-  const stripRef = useRef<HTMLDivElement | null>(null)
+  const navRef = useRef<HTMLElement | null>(null)
+  const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({})
 
   useEffect(() => {
-    const button = stripRef.current?.querySelector<HTMLButtonElement>(
-      `[data-testid="settings-tab-${activeTab}"]`,
-    )
-    if (!button || typeof button.scrollIntoView !== 'function') return
-    button.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const scroller = navRef.current
+    const button = tabRefs.current[activeTab]
+    if (!scroller || !button) return
+    const viewRect = scroller.getBoundingClientRect()
+    const buttonRect = button.getBoundingClientRect()
+    const overflowLeft = buttonRect.left - viewRect.left
+    const overflowRight = buttonRect.right - viewRect.right
+    if (overflowLeft < 0) scroller.scrollLeft += overflowLeft
+    else if (overflowRight > 0) scroller.scrollLeft += overflowRight
   }, [activeTab])
 
   const tabs: { id: SettingsTab; label: string }[] = [
@@ -76,15 +81,19 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
 
   return (
     <nav
+      ref={navRef}
       data-testid="settings-tabs"
       className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
     >
-      <div ref={stripRef} className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
+      <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
         {tabs.map((tab) => {
           const Icon = TAB_ICONS[tab.id]
           return (
             <button
               key={tab.id}
+              ref={(element) => {
+                tabRefs.current[tab.id] = element
+              }}
               onClick={() => onTabChange(tab.id)}
               type="button"
               data-testid={`settings-tab-${tab.id}`}

@@ -224,7 +224,7 @@ describe('SettingsPage — new tabs', () => {
   })
 })
 describe('SettingsPage — scroll area containment', () => {
-  test('the scroll area is a containment block for absolutely positioned descendants', async () => {
+  test('the scroll area is a positioned containing block (structural pin)', async () => {
     const view = renderLayout('/settings/mcp', { config: 0 })
     await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
 
