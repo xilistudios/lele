@@ -129,6 +129,20 @@
       "tool_call": true
     },
     {
+      "id": "Qwen/Qwen4-Max",
+      "name": "Qwen4 Max",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
       "name": "DeepSeek V4.1 Flash 1017",
       "context_window": 1000000,

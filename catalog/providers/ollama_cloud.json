@@ -147,6 +147,18 @@
       "tool_call": true
     },
     {
+      "id": "hy4",
+      "name": "hy4",
+      "context_window": 1048576,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "inkling-2-small",
       "name": "Inkling 2 Small",
       "context_window": 1048576,

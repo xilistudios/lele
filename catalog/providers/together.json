@@ -59,6 +59,34 @@
       "tool_call": true
     },
     {
+      "id": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "name": "MiniMax-M3.1-Flash",
+      "context_window": 1048576,
+      "max_output": 512000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "Qwen/Qwen4-Max",
+      "name": "Qwen4 Max",
+      "context_window": 1000000,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-ai/DeepSeek-V4.1-Flash",
       "name": "DeepSeek V4.1 Flash",
       "context_window": 1048576,
@@ -66,6 +94,33 @@
       "vision": true,
       "thinking_levels": [
         "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "context_window": 1048576,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "meta-models/Muse-Glimmer-30B",
+      "name": "Muse Glimmer 30B",
+      "context_window": 131072,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
         "high"
       ],
       "reasoning": true,
@@ -127,9 +182,35 @@
       "tool_call": true
     },
     {
+      "id": "tencent/Hy4",
+      "name": "Hy4",
+      "context_window": 1048576,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "thinkingmachines/Inkling",
       "name": "Inkling",
       "context_window": 524288,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "thinkingmachines/Inkling-2-Small",
+      "name": "Inkling 2 Small",
+      "context_window": 1048576,
       "max_output": 131072,
       "vision": true,
       "thinking_levels": [

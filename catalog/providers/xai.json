@@ -96,20 +96,6 @@
       "reasoning": true
     },
     {
-      "id": "grok-build-0.1",
-      "name": "Grok Build 0.1",
-      "context_window": 256000,
-      "max_output": 256000,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "grok-imagine-image",
       "name": "Grok Imagine Image",
       "context_window": 16000,
