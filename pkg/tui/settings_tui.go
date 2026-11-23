@@ -33,13 +33,9 @@ func (m *Model) modalTextBudget(indentCells int) int {
 }
 
 func (m *Model) loadTUISettings() {
-	mouseStatus := "✓"
-	if !m.mouseEnabled {
-		mouseStatus = "✗"
-	}
 	m.modalItems = []string{
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.theme"), m.currentThemeName),
-		fmt.Sprintf("%s: %s", i18n.T("tui.settings.mouse"), mouseStatus),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.mouse"), boolStatus(m.mouseEnabled)),
 		fmt.Sprintf("%s: %d", i18n.T("tui.settings.maxMessages"), m.maxRenderedMessages),
 		fmt.Sprintf("%s: %dms", i18n.T("tui.settings.streamThrottle"), int(m.streamThrottleInterval.Milliseconds())),
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keepAwake"), m.keepAwakeStatus()),

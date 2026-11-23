@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,60 @@ const (
 	sysGroupLanguage = 3
 	sysGroupGoal     = 4
 	sysGroupUpdates  = 5
+	sysGroupGateway  = 6
+	sysGroupKeyring  = 7
+)
+
+const (
+	sessionFieldEphemeral = iota
+	sessionFieldThreshold
+	sessionFieldCompactionPercent
+	sessionFieldCompactionModel
+	sessionFieldEvictExcluded
+	sessionFieldDurableInbound
+	sessionFieldDurableOutbound
+	sessionFieldResume
+	sessionFieldDMScope
+)
+
+const (
+	goalFieldJudgeMode = iota
+	goalFieldJudgeAgent
+)
+
+const (
+	logsFieldEnabled = iota
+	logsFieldPath
+	logsFieldMaxDays
+	logsFieldRotation
+)
+
+const (
+	toolsFieldExecTimeout = iota
+	toolsFieldDenyPatterns
+	toolsFieldCustomDenyPatterns
+	toolsFieldWhitelistCommands
+	toolsFieldCronExecTimeout
+)
+
+const (
+	updatesFieldEnabled = iota
+	updatesFieldChannel
+	updatesFieldRepo
+)
+
+const (
+	gatewayFieldHost = iota
+	gatewayFieldPort
+)
+
+const (
+	keyringFieldEnabled = iota
+	keyringFieldPath
+	keyringFieldBackend
+	keyringFieldAuditLogSize
+	keyringFieldAllowAgentSet
+	keyringFieldAllowAgentDelete
 )
 
 func valueOr(s, fallback string) string {
@@ -56,41 +111,38 @@ func (m *Model) loadSystemSettings() {
 		i18n.T("tui.settings.language"),
 		i18n.T("tui.settings.goal"),
 		i18n.T("tui.settings.updates"),
+		i18n.T("tui.settings.gateway"),
+		i18n.T("tui.settings.keyring"),
 	}
 }
 
 func (m *Model) loadSessionSettings() {
-	ephemeralStatus := "✗"
-	if m.cfg.Session.Ephemeral {
-		ephemeralStatus = "✓"
-	}
 	m.modalItems = []string{
-		fmt.Sprintf("%s: %s", i18n.T("tui.settings.ephemeral"), ephemeralStatus),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.ephemeral"), boolStatus(m.cfg.Session.Ephemeral)),
 		fmt.Sprintf("%s: %ds", i18n.T("tui.settings.ephemeralThreshold"), m.cfg.Session.EphemeralThreshold),
 		fmt.Sprintf("%s: %d%%", i18n.T("tui.settings.compactionPercent"), m.cfg.Session.CompactionThresholdPercent),
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.compactionModel"), valueOr(m.cfg.Session.CompactionModel, "default")),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.evictExcluded"), boolStatus(m.cfg.Session.EvictExcludedFromMemory)),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.durableInbound"), boolStatus(m.cfg.Session.DurableInboundEnabled())),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.durableOutbound"), boolStatus(m.cfg.Session.DurableOutboundEnabled())),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.resume"), boolStatus(m.cfg.Session.ResumeEnabled())),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.dmScope"), valueOr(m.cfg.Session.DMScope, "default")),
 	}
 }
 
 func (m *Model) loadToolsSettings() {
-	denyStatus := "✗"
-	if m.cfg.Tools.Exec.EnableDenyPatterns {
-		denyStatus = "✓"
-	}
 	m.modalItems = []string{
 		fmt.Sprintf("%s: %ds", i18n.T("tui.settings.execTimeout"), m.cfg.Tools.Exec.TimeoutSeconds),
-		fmt.Sprintf("%s: %s", i18n.T("tui.settings.denyPatterns"), denyStatus),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.denyPatterns"), boolStatus(m.cfg.Tools.Exec.EnableDenyPatterns)),
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.customDenyPatterns"), valueOr(strings.Join(m.cfg.Tools.Exec.CustomDenyPatterns, ", "), "none")),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.whitelistCommands"), valueOr(strings.Join(m.cfg.Tools.Exec.WhitelistCommands, ", "), "none")),
+		fmt.Sprintf("%s: %dm", i18n.T("tui.settings.cronExecTimeout"), m.cfg.Tools.Cron.ExecTimeoutMinutes),
 	}
 }
 
 func (m *Model) loadLogsSettings() {
-	enabledStatus := "✗"
-	if m.cfg.Logs.Enabled {
-		enabledStatus = "✓"
-	}
 	m.modalItems = []string{
-		fmt.Sprintf("%s: %s", i18n.T("tui.settings.logsEnabled"), enabledStatus),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.logsEnabled"), boolStatus(m.cfg.Logs.Enabled)),
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.logsPath"), valueOr(m.cfg.Logs.Path, "default")),
 		fmt.Sprintf("%s: %d", i18n.T("tui.settings.logsMaxDays"), m.cfg.Logs.MaxDays),
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.logsRotation"), valueOr(m.cfg.Logs.Rotation, "daily")),
@@ -151,13 +203,28 @@ func (m *Model) loadGoalSettings() {
 }
 
 func (m *Model) loadUpdatesSettings() {
-	enabledStatus := "✗"
-	if m.cfg.Updates.Enabled {
-		enabledStatus = "✓"
-	}
 	m.modalItems = []string{
-		fmt.Sprintf("%s: %s", i18n.T("tui.settings.updatesEnabled"), enabledStatus),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.updatesEnabled"), boolStatus(m.cfg.Updates.Enabled)),
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.updatesChannel"), valueOr(m.cfg.Updates.Channel, "stable")),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.updatesRepo"), valueOr(m.cfg.Updates.Repo, "default")),
+	}
+}
+
+func (m *Model) loadGatewaySettings() {
+	m.modalItems = []string{
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.gatewayHost"), valueOr(m.cfg.Gateway.Host, "default")),
+		fmt.Sprintf("%s: %d", i18n.T("tui.settings.gatewayPort"), m.cfg.Gateway.Port),
+	}
+}
+
+func (m *Model) loadKeyringSettings() {
+	m.modalItems = []string{
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keyringEnabled"), boolStatus(m.cfg.Keyring.Enabled)),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keyringPath"), valueOr(m.cfg.Keyring.Path, "default")),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keyringBackend"), valueOr(m.cfg.Keyring.Backend, "default")),
+		fmt.Sprintf("%s: %d", i18n.T("tui.settings.keyringAuditLogSize"), m.cfg.Keyring.AuditLogSize),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keyringAllowAgentSet"), boolStatus(m.cfg.Keyring.AllowAgentSet)),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keyringAllowAgentDelete"), boolStatus(m.cfg.Keyring.AllowAgentDelete)),
 	}
 }
 
@@ -175,73 +242,105 @@ func (m *Model) handleSystemSubEnter() tea.Cmd {
 		return m.handleGoalEnter()
 	case sysSubViewName(sysGroupUpdates):
 		return m.handleUpdatesEnter()
+	case sysSubViewName(sysGroupGateway):
+		return m.handleGatewayEnter()
+	case sysSubViewName(sysGroupKeyring):
+		return m.handleKeyringEnter()
 	}
 	return nil
 }
 
 func (m *Model) handleSessionEnter() tea.Cmd {
+	s := &m.cfg.Session
 	switch m.modalSelectedIdx {
-	case 0:
-		m.cfg.Session.Ephemeral = !m.cfg.Session.Ephemeral
-		m.saveConfigToDisk()
-		m.loadSessionSettings()
-	case 1:
-		m.settingsEditField = "ephemeralThreshold"
-		m.textInput.SetValue(strconv.Itoa(m.cfg.Session.EphemeralThreshold))
-		m.textInput.Focus()
-	case 2:
+	case sessionFieldEphemeral:
+		s.Ephemeral = !s.Ephemeral
+		m.persistSystemSettings()
+	case sessionFieldThreshold:
+		m.startNumberEdit("ephemeralThreshold", s.EphemeralThreshold)
+	case sessionFieldCompactionPercent:
 		m.settingsEditField = "compactionPercent"
-		m.textInput.SetValue(strconv.Itoa(m.cfg.Session.CompactionThresholdPercent))
+		m.textInput.SetValue(strconv.Itoa(s.CompactionThresholdPercent))
 		m.textInput.Focus()
-	case 3:
-		labels, values := m.modelSelectorOptions(m.cfg.Session.CompactionModel)
-		if len(values) == 0 {
-			m.settingsEditField = "compactionModel"
-			m.textInput.SetValue(m.cfg.Session.CompactionModel)
-			m.textInput.Focus()
-		} else {
-			m.startSettingsSelector("compactionModel", m.cfg.Session.CompactionModel, labels, values)
-		}
+	case sessionFieldCompactionModel:
+		m.startCompactionModelEdit()
+	case sessionFieldEvictExcluded:
+		s.EvictExcludedFromMemory = !s.EvictExcludedFromMemory
+		m.persistSystemSettings()
+	case sessionFieldDurableInbound:
+		enabled := !s.DurableInboundEnabled()
+		s.DurableInbound = &enabled
+		m.persistSystemSettings()
+	case sessionFieldDurableOutbound:
+		enabled := !s.DurableOutboundEnabled()
+		s.DurableOutbound = &enabled
+		m.persistSystemSettings()
+	case sessionFieldResume:
+		enabled := !s.ResumeEnabled()
+		s.Resume = &enabled
+		m.persistSystemSettings()
+	case sessionFieldDMScope:
+		labels := []string{"(default)", "main", "per-peer", "per-channel-peer", "per-account-channel-peer"}
+		values := []string{"", "main", "per-peer", "per-channel-peer", "per-account-channel-peer"}
+		m.startSettingsSelector("dmScope", s.DMScope, labels, values)
 	}
 	return nil
 }
 
+func (m *Model) startCompactionModelEdit() {
+	labels, values := m.modelSelectorOptions(m.cfg.Session.CompactionModel)
+	if len(values) == 0 {
+		m.settingsEditField = "compactionModel"
+		m.textInput.SetValue(m.cfg.Session.CompactionModel)
+		m.textInput.Focus()
+		return
+	}
+	m.startSettingsSelector("compactionModel", m.cfg.Session.CompactionModel, labels, values)
+}
+
+func (m *Model) persistSystemSettings() {
+	m.formError = ""
+	m.saveConfigToDisk()
+	m.reloadSystemSubView()
+}
+
 func (m *Model) handleToolsEnter() tea.Cmd {
+	tools := &m.cfg.Tools
 	switch m.modalSelectedIdx {
-	case 0:
-		m.settingsEditField = "execTimeout"
-		m.textInput.SetValue(strconv.Itoa(m.cfg.Tools.Exec.TimeoutSeconds))
-		m.textInput.Focus()
-	case 1:
-		m.cfg.Tools.Exec.EnableDenyPatterns = !m.cfg.Tools.Exec.EnableDenyPatterns
-		m.saveConfigToDisk()
-		m.loadToolsSettings()
-	case 2:
+	case toolsFieldExecTimeout:
+		m.startNumberEdit("execTimeout", tools.Exec.TimeoutSeconds)
+	case toolsFieldDenyPatterns:
+		tools.Exec.EnableDenyPatterns = !tools.Exec.EnableDenyPatterns
+		m.persistSystemSettings()
+	case toolsFieldCustomDenyPatterns:
 		m.settingsEditField = "customDenyPatterns"
-		m.textInput.SetValue(strings.Join(m.cfg.Tools.Exec.CustomDenyPatterns, ", "))
+		m.textInput.SetValue(strings.Join(tools.Exec.CustomDenyPatterns, ", "))
 		m.textInput.Focus()
+	case toolsFieldWhitelistCommands:
+		m.settingsEditField = "whitelistCommands"
+		m.textInput.SetValue(strings.Join(tools.Exec.WhitelistCommands, ", "))
+		m.textInput.Focus()
+	case toolsFieldCronExecTimeout:
+		m.startNumberEdit("cronExecTimeout", tools.Cron.ExecTimeoutMinutes)
 	}
 	return nil
 }
 
 func (m *Model) handleLogsEnter() tea.Cmd {
+	logs := &m.cfg.Logs
 	switch m.modalSelectedIdx {
-	case 0:
-		m.cfg.Logs.Enabled = !m.cfg.Logs.Enabled
-		m.saveConfigToDisk()
-		m.loadLogsSettings()
-	case 1:
+	case logsFieldEnabled:
+		logs.Enabled = !logs.Enabled
+		m.persistSystemSettings()
+	case logsFieldPath:
 		m.settingsEditField = "logsPath"
-		m.textInput.SetValue(m.cfg.Logs.Path)
+		m.textInput.SetValue(logs.Path)
 		m.textInput.Focus()
-	case 2:
-		m.settingsEditField = "logsMaxDays"
-		m.textInput.SetValue(strconv.Itoa(m.cfg.Logs.MaxDays))
-		m.textInput.Focus()
-	case 3:
+	case logsFieldMaxDays:
+		m.startNumberEdit("logsMaxDays", logs.MaxDays)
+	case logsFieldRotation:
 		labels := []string{"daily", "weekly"}
-		values := []string{"daily", "weekly"}
-		m.startSettingsSelector("logsRotation", m.cfg.Logs.Rotation, labels, values)
+		m.startSettingsSelector("logsRotation", logs.Rotation, labels, labels)
 	}
 	return nil
 }
@@ -263,11 +362,10 @@ func (m *Model) handleLanguageEnter() tea.Cmd {
 
 func (m *Model) handleGoalEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0:
+	case goalFieldJudgeMode:
 		labels := []string{"inline", "subagent"}
-		values := []string{"inline", "subagent"}
-		m.startSettingsSelector("goalJudgeMode", m.cfg.Goal.Judge.Mode, labels, values)
-	case 1:
+		m.startSettingsSelector("goalJudgeMode", m.cfg.Goal.Judge.Mode, labels, labels)
+	case goalFieldJudgeAgent:
 		labels := []string{"(default)"}
 		values := []string{""}
 		for _, a := range m.cfg.Agents.List {
@@ -284,15 +382,57 @@ func (m *Model) handleGoalEnter() tea.Cmd {
 }
 
 func (m *Model) handleUpdatesEnter() tea.Cmd {
+	updates := &m.cfg.Updates
 	switch m.modalSelectedIdx {
-	case 0:
-		m.cfg.Updates.Enabled = !m.cfg.Updates.Enabled
-		m.saveConfigToDisk()
-		m.loadUpdatesSettings()
-	case 1:
+	case updatesFieldEnabled:
+		updates.Enabled = !updates.Enabled
+		m.persistSystemSettings()
+	case updatesFieldChannel:
 		labels := []string{"stable"}
-		values := []string{"stable"}
-		m.startSettingsSelector("updatesChannel", m.cfg.Updates.Channel, labels, values)
+		m.startSettingsSelector("updatesChannel", updates.Channel, labels, labels)
+	case updatesFieldRepo:
+		m.settingsEditField = "updatesRepo"
+		m.textInput.SetValue(updates.Repo)
+		m.textInput.Focus()
+	}
+	return nil
+}
+
+func (m *Model) handleGatewayEnter() tea.Cmd {
+	gw := &m.cfg.Gateway
+	switch m.modalSelectedIdx {
+	case gatewayFieldHost:
+		m.settingsEditField = "gatewayHost"
+		m.textInput.SetValue(gw.Host)
+		m.textInput.Focus()
+	case gatewayFieldPort:
+		m.startNumberEdit("gatewayPort", gw.Port)
+	}
+	return nil
+}
+
+func (m *Model) handleKeyringEnter() tea.Cmd {
+	kr := &m.cfg.Keyring
+	switch m.modalSelectedIdx {
+	case keyringFieldEnabled:
+		kr.Enabled = !kr.Enabled
+		m.persistSystemSettings()
+	case keyringFieldPath:
+		m.settingsEditField = "keyringPath"
+		m.textInput.SetValue(kr.Path)
+		m.textInput.Focus()
+	case keyringFieldBackend:
+		labels := []string{"(default)", "auto", "file", "keychain"}
+		values := []string{"", "auto", "file", "keychain"}
+		m.startSettingsSelector("keyringBackend", kr.Backend, labels, values)
+	case keyringFieldAuditLogSize:
+		m.startNumberEdit("keyringAuditLogSize", kr.AuditLogSize)
+	case keyringFieldAllowAgentSet:
+		kr.AllowAgentSet = !kr.AllowAgentSet
+		m.persistSystemSettings()
+	case keyringFieldAllowAgentDelete:
+		kr.AllowAgentDelete = !kr.AllowAgentDelete
+		m.persistSystemSettings()
 	}
 	return nil
 }
@@ -302,47 +442,42 @@ func (m *Model) handleSystemSettingsInput(value string) {
 
 	switch m.settingsEditField {
 	case "ephemeralThreshold":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		m.cfg.Session.EphemeralThreshold = v
 	case "compactionPercent":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 || v > 100 {
-			m.formError = i18n.T("tui.settings.invalidPercent")
+		v, ok := m.parsePercentField(value)
+		if !ok {
 			return
 		}
 		m.cfg.Session.CompactionThresholdPercent = v
 	case "compactionModel":
 		m.cfg.Session.CompactionModel = value
+	case "dmScope":
+		m.cfg.Session.DMScope = value
 	case "execTimeout":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		m.cfg.Tools.Exec.TimeoutSeconds = v
 	case "customDenyPatterns":
-		if value == "" {
-			m.cfg.Tools.Exec.CustomDenyPatterns = nil
-		} else {
-			var patterns []string
-			for _, p := range strings.Split(value, ",") {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					patterns = append(patterns, p)
-				}
-			}
-			m.cfg.Tools.Exec.CustomDenyPatterns = patterns
+		m.cfg.Tools.Exec.CustomDenyPatterns = parseCSVList(value)
+	case "whitelistCommands":
+		m.cfg.Tools.Exec.WhitelistCommands = parseCSVList(value)
+	case "cronExecTimeout":
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
+			return
 		}
+		m.cfg.Tools.Cron.ExecTimeoutMinutes = v
 	case "logsPath":
 		m.cfg.Logs.Path = value
 	case "logsMaxDays":
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 {
-			m.formError = i18n.T("tui.settings.invalidNumber")
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
 			return
 		}
 		m.cfg.Logs.MaxDays = v
@@ -354,6 +489,28 @@ func (m *Model) handleSystemSettingsInput(value string) {
 		m.cfg.Goal.Judge.Agent = value
 	case "updatesChannel":
 		m.cfg.Updates.Channel = value
+	case "updatesRepo":
+		m.cfg.Updates.Repo = value
+	case "gatewayHost":
+		m.cfg.Gateway.Host = value
+	case "gatewayPort":
+		v, ok := m.parseIntField(value, 1, 65535)
+		if !ok {
+			return
+		}
+		m.cfg.Gateway.Port = v
+	case "keyringPath":
+		m.cfg.Keyring.Path = value
+	case "keyringBackend":
+		m.cfg.Keyring.Backend = value
+	case "keyringAuditLogSize":
+		v, ok := m.parseIntField(value, 0, math.MaxInt)
+		if !ok {
+			return
+		}
+		m.cfg.Keyring.AuditLogSize = v
+	default:
+		return
 	}
 
 	m.formError = ""
@@ -376,5 +533,9 @@ func (m *Model) reloadSystemSubView() {
 		m.loadGoalSettings()
 	case sysSubViewName(sysGroupUpdates):
 		m.loadUpdatesSettings()
+	case sysSubViewName(sysGroupGateway):
+		m.loadGatewaySettings()
+	case sysSubViewName(sysGroupKeyring):
+		m.loadKeyringSettings()
 	}
 }

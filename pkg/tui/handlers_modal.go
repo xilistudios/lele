@@ -867,20 +867,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					groupIdx := m.modalSelectedIdx
 					m.resetModal(ModalSettingsSystemEdit)
 					m.settingsSection = sysSubViewName(groupIdx)
-					switch groupIdx {
-					case sysGroupSession:
-						m.loadSessionSettings()
-					case sysGroupTools:
-						m.loadToolsSettings()
-					case sysGroupLogs:
-						m.loadLogsSettings()
-					case sysGroupLanguage:
-						m.loadLanguageSettings()
-					case sysGroupGoal:
-						m.loadGoalSettings()
-					case sysGroupUpdates:
-						m.loadUpdatesSettings()
-					}
+					m.reloadSystemSubView()
 					return m, nil
 				} else if m.modalMode == ModalSettingsSystemEdit {
 					if m.settingsSelectorActive {
