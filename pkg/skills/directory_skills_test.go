@@ -29,7 +29,7 @@ func newDirectorySkillLoader(t *testing.T, directory string, workspaceFixtures, 
 	global := t.TempDir()
 	writeSkillFixtures(t, filepath.Join(workspace, "skills"), workspaceFixtures)
 	writeSkillFixtures(t, global, globalFixtures)
-	return NewSkillsLoader(workspace, global, "", directory)
+	return NewSkillsLoader(workspace, global, "", directory, "")
 }
 
 func TestSkillsLoader_DirectorySkillIsListedAndLoaded(t *testing.T) {

@@ -63,16 +63,18 @@ type SkillsLoader struct {
 	globalSkills    string
 	builtinSkills   string
 	directorySkills string
+	agentsSkills    string
 	configMgr       *WorkspaceConfigManager
 }
 
-func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string, directorySkills string) *SkillsLoader {
+func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string, directorySkills string, agentsSkills string) *SkillsLoader {
 	loader := &SkillsLoader{
 		workspace:       workspace,
 		workspaceSkills: filepath.Join(workspace, "skills"),
 		globalSkills:    globalSkills,
 		builtinSkills:   builtinSkills,
 		directorySkills: directorySkills,
+		agentsSkills:    agentsSkills,
 	}
 
 	if workspace != "" {
@@ -109,6 +111,7 @@ type skillRoot struct {
 
 func (sl *SkillsLoader) skillRoots() []skillRoot {
 	roots := []skillRoot{
+		{path: sl.agentsSkills, source: "agents"},
 		{path: sl.directorySkills, source: "directory"},
 		{path: sl.workspaceSkills, source: "workspace"},
 		{path: sl.globalSkills, source: "global"},

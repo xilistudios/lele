@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,14 +8,7 @@ import (
 
 func writeProjectSkill(t *testing.T, cwd, name string) {
 	t.Helper()
-	dir := filepath.Join(cwd, ".lele", "skills", name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", dir, err)
-	}
-	body := "---\nname: " + name + "\ndescription: the project " + name + " skill\n---\n\nproject body of " + name + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
-		t.Fatalf("WriteFile(SKILL.md): %v", err)
-	}
+	writeSkillUnder(t, cwd, filepath.Join(".lele", "skills"), name, "project body of "+name)
 }
 
 func TestNewContextBuilder_ResolvesProjectSkillsFromWorkingDirectory(t *testing.T) {

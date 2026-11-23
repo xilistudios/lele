@@ -242,7 +242,7 @@ func TestSkillsLoader_LoadSkillValidName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sl := NewSkillsLoader(workspace, "", "", "")
+	sl := NewSkillsLoader(workspace, "", "", "", "")
 	content, ok := sl.LoadSkill("good-skill")
 	if !ok {
 		t.Fatal("expected valid skill to load")
@@ -325,7 +325,7 @@ func newSummaryLoader(t *testing.T, names ...string) *SkillsLoader {
 			t.Fatal(err)
 		}
 	}
-	return NewSkillsLoader(workspace, "", "", "")
+	return NewSkillsLoader(workspace, "", "", "", "")
 }
 
 type skillFixture struct {
@@ -355,7 +355,7 @@ func writeSkillFixtures(t *testing.T, root string, fixtures []skillFixture) {
 func newSkillLoader(t *testing.T, workspace string, fixtures ...skillFixture) *SkillsLoader {
 	t.Helper()
 	writeSkillFixtures(t, filepath.Join(workspace, "skills"), fixtures)
-	return NewSkillsLoader(workspace, "", "", "")
+	return NewSkillsLoader(workspace, "", "", "", "")
 }
 
 func newTwoRootSkillLoader(t *testing.T, workspaceFixtures, globalFixtures []skillFixture) *SkillsLoader {
@@ -364,7 +364,7 @@ func newTwoRootSkillLoader(t *testing.T, workspaceFixtures, globalFixtures []ski
 	global := t.TempDir()
 	writeSkillFixtures(t, filepath.Join(workspace, "skills"), workspaceFixtures)
 	writeSkillFixtures(t, global, globalFixtures)
-	return NewSkillsLoader(workspace, global, "", "")
+	return NewSkillsLoader(workspace, global, "", "", "")
 }
 
 func TestSkillsLoader_LoadSkillResolvesFrontmatterName(t *testing.T) {
@@ -547,7 +547,7 @@ func TestSkillsLoader_CatalogClaimsNamesCaseInsensitively(t *testing.T) {
 
 func TestSkillsLoader_SkillResolvable(t *testing.T) {
 	workspace := t.TempDir()
-	sl := NewSkillsLoader(workspace, "", "", "")
+	sl := NewSkillsLoader(workspace, "", "", "", "")
 	writeSkillFixtures(t, filepath.Join(workspace, "skills"), []skillFixture{
 		{Dir: "alpha", Name: "alpha"},
 		{Dir: "aliased-dir", Name: "aliased"},

@@ -90,13 +90,15 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	builtinSkillsDir := filepath.Join(wd, "skills")
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 	directorySkillsDir := ""
+	agentsSkillsDir := ""
 	if wd != "" {
 		directorySkillsDir = filepath.Join(wd, ".lele", "skills")
+		agentsSkillsDir = filepath.Join(wd, ".agents", "skills")
 	}
 
 	return &ContextBuilder{
 		workspace:       workspace,
-		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir),
+		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir, agentsSkillsDir),
 		memory:          NewMemoryStore(workspace),
 		skillsDiscovery: &skillsDiscoveryPerms{List: true, Search: true, Load: true},
 	}
