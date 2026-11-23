@@ -954,7 +954,7 @@ func (ap *agentProvidableImpl) FinalizeAssistantMessage(sessionKey string) {
 	agent.Sessions.FinalizeAssistantMessage(resolvedKey)
 }
 
-func (ap *agentProvidableImpl) AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment) {
+func (ap *agentProvidableImpl) AddAttachmentMessage(sessionKey, content string, attachments []providers.MessageAttachment) {
 	if len(attachments) == 0 {
 		return
 	}
@@ -963,7 +963,7 @@ func (ap *agentProvidableImpl) AttachFilesToLastAssistant(sessionKey string, att
 	if agent == nil || agent.Sessions == nil {
 		return
 	}
-	agent.Sessions.AttachFilesToLastAssistant(resolvedKey, attachments)
+	agent.Sessions.AddAttachmentMessage(resolvedKey, content, attachments)
 }
 
 func (ap *agentProvidableImpl) HasStreamedContent(sessionKey string) bool {

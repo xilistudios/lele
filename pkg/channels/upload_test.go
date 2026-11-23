@@ -398,3 +398,163 @@ func TestStageAttachment_IdempotentUnderSymlinkedLeleDir(t *testing.T) {
 		t.Errorf("staging holds %d entries, want 1: staging must be idempotent", len(entries))
 	}
 }
+func TestPersistOutboundAttachments_CopiesIntoDurableDir(t *testing.T) {
+	leleDir := t.TempDir()
+	src := filepath.Join(t.TempDir(), "report.csv")
+	if err := os.WriteFile(src, []byte("a,b\n1,2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := []bus.FileAttachment{{Name: "report.csv", Path: src, MIMEType: "text/csv", Kind: "file"}}
+	got := persistOutboundAttachments(out, leleDir)
+
+	if len(got) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(got))
+	}
+	dir := durableAttachmentsDir(leleDir)
+	if filepath.Dir(got[0].Path) != dir {
+		t.Fatalf("path = %q, want a copy directly inside %q", got[0].Path, dir)
+	}
+	if got[0].Name != "report.csv" {
+		t.Errorf("name = %q, want report.csv", got[0].Name)
+	}
+	if got[0].MIMEType != "text/csv" || got[0].Kind != "file" {
+		t.Errorf("mime/kind not preserved: %+v", got[0])
+	}
+	body, err := os.ReadFile(got[0].Path)
+	if err != nil {
+		t.Fatalf("read durable copy: %v", err)
+	}
+	if string(body) != "a,b\n1,2\n" {
+		t.Errorf("durable copy = %q, want the source payload", body)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source file must be left in place: %v", err)
+	}
+}
+
+func TestPersistOutboundAttachments_KeepsProvidedName(t *testing.T) {
+	leleDir := t.TempDir()
+	src := filepath.Join(t.TempDir(), "ab12cd34_chart.png")
+	if err := os.WriteFile(src, []byte("png"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := persistOutboundAttachments([]bus.FileAttachment{{Name: "chart.png", Path: src}}, leleDir)
+
+	if got[0].Name != "chart.png" {
+		t.Errorf("name = %q, want chart.png: the caller-provided display name must win over the staged basename", got[0].Name)
+	}
+}
+
+func TestPersistOutboundAttachments_DeterministicDestination(t *testing.T) {
+	leleDir := t.TempDir()
+	src := filepath.Join(t.TempDir(), "chart.png")
+	if err := os.WriteFile(src, []byte("png"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	first := persistOutboundAttachments([]bus.FileAttachment{{Name: "chart.png", Path: src}}, leleDir)
+	second := persistOutboundAttachments([]bus.FileAttachment{{Name: "chart.png", Path: src}}, leleDir)
+
+	if first[0].Path != second[0].Path {
+		t.Fatalf("second call wrote %q, want the same path %q", second[0].Path, first[0].Path)
+	}
+	entries, err := os.ReadDir(durableAttachmentsDir(leleDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("durable dir holds %d entries, want 1: redelivery must not duplicate files", len(entries))
+	}
+}
+
+func TestPersistOutboundAttachments_LeavesDurablePathUntouched(t *testing.T) {
+	leleDir := t.TempDir()
+	dir := durableAttachmentsDir(leleDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(dir, "abcd1234_report.csv")
+	if err := os.WriteFile(existing, []byte("payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := persistOutboundAttachments([]bus.FileAttachment{{Name: "report.csv", Path: existing}}, leleDir)
+
+	if got[0].Path != existing {
+		t.Errorf("path = %q, want %q: a durable file must be left alone", got[0].Path, existing)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("durable dir holds %d entries, want 1", len(entries))
+	}
+}
+
+func TestPersistOutboundAttachments_MissingFileKeepsOriginal(t *testing.T) {
+	leleDir := t.TempDir()
+	ghost := filepath.Join(t.TempDir(), "gone.txt")
+
+	got := persistOutboundAttachments([]bus.FileAttachment{{Name: "gone.txt", Path: ghost}}, leleDir)
+
+	if len(got) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(got))
+	}
+	if got[0].Path != ghost || got[0].Name != "gone.txt" {
+		t.Errorf("attachment = %+v, want the original untouched", got[0])
+	}
+	if _, err := os.Stat(durableAttachmentsDir(leleDir)); !os.IsNotExist(err) {
+		t.Errorf("durable dir created for a missing source (err=%v)", err)
+	}
+}
+
+func TestPersistOutboundAttachments_DirectoryKeepsOriginal(t *testing.T) {
+	leleDir := t.TempDir()
+	dir := t.TempDir()
+
+	got := persistOutboundAttachments([]bus.FileAttachment{{Name: filepath.Base(dir), Path: dir}}, leleDir)
+
+	if len(got) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(got))
+	}
+	if got[0].Path != dir {
+		t.Errorf("path = %q, want the directory untouched", got[0].Path)
+	}
+}
+
+func TestPersistOutboundAttachments_HashPrefixAvoidsDeniedViewNames(t *testing.T) {
+	leleDir := t.TempDir()
+	src := filepath.Join(t.TempDir(), "config.png")
+	if err := os.WriteFile(src, []byte("png"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := persistOutboundAttachments([]bus.FileAttachment{{Name: "config.png", Path: src}}, leleDir)
+
+	base := filepath.Base(got[0].Path)
+	if strings.HasPrefix(base, "config.") {
+		t.Fatalf("basename %q is denied by the file view", base)
+	}
+	if !strings.HasSuffix(base, "_config.png") {
+		t.Fatalf("basename = %q, want a hash prefix plus _config.png", base)
+	}
+	if len(base) != len("0123456789abcdef_config.png") {
+		t.Errorf("basename = %q, want a 16 hex char prefix", base)
+	}
+}
+
+func TestPersistOutboundAttachments_EmptyLeleDirIsNoop(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "keep.txt")
+	if err := os.WriteFile(src, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := persistOutboundAttachments([]bus.FileAttachment{{Name: "keep.txt", Path: src}}, "")
+
+	if got[0].Path != src {
+		t.Errorf("path = %q, want the original when leleDir is empty", got[0].Path)
+	}
+}

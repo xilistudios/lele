@@ -3,7 +3,9 @@ import '../../test/i18n'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
+import { toChatMessages } from '../../lib/chatMessageBuilder'
 import type { ChatMessage } from '../../lib/types'
+import i18n from '../../test/i18n'
 import { clearAuthedImageCache } from '../molecules/AuthedImage'
 import { MessageBubble } from './MessageBubble'
 
@@ -146,7 +148,7 @@ describe('MessageBubble — authenticated attachment preview', () => {
       expect(img).toBeTruthy()
     })
 
-    const downloadBtn = container.querySelector('button[aria-label]')
+    const downloadBtn = container.querySelector(`button[aria-label^="${i18n.t('chat.download')}"]`)
     expect(downloadBtn).toBeTruthy()
 
     if (downloadBtn) fireEvent.click(downloadBtn)
@@ -220,5 +222,126 @@ describe('MessageBubble — system notice', () => {
 
     expect(container.querySelector('[data-system-notice="true"]')).toBeNull()
     expect(container.textContent).toContain('hola mundo')
+  })
+})
+
+const IMG_A = '/home/x/.lele/workspace-demo/attachments/20261123/aaaa1111_one.png'
+const IMG_B = '/home/x/.lele/workspace-demo/attachments/20261123/bbbb2222_two.png'
+
+const imageAttachment = (path: string) => ({
+  path,
+  name: path.split('/').pop() ?? 'image.png',
+  mime_type: 'image/png',
+  kind: 'image',
+})
+
+describe('MessageBubble — image mosaic', () => {
+  test('a user message with image attachments renders the mosaic instead of a bare image row', async () => {
+    const { value: ctx } = makeAuthCtx()
+    const message = makeUserMessage({
+      content: 'mira esto',
+      attachments: [imageAttachment(IMG_A), imageAttachment(IMG_B)],
+    })
+
+    const { container } = renderBubble(message, ctx)
+
+    const mosaic = container.querySelector('[data-testid="image-mosaic"]')
+    expect(mosaic).toBeTruthy()
+    expect(mosaic?.getAttribute('data-count')).toBe('2')
+    expect(mosaic?.querySelectorAll('[data-testid="image-mosaic-tile"]').length).toBe(2)
+
+    await waitFor(() => {
+      const img = mosaic?.querySelector('img')
+      expect(img).toBeTruthy()
+      expect(img?.getAttribute('alt')).toBe('aaaa1111_one.png')
+    })
+  })
+
+  test('a single image keeps the mosaic contract with one tile', async () => {
+    const { value: ctx } = makeAuthCtx()
+    const message = makeUserMessage({ attachments: [imageAttachment(IMG_A)] })
+
+    const { container } = renderBubble(message, ctx)
+
+    const mosaic = container.querySelector('[data-testid="image-mosaic"]')
+    expect(mosaic?.getAttribute('data-count')).toBe('1')
+    expect(mosaic?.querySelectorAll('[data-testid="image-mosaic-tile"]').length).toBe(1)
+    await waitFor(() => expect(mosaic?.querySelector('img')).toBeTruthy())
+  })
+
+  test('non-image attachments stay as chips, outside the mosaic', () => {
+    const { value: ctx } = makeAuthCtx()
+    const message = makeUserMessage({
+      attachments: [imageAttachment(IMG_A), { path: '/tmp/report.pdf', name: 'report.pdf' }],
+    })
+
+    const { container } = renderBubble(message, ctx)
+
+    const mosaic = container.querySelector('[data-testid="image-mosaic"]')
+    expect(mosaic?.getAttribute('data-count')).toBe('1')
+    expect(mosaic?.textContent ?? '').not.toContain('report.pdf')
+    expect(container.textContent).toContain('report.pdf')
+  })
+
+  test('an assistant message with image attachments renders the mosaic plus a per-image download', async () => {
+    const { value: ctx } = makeAuthCtx()
+    const message = makeAssistantMessage({
+      content: 'aqui esta el grafico',
+      attachments: [imageAttachment(IMG_A), imageAttachment(IMG_B)],
+    })
+
+    const { container } = renderBubble(message, ctx)
+
+    const mosaic = container.querySelector('[data-testid="image-mosaic"]')
+    expect(mosaic?.getAttribute('data-count')).toBe('2')
+    expect(container.textContent).toContain('aqui esta el grafico')
+
+    const downloadButtons = mosaic?.querySelectorAll(
+      `button[aria-label^="${i18n.t('chat.download')}"]`,
+    )
+    expect(downloadButtons?.length).toBe(2)
+
+    await waitFor(() => expect(mosaic?.querySelector('img')).toBeTruthy())
+  })
+
+  test('an assistant message with only non-image attachments keeps the file cards', () => {
+    const { value: ctx } = makeAuthCtx()
+    const message = makeAssistantMessage({
+      content: 'report attached',
+      attachments: [{ path: '/tmp/report.pdf', name: 'report.pdf', caption: 'Q3 numbers' }],
+    })
+
+    const { container } = renderBubble(message, ctx)
+
+    expect(container.querySelector('[data-testid="image-mosaic"]')).toBeNull()
+    expect(container.textContent).toContain('report.pdf')
+    expect(container.textContent).toContain('Q3 numbers')
+  })
+
+  test('a persisted file: history row renders as an assistant bubble with the mosaic', async () => {
+    const { value: ctx } = makeAuthCtx()
+    const [message] = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'tool',
+          content: '',
+          tool_call_id: 'file:ab12cd34ef56ab78',
+          attachments: [imageAttachment(IMG_A)],
+        },
+      ],
+      'session-1',
+    )
+
+    expect(message.role).toBe('assistant')
+
+    const { container } = renderBubble(message, ctx)
+
+    const bubble = container.querySelector('[data-role="assistant"]')
+    expect(bubble).toBeTruthy()
+    expect(bubble?.querySelector('[data-testid="image-mosaic"]')?.getAttribute('data-count')).toBe(
+      '1',
+    )
+    await waitFor(() => expect(bubble?.querySelector('img')).toBeTruthy())
   })
 })

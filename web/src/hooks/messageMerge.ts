@@ -1,5 +1,5 @@
 import { isHiddenFromChat, parseSystemNotice } from '../lib/chatMessageBuilder'
-import { assistantIdentityText } from '../lib/messageIdentity'
+import { assistantMessageIdentity } from '../lib/messageIdentity'
 import type { ChatMessage } from '../lib/types'
 
 type AssistantEntry = {
@@ -24,7 +24,10 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant') {
       const isEmptyPlaceholder =
-        msg.streaming !== true && msg.content.trim() === '' && !msg.reasoningContent
+        msg.streaming !== true &&
+        msg.content.trim() === '' &&
+        !msg.reasoningContent &&
+        (msg.attachments?.length ?? 0) === 0
       if (isEmptyPlaceholder) continue
       assistants.push({ msg, isStreaming: msg.streaming === true, used: false })
     } else if (msg.role === 'tool') {
@@ -45,8 +48,11 @@ function contentConfirmed(content: string, candidate: string): boolean {
   return prefix.length > 0 && candidate.startsWith(prefix)
 }
 
-const assistantIdentity = (m: ChatMessage): string =>
-  assistantIdentityText(m.content, m.reasoningContent).trim()
+function assistantIdentity(m: ChatMessage): string {
+  return assistantMessageIdentity(m.content, m.reasoningContent, m.attachments)
+}
+
+const hasAttachments = (m: ChatMessage): boolean => (m.attachments?.length ?? 0) > 0
 
 function findStreamingTwin(
   msg: ChatMessage,
@@ -60,7 +66,9 @@ function findStreamingTwin(
   const exact = candidates.find((e) => assistantIdentity(e.msg) === identity)
   if (exact) return exact
 
+  const msgHasAttachments = hasAttachments(msg)
   return candidates.find((e) => {
+    if (msgHasAttachments || hasAttachments(e.msg)) return false
     const liveIdentity = assistantIdentity(e.msg)
     if (liveIdentity === '' || baseIdentities.has(liveIdentity)) return false
     return contentConfirmed(liveIdentity, identity)
@@ -70,7 +78,9 @@ function findStreamingTwin(
 function assistantAlreadyPersisted(msg: ChatMessage, candidate: ChatMessage): boolean {
   const identity = assistantIdentity(msg)
   if (identity === '') return false
-  return contentConfirmed(identity, assistantIdentity(candidate))
+  const candidateIdentity = assistantIdentity(candidate)
+  if (hasAttachments(msg) || hasAttachments(candidate)) return candidateIdentity === identity
+  return contentConfirmed(identity, candidateIdentity)
 }
 
 type BasePassResult = {
@@ -132,7 +142,7 @@ function buildFilteredBase(baseMessages: ChatMessage[], index: StreamingIndex): 
 
   for (const e of index.assistants) {
     if (e.used || e.isStreaming) continue
-    if (assistantIdentityText(e.msg.content, e.msg.reasoningContent).trim() === '') continue
+    if (assistantIdentity(e.msg) === '') continue
     const alreadyRendered = baseMessages.some(
       (bm) => bm.role === 'assistant' && assistantAlreadyPersisted(e.msg, bm),
     )
@@ -342,7 +352,7 @@ function filterStreamingLeftovers(
     if (msg.role === 'assistant') {
       if (usedAssistantIds.has(msg.id)) return false
       if (!msg.streaming && msg.content.trim() === '' && !msg.reasoningContent) {
-        return false
+        return hasAttachments(msg)
       }
       return true
     }

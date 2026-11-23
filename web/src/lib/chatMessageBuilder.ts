@@ -4,7 +4,7 @@ import {
   lookupStableIdFromEnd,
   stableIdKey,
 } from '../hooks/stableIdRegistry'
-import { assistantIdentityText } from './messageIdentity'
+import { assistantIdentityText, assistantMessageIdentity } from './messageIdentity'
 import type {
   Attachment,
   ChatMessage,
@@ -371,8 +371,10 @@ export function toChatMessages(
         message.reasoning_content && message.reasoning_content.trim() !== '',
       )
       const hasContent = Boolean(messageContent && messageContent.trim() !== '')
+      const hasAttachments = (parsedAttachments?.length ?? 0) > 0
       const errorDetail = message.error_detail || undefined
-      const shouldAddAssistant = hasContent || hasReasoning || !hasToolCalls || Boolean(errorDetail)
+      const shouldAddAssistant =
+        hasContent || hasReasoning || !hasToolCalls || Boolean(errorDetail) || hasAttachments
       if (shouldAddAssistant) {
         return [
           createAssistantMessage({
@@ -403,6 +405,27 @@ export function toChatMessages(
             sessionKey,
             attachments: parsedAttachments,
           },
+        ]
+      }
+
+      if (message.tool_call_id?.startsWith('file:')) {
+        return [
+          createAssistantMessage({
+            id: msgId,
+            sessionKey,
+            content: messageContent,
+            streaming: false,
+            attachments: parsedAttachments,
+            stableId:
+              lookupStableId(
+                'assistant',
+                assistantMessageIdentity(
+                  messageContent,
+                  message.reasoning_content,
+                  parsedAttachments,
+                ),
+              ) ?? stableId,
+          }),
         ]
       }
 

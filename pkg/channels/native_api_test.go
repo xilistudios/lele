@@ -49,8 +49,10 @@ type nativeTestAgentLoop struct {
 	groupSnapshotMu         sync.Mutex
 	allGroupSnapshotsCalls  int
 
-	attachFilesCalls []attachFilesCall
-	attachMu         sync.Mutex
+	sessions *session.SessionManager
+
+	attachmentMessageCalls []attachmentMessageCall
+	attachmentMu           sync.Mutex
 
 	hintedAgents []hintCall
 	hintMu       sync.Mutex
@@ -146,6 +148,9 @@ func (m *nativeTestAgentLoop) ListAgentTools(agentID string) ([]AgentToolInfo, b
 }
 
 func (m *nativeTestAgentLoop) GetSessionHistory(sessionKey string) []providers.Message {
+	if m.sessions != nil {
+		return m.sessions.GetHistory(sessionKey)
+	}
 	history := m.histories[sessionKey]
 	result := make([]providers.Message, len(history))
 	copy(result, history)
@@ -438,22 +443,27 @@ func (m *nativeTestAgentLoop) AppendReasoningChunk(sessionKey, chunk string) {}
 
 func (m *nativeTestAgentLoop) FinalizeAssistantMessage(sessionKey string) {}
 
-type attachFilesCall struct {
+type attachmentMessageCall struct {
 	sessionKey  string
+	content     string
 	attachments []providers.MessageAttachment
 }
 
-func (m *nativeTestAgentLoop) AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment) {
-	m.attachMu.Lock()
-	defer m.attachMu.Unlock()
-	m.attachFilesCalls = append(m.attachFilesCalls, attachFilesCall{sessionKey: sessionKey, attachments: attachments})
+func (m *nativeTestAgentLoop) AddAttachmentMessage(sessionKey, content string, attachments []providers.MessageAttachment) {
+	m.attachmentMu.Lock()
+	m.attachmentMessageCalls = append(m.attachmentMessageCalls, attachmentMessageCall{sessionKey: sessionKey, content: content, attachments: attachments})
+	m.attachmentMu.Unlock()
+
+	if m.sessions != nil {
+		m.sessions.AddAttachmentMessage(sessionKey, content, attachments)
+	}
 }
 
-func (m *nativeTestAgentLoop) attachCalls() []attachFilesCall {
-	m.attachMu.Lock()
-	defer m.attachMu.Unlock()
-	out := make([]attachFilesCall, len(m.attachFilesCalls))
-	copy(out, m.attachFilesCalls)
+func (m *nativeTestAgentLoop) attachmentCalls() []attachmentMessageCall {
+	m.attachmentMu.Lock()
+	defer m.attachmentMu.Unlock()
+	out := make([]attachmentMessageCall, len(m.attachmentMessageCalls))
+	copy(out, m.attachmentMessageCalls)
 	return out
 }
 

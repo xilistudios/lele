@@ -738,3 +738,139 @@ describe('toChatMessages: LLM failure messages', () => {
     expect(result[0].error).toBeUndefined()
   })
 })
+describe('toChatMessages — send_file display rows (tool_call_id "file:")', () => {
+  const sessionKey = 's1'
+  const DURABLE = '/data/lele/attachments/20261123/ab12cd34_photo.png'
+  const imageAttachment = {
+    name: 'photo.png',
+    path: DURABLE,
+    mime_type: 'image/png',
+    kind: 'image',
+    caption: '',
+  }
+
+  test('a file: tool row becomes ONE assistant message carrying the attachments', () => {
+    const result = toChatMessages(
+      [
+        { id: 'u1', role: 'user', content: 'genera un diagrama' },
+        {
+          id: 'h1',
+          role: 'tool',
+          content: '',
+          tool_call_id: 'file:ab12cd34ef56ab78',
+          attachments: [imageAttachment],
+        },
+      ],
+      sessionKey,
+    )
+
+    expect(result).toHaveLength(2)
+    expect(result[1].role).toBe('assistant')
+    expect(result[1].content).toBe('')
+    expect(result[1].attachments).toEqual([imageAttachment])
+    expect(result[1].streaming).toBe(false)
+    expect(result.some((m) => m.role === 'tool')).toBe(false)
+  })
+
+  test('the caption becomes the assistant content (not the tool result)', () => {
+    const result = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'tool',
+          content: 'ventas del trimestre',
+          tool_call_id: 'file:0011223344556677',
+          attachments: [{ ...imageAttachment, caption: 'ventas del trimestre' }],
+        },
+      ],
+      sessionKey,
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].role).toBe('assistant')
+    expect(result[0].content).toBe('ventas del trimestre')
+    expect(result[0].excludeFromContext).toBeUndefined()
+  })
+
+  test('exclude_from_context on the display row is NOT propagated (no archived badge)', () => {
+    const result = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'tool',
+          content: '',
+          tool_call_id: 'file:ffeeddccbbaa0099',
+          attachments: [imageAttachment],
+          exclude_from_context: true,
+        },
+      ],
+      sessionKey,
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].excludeFromContext).toBeUndefined()
+  })
+
+  test('a registered stable id is attached to the file: display row', async () => {
+    const { registerStableId, clearStableIdRegistry } = await import('../hooks/stableIdRegistry')
+    clearStableIdRegistry()
+    registerStableId('assistant', DURABLE, 'ack-file-1')
+
+    const result = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'tool',
+          content: '',
+          tool_call_id: 'file:ab12cd34ef56ab78',
+          attachments: [imageAttachment],
+        },
+      ],
+      sessionKey,
+      { bindStableIds: true },
+    )
+
+    expect(result[0].stableId).toBe('ack-file-1')
+    clearStableIdRegistry()
+  })
+})
+
+describe('toChatMessages — legacy assistant display rows with attachments', () => {
+  const sessionKey = 's1'
+  const LEGACY = '/data/lele/attachments/20261123/deadbeef_legacy.png'
+
+  test('a tool_calls-only assistant row carrying attachments is kept (not dropped)', () => {
+    const result = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ id: 'call-1', name: 'send_file', arguments: { path: LEGACY } }],
+          attachments: [{ name: 'legacy.png', path: LEGACY, kind: 'image' }],
+        },
+      ],
+      sessionKey,
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].role).toBe('assistant')
+    expect(result[0].attachments?.map((a) => a.path)).toEqual([LEGACY])
+  })
+
+  test('a tool_calls-only assistant row WITHOUT attachments is still dropped', () => {
+    const result = toChatMessages(
+      [
+        {
+          id: 'h1',
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ id: 'call-1', name: 'read_file', arguments: {} }],
+        },
+      ],
+      sessionKey,
+    )
+
+    expect(result).toHaveLength(0)
+  })
+})

@@ -73,7 +73,7 @@ type AgentProvidable interface {
 	AppendAssistantChunk(sessionKey, chunk string)
 	AppendReasoningChunk(sessionKey, chunk string)
 	FinalizeAssistantMessage(sessionKey string)
-	AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment)
+	AddAttachmentMessage(sessionKey, content string, attachments []providers.MessageAttachment)
 	HasStreamedContent(sessionKey string) bool
 	GetInProgressAssistant(sessionKey string) *providers.Message
 	GetInProgressTool(sessionKey string) *session.InProgressTool

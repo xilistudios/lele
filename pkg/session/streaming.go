@@ -1,13 +1,21 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"slices"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-const streamFlushInterval = 200 * time.Millisecond
+const (
+	streamFlushInterval       = 200 * time.Millisecond
+	attachmentRowDedupeWindow = 8
+)
 
 func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
 	sm.ensureLoaded()
@@ -129,10 +137,12 @@ func (sm *SessionManager) SealStreamingTail(key string) {
 	sm.flushStreamNow(key)
 }
 
-func (sm *SessionManager) AttachFilesToLastAssistant(key string, attachments []providers.MessageAttachment) {
+func (sm *SessionManager) AddAttachmentMessage(key, content string, attachments []providers.MessageAttachment) {
 	if len(attachments) == 0 {
 		return
 	}
+
+	toolCallID := attachmentToolCallID(attachments)
 
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -142,49 +152,98 @@ func (sm *SessionManager) AttachFilesToLastAssistant(key string, attachments []p
 	if !ok {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
+			logger.DebugCF("session", "AddAttachmentMessage: session not found",
+				map[string]interface{}{"session_key": key})
 			return
 		}
 	}
 
-	idx := -1
-	for i := len(session.Messages) - 1; i >= 0; i-- {
-		if session.Messages[i].Role == "assistant" {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		logger.DebugCF("session", "AttachFilesToLastAssistant: no assistant message in session",
-			map[string]interface{}{"session_key": key})
+	if idx := recentAttachmentRowIndex(session.Messages, toolCallID); idx >= 0 {
+		sm.mergeAttachmentRowLocked(key, session, idx, content, attachments)
 		return
 	}
 
+	pos := len(session.Messages)
+	if last := len(session.Messages) - 1; last >= 0 && session.Messages[last].Role == "assistant" && session.Messages[last].Streaming {
+		pos = last
+	}
+
+	session.Messages = slices.Insert(session.Messages, pos, providers.Message{
+		Role:               "tool",
+		ToolCallID:         toolCallID,
+		Content:            content,
+		Attachments:        attachments,
+		ExcludeFromContext: true,
+	})
+	session.markModified(pos)
+	session.Updated = time.Now()
+	session.publishViewLocked()
+	sm.syncSessionMetaLocked(session)
+	sm.touchSession(key)
+	if err := sm.saveUnlocked(key); err != nil {
+		logger.WarnCF("session", "Failed to persist attachment message",
+			map[string]interface{}{"session_key": key, "error": err.Error()})
+	}
+}
+
+func (sm *SessionManager) mergeAttachmentRowLocked(key string, session *Session, idx int, content string, attachments []providers.MessageAttachment) {
 	msg := &session.Messages[idx]
+
+	changed := false
+	if msg.Content == "" && content != "" {
+		msg.Content = content
+		changed = true
+	}
+
 	existing := make(map[string]struct{}, len(msg.Attachments))
 	for _, a := range msg.Attachments {
 		existing[a.Path] = struct{}{}
 	}
-	added := 0
 	for _, a := range attachments {
 		if _, dup := existing[a.Path]; dup {
 			continue
 		}
 		existing[a.Path] = struct{}{}
 		msg.Attachments = append(msg.Attachments, a)
-		added++
+		changed = true
 	}
-	if added == 0 {
+	if !changed {
 		return
 	}
 
 	session.Updated = time.Now()
 	session.markModified(idx)
 	session.publishViewLocked()
+	sm.syncSessionMetaLocked(session)
 	sm.touchSession(key)
 	if err := sm.saveUnlocked(key); err != nil {
 		logger.WarnCF("session", "Failed to persist message attachments",
 			map[string]interface{}{"session_key": key, "error": err.Error()})
 	}
+}
+
+func attachmentToolCallID(attachments []providers.MessageAttachment) string {
+	paths := make([]string, 0, len(attachments))
+	for _, a := range attachments {
+		paths = append(paths, a.Path)
+	}
+	sort.Strings(paths)
+	sum := sha256.Sum256([]byte(strings.Join(paths, "\n")))
+	return "file:" + hex.EncodeToString(sum[:])[:16]
+}
+
+func recentAttachmentRowIndex(messages []providers.Message, toolCallID string) int {
+	start := len(messages) - attachmentRowDedupeWindow
+	if start < 0 {
+		start = 0
+	}
+	for i := len(messages) - 1; i >= start; i-- {
+		msg := messages[i]
+		if msg.Role == "tool" && strings.HasPrefix(msg.ToolCallID, "file:") && msg.ToolCallID == toolCallID {
+			return i
+		}
+	}
+	return -1
 }
 
 func (sm *SessionManager) HasStreamedContent(key string) bool {

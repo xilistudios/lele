@@ -78,8 +78,8 @@ func TestDispatchOutboundDiscardLeavesSessionUntouched(t *testing.T) {
 	if ts.loop.GetInProgressAssistant(sessionKey) != nil {
 		t.Error("discard must not create an in-progress assistant message")
 	}
-	if len(ts.loop.attachCalls()) != 0 {
-		t.Errorf("discard must not attach files, got %+v", ts.loop.attachCalls())
+	if len(ts.loop.attachmentCalls()) != 0 {
+		t.Errorf("discard must not attach files, got %+v", ts.loop.attachmentCalls())
 	}
 
 	if findWSEvent(drainWSEvents(t, client), "message.discard") == nil {
