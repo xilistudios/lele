@@ -512,3 +512,67 @@ func TestBackgroundProcessVisibleTo_SessionFamily(t *testing.T) {
 		})
 	}
 }
+
+func TestBackgroundProcessManager_MarkCompletedKeepsTerminal(t *testing.T) {
+	tests := []struct {
+		name       string
+		settle     func(mgr *BackgroundProcessManager)
+		exitCode   int
+		wantStatus string
+		wantExit   int
+	}{
+		{
+			name:       "stopped process ignores the kill exit code",
+			settle:     func(mgr *BackgroundProcessManager) { mgr.Stop("bg-1") },
+			exitCode:   -1,
+			wantStatus: BgExecStatusStopped,
+			wantExit:   0,
+		},
+		{
+			name:       "stopped process ignores a clean completion",
+			settle:     func(mgr *BackgroundProcessManager) { mgr.Stop("bg-1") },
+			exitCode:   0,
+			wantStatus: BgExecStatusStopped,
+			wantExit:   0,
+		},
+		{
+			name:       "completed process keeps its first exit code",
+			settle:     func(mgr *BackgroundProcessManager) { mgr.MarkCompleted("bg-1", 0) },
+			exitCode:   1,
+			wantStatus: BgExecStatusCompleted,
+			wantExit:   0,
+		},
+		{
+			name:       "failed process keeps its first exit code",
+			settle:     func(mgr *BackgroundProcessManager) { mgr.MarkCompleted("bg-1", 2) },
+			exitCode:   0,
+			wantStatus: BgExecStatusFailed,
+			wantExit:   2,
+		},
+		{
+			name:       "running process is completed by the first report",
+			settle:     func(mgr *BackgroundProcessManager) {},
+			exitCode:   3,
+			wantStatus: BgExecStatusFailed,
+			wantExit:   3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := NewBackgroundProcessManager()
+			registerTestProcess(t, mgr, "cmd")
+			tt.settle(mgr)
+
+			mgr.MarkCompleted("bg-1", tt.exitCode)
+
+			p, _ := mgr.Get("bg-1")
+			if p.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", p.Status, tt.wantStatus)
+			}
+			if p.ExitCode != tt.wantExit {
+				t.Fatalf("exit code = %d, want %d", p.ExitCode, tt.wantExit)
+			}
+		})
+	}
+}
