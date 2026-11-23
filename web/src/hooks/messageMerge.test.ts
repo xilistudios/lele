@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { Attachment, ChatMessage } from '../lib/types'
 import { assistantMessageIdentity } from '../lib/messageIdentity'
+import type { Attachment, ChatMessage } from '../lib/types'
 import { mergeMessages } from './messageMerge'
 
 const SESSION_KEY = 's1'
@@ -116,5 +116,66 @@ describe('mergeMessages — persisted send_file display rows', () => {
 
     expect(merged).toHaveLength(1)
     expect(merged[0].id).toBe('hash-text')
+  })
+})
+
+describe('mergeMessages — captions with attachments', () => {
+  const CAPTION = 'The dataset'
+
+  const captioned = (id: string, attachments?: Attachment[]) =>
+    makeMessage(id, 'assistant', CAPTION, { attachments })
+
+  test('same caption and same attachments collapse into ONE row', () => {
+    const live = captioned('ack-cap-1', [image('/att/a.png')])
+    const base = [captioned('hash-cap-1', [image('/att/a.png')])]
+
+    const merged = mergeMessages(base, [live])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].id).toBe('hash-cap-1')
+    expect(merged[0].stableId).toBe('ack-cap-1')
+    expect(merged[0].attachments?.map((a) => a.path)).toEqual(['/att/a.png'])
+  })
+
+  test('attachments that arrive late still merge into the persisted text row', () => {
+    const live = captioned('ack-cap-2', [image('/att/a.png')])
+    const base = [captioned('hash-cap-2')]
+
+    const merged = mergeMessages(base, [live])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].id).toBe('hash-cap-2')
+  })
+
+  test('a persisted caption with attachments absorbs a live caption without them', () => {
+    const live = captioned('ack-cap-3')
+    const base = [captioned('hash-cap-3', [image('/att/a.png')])]
+
+    const merged = mergeMessages(base, [live])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].id).toBe('hash-cap-3')
+  })
+
+  test('same caption with different attachment sets stays as TWO rows', () => {
+    const live = captioned('ack-cap-4', [image('/att/live.png')])
+    const base = [captioned('hash-cap-4', [image('/att/history.png')])]
+
+    const merged = mergeMessages(base, [live])
+
+    expect(merged).toHaveLength(2)
+    expect(merged.map((m) => m.attachments?.[0].path)).toEqual([
+      '/att/history.png',
+      '/att/live.png',
+    ])
+  })
+
+  test('same caption with a different attachment count stays as TWO rows', () => {
+    const live = captioned('ack-cap-5', [image('/att/a.png')])
+    const base = [captioned('hash-cap-5', [image('/att/a.png'), image('/att/b.png')])]
+
+    const merged = mergeMessages(base, [live])
+
+    expect(merged).toHaveLength(2)
   })
 })

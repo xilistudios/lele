@@ -68,15 +68,22 @@ function useIntersectOnce(ref: RefObject<HTMLElement | null>): boolean {
   return intersected
 }
 
+type LoadedImage = {
+  path: string
+  url: string
+}
+
 export function AuthedImage({ path, alt, className }: AuthedImageProps) {
   const { api, apiUrl } = useAuthContext()
   const containerRef = useRef<HTMLSpanElement>(null)
   const inView = useIntersectOnce(containerRef)
 
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>(path ? 'loading' : 'error')
-  const [objectUrl, setObjectUrl] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState<LoadedImage | null>(null)
+  const [failedPath, setFailedPath] = useState<string | null>(null)
 
   const fileName = path ? (path.split('/').pop() ?? alt) : alt
+  const ready = loaded?.path === path ? loaded : null
+  const failed = path !== '' && failedPath === path
 
   useEffect(() => {
     if (!path || !inView) return
@@ -85,10 +92,7 @@ export function AuthedImage({ path, alt, className }: AuthedImageProps) {
     const key = cacheKey(apiUrl, path)
     const cached = urlCache.get(key)
     if (cached) {
-      if (!cancelled) {
-        setObjectUrl(cached)
-        setState('ready')
-      }
+      setLoaded({ path, url: cached })
       return
     }
 
@@ -109,23 +113,21 @@ export function AuthedImage({ path, alt, className }: AuthedImageProps) {
       inflight.set(key, promise)
     }
 
-    promise
-      .then((url) => {
-        if (!cancelled) {
-          setObjectUrl(url)
-          setState('ready')
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setState('error')
-      })
+    promise.then(
+      (url) => {
+        if (!cancelled) setLoaded({ path, url })
+      },
+      () => {
+        if (!cancelled) setFailedPath(path)
+      },
+    )
 
     return () => {
       cancelled = true
     }
   }, [api, apiUrl, path, inView])
 
-  if (!path || state === 'error') {
+  if (!path || failed) {
     return (
       <span
         title={path}
@@ -137,9 +139,9 @@ export function AuthedImage({ path, alt, className }: AuthedImageProps) {
     )
   }
 
-  if (state === 'loading') {
+  if (!ready) {
     return <span ref={containerRef} className={className} data-state="loading" aria-busy="true" />
   }
 
-  return <img src={objectUrl ?? undefined} alt={alt} className={className} loading="lazy" />
+  return <img src={ready.url} alt={alt} className={className} loading="lazy" />
 }

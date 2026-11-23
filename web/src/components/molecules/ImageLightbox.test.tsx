@@ -78,12 +78,51 @@ describe('ImageLightbox', () => {
   })
 
   test('exposes a modal dialog labelled with the view-image message', async () => {
-    await mountLightbox(<ImageLightbox images={TWO} index={0} onClose={() => {}} />)
+    const { getByRole } = await mountLightbox(
+      <ImageLightbox images={TWO} index={0} onClose={() => {}} />,
+    )
+
+    const dialog = getByRole('dialog', { name: i18n.t('chat.viewImage') })
+    expect(dialog.tagName).toBe('DIALOG')
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    expect(dialog.getAttribute('aria-label')).toBe(i18n.t('chat.viewImage'))
+  })
+
+  test('opens itself through showModal when the platform provides it', async () => {
+    const dialogProto = HTMLDialogElement.prototype as { showModal?: () => void }
+    const original = dialogProto.showModal
+    const showModal = mock(() => {})
+    dialogProto.showModal = showModal
+
+    try {
+      const { unmount } = await mountLightbox(
+        <ImageLightbox images={TWO} index={0} onClose={() => {}} />,
+      )
+
+      expect(showModal).toHaveBeenCalledTimes(1)
+      const dialog = document.querySelector('[data-testid="image-lightbox"]')
+      expect(dialog?.tagName).toBe('DIALOG')
+      expect(document.activeElement).toBe(
+        document.querySelector(`button[aria-label="${i18n.t('common.close')}"]`),
+      )
+      unmount()
+    } finally {
+      if (original) dialogProto.showModal = original
+      else dialogProto.showModal = undefined
+    }
+  })
+
+  test('the native cancel event is prevented and routed to onClose', async () => {
+    const onClose = mock(() => {})
+    await mountLightbox(<ImageLightbox images={TWO} index={0} onClose={onClose} />)
 
     const dialog = document.querySelector('[data-testid="image-lightbox"]')
-    expect(dialog?.tagName).toBe('DIALOG')
-    expect(dialog?.getAttribute('aria-modal')).toBe('true')
-    expect(dialog?.getAttribute('aria-label')).toBe(i18n.t('chat.viewImage'))
+    if (!dialog) throw new Error('lightbox not rendered')
+    const event = new window.Event('cancel', { cancelable: true })
+    dialog.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   test('Escape closes the lightbox', async () => {
@@ -146,7 +185,7 @@ describe('ImageLightbox', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  test('a single image renders no previous/next controls', async () => {
+  test('a single image renders no previous/next controls and no counter', async () => {
     await mountLightbox(
       <ImageLightbox images={[image('/att/only.png')]} index={0} onClose={() => {}} />,
     )
@@ -155,7 +194,7 @@ describe('ImageLightbox', () => {
       document.querySelector(`button[aria-label="${i18n.t('chat.previousImage')}"]`),
     ).toBeNull()
     expect(document.querySelector(`button[aria-label="${i18n.t('chat.nextImage')}"]`)).toBeNull()
-    expect(counter()).toBe('1 / 1')
+    expect(document.querySelector('[data-testid="image-lightbox-counter"]')).toBeNull()
   })
 
   test('several images render the controls and a 1-based counter', async () => {

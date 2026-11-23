@@ -17,13 +17,16 @@ function gridColumns(count: number): string {
   return 'grid-cols-2 sm:grid-cols-3'
 }
 
+const tileBase =
+  'group relative block overflow-hidden rounded-lg border border-border bg-background-secondary'
+
 function tileClasses(count: number): string {
-  const shape = count <= 1 ? 'max-h-96' : 'aspect-square'
-  return `group relative block w-full overflow-hidden rounded-lg border border-border bg-background-secondary ${shape}`
+  if (count <= 1) return `${tileBase} mx-auto w-fit max-w-full`
+  return `${tileBase} aspect-square w-full`
 }
 
 function tileImageClasses(count: number): string {
-  if (count <= 1) return 'h-full w-full object-contain'
+  if (count <= 1) return 'block max-h-96 w-auto max-w-full object-contain'
   return 'h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]'
 }
 

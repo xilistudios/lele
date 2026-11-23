@@ -96,16 +96,38 @@ describe('ImageMosaic', () => {
     }
   })
 
-  test('a single image tile is not square and uses object-contain', async () => {
+  test('a single image tile sizes to the image and letterboxes it', async () => {
     const { container } = renderWithAuth(<ImageMosaic attachments={[IMAGES[0]]} />)
 
     const [tile] = tiles(container)
     expect(tile.className).not.toContain('aspect-square')
-    expect(tile.className).toContain('max-h-96')
+    expect(tile.className).not.toContain('max-h-96')
+    expect(tile.className).toContain('w-fit')
+    expect(tile.className).toContain('mx-auto')
+    expect(tile.className).toContain('max-w-full')
 
     await waitFor(() => {
       const img = container.querySelector('img')
       expect(img?.className).toContain('object-contain')
+      expect(img?.className).toContain('max-h-96')
+      expect(img?.className).toContain('w-auto')
+      expect(img?.className).toContain('max-w-full')
+    })
+  })
+
+  test('grid tiles of two or more images keep the square frame and cover', async () => {
+    const { container } = renderWithAuth(<ImageMosaic attachments={IMAGES.slice(0, 2)} />)
+
+    for (const tile of tiles(container)) {
+      expect(tile.className).toContain('aspect-square')
+      expect(tile.className).toContain('w-full')
+      expect(tile.className).not.toContain('w-fit')
+    }
+
+    await waitFor(() => {
+      const img = container.querySelector('img')
+      expect(img?.className).toContain('h-full')
+      expect(img?.className).not.toContain('max-h-96')
     })
   })
 

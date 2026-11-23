@@ -1,5 +1,5 @@
 import { isHiddenFromChat, parseSystemNotice } from '../lib/chatMessageBuilder'
-import { assistantMessageIdentity } from '../lib/messageIdentity'
+import { assistantMessageIdentity, attachmentIdentityKeys } from '../lib/messageIdentity'
 import type { ChatMessage } from '../lib/types'
 
 type AssistantEntry = {
@@ -54,6 +54,14 @@ function assistantIdentity(m: ChatMessage): string {
 
 const hasAttachments = (m: ChatMessage): boolean => (m.attachments?.length ?? 0) > 0
 
+function attachmentSetsDisagree(left: ChatMessage, right: ChatMessage): boolean {
+  if (!hasAttachments(left) || !hasAttachments(right)) return false
+  const leftKeys = attachmentIdentityKeys(left.attachments)
+  const rightKeys = attachmentIdentityKeys(right.attachments)
+  if (leftKeys.length !== rightKeys.length) return true
+  return leftKeys.some((key, i) => key !== rightKeys[i])
+}
+
 function findStreamingTwin(
   msg: ChatMessage,
   index: StreamingIndex,
@@ -63,7 +71,9 @@ function findStreamingTwin(
   if (identity === '') return undefined
   const candidates = index.assistants.filter((e) => !e.used && !e.isStreaming)
 
-  const exact = candidates.find((e) => assistantIdentity(e.msg) === identity)
+  const exact = candidates.find(
+    (e) => !attachmentSetsDisagree(e.msg, msg) && assistantIdentity(e.msg) === identity,
+  )
   if (exact) return exact
 
   const msgHasAttachments = hasAttachments(msg)
@@ -78,6 +88,7 @@ function findStreamingTwin(
 function assistantAlreadyPersisted(msg: ChatMessage, candidate: ChatMessage): boolean {
   const identity = assistantIdentity(msg)
   if (identity === '') return false
+  if (attachmentSetsDisagree(msg, candidate)) return false
   const candidateIdentity = assistantIdentity(candidate)
   if (hasAttachments(msg) || hasAttachments(candidate)) return candidateIdentity === identity
   return contentConfirmed(identity, candidateIdentity)

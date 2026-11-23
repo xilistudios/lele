@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { Attachment } from '../../lib/types'
@@ -55,6 +55,7 @@ function ChevronRightIcon() {
 
 export function ImageLightbox({ images, index, onClose, onIndexChange }: Props) {
   const { t } = useTranslation()
+  const dialogRef = useRef<HTMLDialogElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
@@ -78,6 +79,16 @@ export function ImageLightbox({ images, index, onClose, onIndexChange }: Props) 
 
   const goToRef = useRef(goTo)
   goToRef.current = goTo
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal()
+      return
+    }
+    dialog.setAttribute('open', '')
+  }, [])
 
   useEffect(() => {
     previouslyFocused.current = document.activeElement as HTMLElement | null
@@ -118,11 +129,15 @@ export function ImageLightbox({ images, index, onClose, onIndexChange }: Props) 
 
   return createPortal(
     <dialog
-      open
+      ref={dialogRef}
       aria-modal="true"
       aria-label={t('chat.viewImage')}
       data-testid="image-lightbox"
       className={overlayClass}
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
@@ -186,12 +201,14 @@ export function ImageLightbox({ images, index, onClose, onIndexChange }: Props) 
         </>
       ) : null}
 
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center p-3 text-xs text-text-secondary"
-        data-testid="image-lightbox-counter"
-      >
-        {`${safeIndex + 1} / ${total}`}
-      </div>
+      {wrap ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center p-3 text-xs text-text-secondary"
+          data-testid="image-lightbox-counter"
+        >
+          {`${safeIndex + 1} / ${total}`}
+        </div>
+      ) : null}
     </dialog>,
     document.body,
   )
