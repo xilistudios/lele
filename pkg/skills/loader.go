@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/xilistudios/lele/pkg/logger"
 )
@@ -181,17 +182,18 @@ func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
 		return "", false
 	}
 
-	for _, root := range sl.skillRoots() {
+	for i, root := range sl.skillRoots() {
 		skillFile := filepath.Join(root.path, name, "SKILL.md")
 		content, err := os.ReadFile(skillFile)
 		if err != nil {
 			continue
 		}
 		body := string(content)
-		if declared := sl.metadataFromContent(body, name).Name; declared != "" && !strings.EqualFold(declared, name) {
-			return sl.loadSkillByCatalogName(name)
+		declared := sl.metadataFromContent(body, name).Name
+		if i == 0 && (declared == "" || strings.EqualFold(declared, name)) {
+			return sl.stripFrontmatter(body), true
 		}
-		return sl.stripFrontmatter(body), true
+		return sl.loadSkillByCatalogName(name)
 	}
 
 	return sl.loadSkillByCatalogName(name)
@@ -208,18 +210,27 @@ func (sl *SkillsLoader) loadSkillByCatalogName(name string) (string, bool) {
 			if !match(s) {
 				continue
 			}
-			content, err := os.ReadFile(s.Path)
-			if err != nil {
-				continue
+			if content, ok := sl.skillBody(s); ok {
+				return content, true
 			}
-			return sl.stripFrontmatter(string(content)), true
 		}
 	}
 	return "", false
 }
 
 func isLoadableSkillName(name string) bool {
-	return namePattern.MatchString(name)
+	if name == "" || len(name) > MaxNameLength {
+		return false
+	}
+	if strings.HasPrefix(name, ".") || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
@@ -282,7 +293,15 @@ func (sl *SkillsLoader) BuildTopSkillsSummary(filter []string, counts map[string
 }
 
 func (sl *SkillsLoader) SearchSkills(query string, filter []string) []SearchMatch {
-	return Search(sl.VisibleSkills(filter), query, sl.LoadSkill)
+	return Search(sl.VisibleSkills(filter), query, sl.skillBody)
+}
+
+func (sl *SkillsLoader) skillBody(s SkillInfo) (string, bool) {
+	content, err := os.ReadFile(s.Path)
+	if err != nil {
+		return "", false
+	}
+	return sl.stripFrontmatter(string(content)), true
 }
 
 func renderSkillsSummary(list []SkillInfo) string {
@@ -344,6 +363,30 @@ func SkillAllowed(filter []string, name string) bool {
 
 func (sl *SkillsLoader) SkillVisible(filter []string, name string) bool {
 	return SkillAllowed(filter, name) && sl.isSkillEnabled(name)
+}
+
+func (sl *SkillsLoader) SkillResolvable(filter []string, name string) bool {
+	if !sl.SkillVisible(filter, name) {
+		return false
+	}
+	return sl.skillExists(name)
+}
+
+func (sl *SkillsLoader) skillExists(name string) bool {
+	if !isLoadableSkillName(name) {
+		return false
+	}
+	for _, root := range sl.skillRoots() {
+		if _, err := os.Stat(filepath.Join(root.path, name, "SKILL.md")); err == nil {
+			return true
+		}
+	}
+	for _, s := range sl.ListSkills() {
+		if strings.EqualFold(s.Name, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {

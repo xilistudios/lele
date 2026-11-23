@@ -125,10 +125,16 @@ func (t *LoadSkillTool) Execute(ctx context.Context, args map[string]interface{}
 }
 
 func (t *LoadSkillTool) collect(names []string) (candidates []string, bodies map[string]string, missing []string) {
-	index := make(map[string]skills.SkillInfo)
-	for _, s := range t.loader.VisibleSkills(t.filter) {
+	visible := t.loader.VisibleSkills(t.filter)
+	index := make(map[string]skills.SkillInfo, len(visible)*2)
+	for _, s := range visible {
 		index[skillLookupKey(s.Name)] = s
-		index[skillLookupKey(filepath.Base(filepath.Dir(s.Path)))] = s
+	}
+	for _, s := range visible {
+		key := skillLookupKey(filepath.Base(filepath.Dir(s.Path)))
+		if _, taken := index[key]; !taken {
+			index[key] = s
+		}
 	}
 
 	seen := make(map[string]struct{}, len(names))

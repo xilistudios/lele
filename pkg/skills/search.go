@@ -22,7 +22,7 @@ const (
 	defaultSearchBodyCap = 64 * 1024
 )
 
-func Search(all []SkillInfo, query string, loadBody func(name string) (string, bool)) []SearchMatch {
+func Search(all []SkillInfo, query string, loadBody func(skill SkillInfo) (string, bool)) []SearchMatch {
 	terms := tokenize(query)
 	if len(terms) == 0 {
 		return nil
@@ -45,7 +45,7 @@ func Search(all []SkillInfo, query string, loadBody func(name string) (string, b
 	return matches
 }
 
-func scoreSkill(skill SkillInfo, terms []string, loadBody func(name string) (string, bool)) float64 {
+func scoreSkill(skill SkillInfo, terms []string, loadBody func(skill SkillInfo) (string, bool)) float64 {
 	name := strings.ToLower(skill.Name)
 	nameTokens := tokenize(skill.Name)
 	description := strings.ToLower(skill.Description)
@@ -53,7 +53,7 @@ func scoreSkill(skill SkillInfo, terms []string, loadBody func(name string) (str
 
 	var body string
 	if loadBody != nil {
-		if content, ok := loadBody(skill.Name); ok {
+		if content, ok := loadBody(skill); ok {
 			if len(content) > defaultSearchBodyCap {
 				content = content[:defaultSearchBodyCap]
 			}

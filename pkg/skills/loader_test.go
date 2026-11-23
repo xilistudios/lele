@@ -190,7 +190,7 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(rootSkill), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(rootSkill, []byte("---\nname: root\ndescription: root\n---\nROOTSKILL"), 0644); err != nil {
+	if err := os.WriteFile(rootSkill, []byte("ROOTSKILL no frontmatter"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -204,17 +204,15 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 		{name: "dot", input: "."},
 		{name: "dot-dot", input: ".."},
 		{name: "hidden", input: ".hidden"},
-		{name: "underscore-prefix", input: "__x"},
+		{name: "double-dot-substring", input: "x..y"},
 		{name: "space", input: "a b"},
-		{name: "leading-hyphen", input: "-leading"},
-		{name: "trailing-hyphen", input: "trailing-"},
-		{name: "double-hyphen", input: "double--hyphen"},
 		{name: "parent-dir", input: "../secret"},
 		{name: "slash", input: "a/b"},
 		{name: "backslash", input: `a\b`},
 		{name: "encoded-slash", input: "..%2f"},
 		{name: "nested", input: "sub/dir"},
 		{name: "escape", input: "foo/../bar"},
+		{name: "too-long", input: strings.Repeat("a", MaxNameLength+1)},
 	}
 
 	for _, tc := range testcases {
@@ -251,6 +249,66 @@ func TestSkillsLoader_LoadSkillValidName(t *testing.T) {
 	}
 	if !strings.Contains(content, "hello body") {
 		t.Errorf("expected skill body in content, got: %q", content)
+	}
+}
+
+func TestSkillsLoader_LoadSkillResolvesFolderSafeNames(t *testing.T) {
+	sl := newSkillLoader(t, t.TempDir(),
+		skillFixture{Dir: "my_skill", Name: "my-skill"},
+		skillFixture{Dir: "pdf.tools", Name: "pdf-toolkit"},
+		skillFixture{Dir: "Weather", Name: "weather"},
+		skillFixture{Dir: "__proto__", Name: "proto-skill"},
+		skillFixture{Dir: "-leading", Name: "leading-skill"},
+	)
+
+	accepted := []struct {
+		name string
+		in   string
+		body string
+	}{
+		{name: "underscore-folder", in: "my_skill", body: "body of my-skill"},
+		{name: "dotted-folder", in: "pdf.tools", body: "body of pdf-toolkit"},
+		{name: "uppercase-folder", in: "Weather", body: "body of weather"},
+		{name: "uppercase-folder-lowercase-request", in: "weather", body: "body of weather"},
+		{name: "dunder-folder", in: "__proto__", body: "body of proto-skill"},
+		{name: "hyphen-prefixed-folder", in: "-leading", body: "body of leading-skill"},
+		{name: "frontmatter-name", in: "my-skill", body: "body of my-skill"},
+	}
+
+	for _, tc := range accepted {
+		t.Run(tc.name, func(t *testing.T) {
+			content, ok := sl.LoadSkill(tc.in)
+			if !ok {
+				t.Fatalf("LoadSkill(%q) must resolve the folder alias", tc.in)
+			}
+			if !strings.Contains(content, tc.body) {
+				t.Fatalf("LoadSkill(%q) = %q, want %q", tc.in, content, tc.body)
+			}
+		})
+	}
+
+	refused := []struct {
+		name string
+		in   string
+	}{
+		{name: "empty", in: ""},
+		{name: "dot", in: "."},
+		{name: "dot-dot", in: ".."},
+		{name: "hidden", in: ".hidden"},
+		{name: "space", in: "a b"},
+		{name: "slash", in: "a/b"},
+		{name: "backslash", in: `a\b`},
+		{name: "parent-dir", in: "../x"},
+		{name: "double-dot-substring", in: "x..y"},
+		{name: "too-long", in: strings.Repeat("a", MaxNameLength+1)},
+	}
+
+	for _, tc := range refused {
+		t.Run("refused-"+tc.name, func(t *testing.T) {
+			if content, ok := sl.LoadSkill(tc.in); ok {
+				t.Fatalf("LoadSkill(%q) = %q, want a refusal", tc.in, content)
+			}
+		})
 	}
 }
 
@@ -444,6 +502,83 @@ func TestSkillsLoader_WorkspaceSkillShadowsGlobalSkillName(t *testing.T) {
 	}
 	if content, ok := sl.LoadSkill("only-global"); !ok || !strings.Contains(content, "body of only-global") {
 		t.Fatalf("LoadSkill(only-global) = (%q, %t), want the global-only skill", content, ok)
+	}
+}
+
+func TestSkillsLoader_LoadSkillResolvesTheCatalogOwnerAcrossRoots(t *testing.T) {
+	sl := newTwoRootSkillLoader(t,
+		[]skillFixture{{Dir: "bar", Name: "baz", Body: "workspace baz body"}},
+		[]skillFixture{{Dir: "baz", Name: "baz", Body: "global baz body"}},
+	)
+
+	listed := sl.ListSkills()
+	if names := catalogNames(listed); len(names) != 1 || names[0] != "baz" {
+		t.Fatalf("ListSkills() = %v, want only the workspace baz", names)
+	}
+	entry, ok := catalogEntry(listed, "baz")
+	if !ok || entry.Source != "workspace" {
+		t.Fatalf("baz entry = %+v, want the workspace skill to own the name", entry)
+	}
+
+	if content, ok := sl.LoadSkill("baz"); !ok || !strings.Contains(content, "workspace baz body") {
+		t.Fatalf("LoadSkill(baz) = (%q, %t), want the body of the catalog owner", content, ok)
+	}
+}
+
+func TestSkillsLoader_CatalogClaimsNamesCaseInsensitively(t *testing.T) {
+	sl := newTwoRootSkillLoader(t,
+		[]skillFixture{{Dir: "Dup", Name: "Dup", Body: "workspace dup body"}},
+		[]skillFixture{{Dir: "dup", Name: "dup", Body: "global dup body"}},
+	)
+
+	listed := sl.ListSkills()
+	if names := catalogNames(listed); len(names) != 1 || names[0] != "Dup" {
+		t.Fatalf("ListSkills() = %v, want a single entry for names that differ only by case", names)
+	}
+	entry, ok := catalogEntry(listed, "Dup")
+	if !ok || entry.Source != "workspace" {
+		t.Fatalf("Dup entry = %+v, want the workspace skill to win the case-insensitive claim", entry)
+	}
+
+	if content, ok := sl.LoadSkill("dup"); !ok || !strings.Contains(content, "workspace dup body") {
+		t.Fatalf("LoadSkill(dup) = (%q, %t), want the workspace body", content, ok)
+	}
+}
+
+func TestSkillsLoader_SkillResolvable(t *testing.T) {
+	workspace := t.TempDir()
+	sl := NewSkillsLoader(workspace, "", "")
+	writeSkillFixtures(t, filepath.Join(workspace, "skills"), []skillFixture{
+		{Dir: "alpha", Name: "alpha"},
+		{Dir: "aliased-dir", Name: "aliased"},
+		{Dir: "doomed", Name: "doomed"},
+	})
+	if err := sl.GetConfigManager().SetDisabled("doomed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(workspace, "skills", "doomed", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	testcases := []struct {
+		name   string
+		filter []string
+		skill  string
+		want   bool
+	}{
+		{name: "folder-name", skill: "alpha", want: true},
+		{name: "frontmatter-name", skill: "aliased", want: true},
+		{name: "unfiltered-allows", filter: []string{"alpha"}, skill: "alpha", want: true},
+		{name: "filtered-out", filter: []string{"aliased"}, skill: "alpha", want: false},
+		{name: "deleted-body", skill: "doomed", want: false},
+		{name: "unknown", skill: "ghost", want: false},
+		{name: "traversal", skill: "..", want: false},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sl.SkillResolvable(tc.filter, tc.skill))
+		})
 	}
 }
 

@@ -370,7 +370,7 @@ func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
 	}
 	out := make([]string, 0, len(pinned))
 	for _, name := range pinned {
-		if cb.skillsLoader.SkillVisible(filter, name) {
+		if cb.skillsLoader.SkillResolvable(filter, name) {
 			out = append(out, name)
 		}
 	}

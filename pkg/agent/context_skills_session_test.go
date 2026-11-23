@@ -351,12 +351,39 @@ func TestLoadedSkills_FilteredPinNeitherRendersNorExcludes(t *testing.T) {
 		t.Fatalf("SkillsInContext = %v, must not report a pin it cannot render", names)
 	}
 }
+func TestLoadedSkills_FrontmatterNamedSkillRenders(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+	workspace := t.TempDir()
+	dir := filepath.Join(workspace, "skills", "aliased-dir")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: aliased\ndescription: the aliased skill\n---\n\nthe aliased body\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cb := NewContextBuilder(workspace)
+	if pinned, _, rejected := cb.PinSkills("", []string{"aliased"}); len(pinned) != 1 || len(rejected) != 0 {
+		t.Fatalf("PinSkills = (%v, rejected %v), want the frontmatter name pinned", pinned, rejected)
+	}
+	if prompt := cb.BuildSystemPromptForSession("", ""); !strings.Contains(prompt, "### Skill: aliased") || !strings.Contains(prompt, "the aliased body") {
+		t.Fatalf("a skill whose folder differs from its frontmatter name must still render: %s", prompt)
+	}
+	if names := cb.SkillsInContext(""); !containsName(names, "aliased") {
+		t.Fatalf("SkillsInContext = %v, want the frontmatter-named pin reported", names)
+	}
+}
+
 func TestLoadedSkills_DeletedSkillDoesNotRender(t *testing.T) {
 	cb := newSevenSkillBuilder(t)
 	cb.PinSkills("", []string{"zeta"})
 
 	if prompt := cb.BuildSystemPromptForSession("", ""); !strings.Contains(prompt, "### Skill: zeta") {
 		t.Fatalf("precondition: pinned skill must render: %s", prompt)
+	}
+	if names := cb.SkillsInContext(""); !containsName(names, "zeta") {
+		t.Fatalf("precondition: SkillsInContext = %v, want zeta", names)
 	}
 
 	vanished := filepath.Join(cb.SkillsLoader().WorkspaceDir(), "skills", "zeta")
@@ -366,5 +393,8 @@ func TestLoadedSkills_DeletedSkillDoesNotRender(t *testing.T) {
 
 	if prompt := cb.BuildSystemPromptForSession("", ""); strings.Contains(prompt, "# Loaded Skills") {
 		t.Fatalf("a pin whose skill vanished must not render: %s", prompt)
+	}
+	if names := cb.SkillsInContext(""); containsName(names, "zeta") {
+		t.Fatalf("SkillsInContext = %v, must not report a pin whose skill no longer resolves", names)
 	}
 }

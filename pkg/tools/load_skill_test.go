@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +14,38 @@ import (
 
 func pinAll(_ string, names []string) ([]string, []string, []string) {
 	return names, nil, nil
+}
+
+type skillToolFixture struct {
+	dir  string
+	name string
+	body string
+}
+
+func newTwoRootSkillToolLoader(t *testing.T, workspaceFixtures, globalFixtures []skillToolFixture) *skills.SkillsLoader {
+	t.Helper()
+	workspace := t.TempDir()
+	global := t.TempDir()
+	roots := []struct {
+		path     string
+		fixtures []skillToolFixture
+	}{
+		{path: filepath.Join(workspace, "skills"), fixtures: workspaceFixtures},
+		{path: global, fixtures: globalFixtures},
+	}
+	for _, root := range roots {
+		for _, f := range root.fixtures {
+			dir := filepath.Join(root.path, f.dir)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			content := fmt.Sprintf("---\nname: %s\ndescription: the %s skill\n---\n\n%s\n", f.name, f.name, f.body)
+			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return skills.NewSkillsLoader(workspace, global, "")
 }
 
 func TestLoadSkillTool_LoadsContentAndRecordsUsage(t *testing.T) {
@@ -185,6 +219,40 @@ func TestLoadSkillTool_LoadsMixedCaseBatchOnce(t *testing.T) {
 	}
 	if !slices.Equal(pinned, []string{"weather", "github"}) {
 		t.Fatalf("pin got %v, want each canonical name once", pinned)
+	}
+}
+
+func TestLoadSkillTool_FrontmatterNameWinsOverAFolderAlias(t *testing.T) {
+	loader := newTwoRootSkillToolLoader(t,
+		[]skillToolFixture{{dir: "a", name: "x", body: "workspace x body"}},
+		[]skillToolFixture{{dir: "x", name: "y", body: "global y body"}},
+	)
+	var pinned []string
+	pin := func(_ string, names []string) ([]string, []string, []string) {
+		pinned = append(pinned, names...)
+		return names, nil, nil
+	}
+	tool := NewLoadSkillTool(loader, nil, "coder", nil, pin, nil, nil)
+
+	if content, ok := loader.LoadSkill("x"); !ok || !strings.Contains(content, "workspace x body") {
+		t.Fatalf("precondition: LoadSkill(x) = (%q, %t), want the workspace x body", content, ok)
+	}
+
+	res := tool.Execute(context.Background(), map[string]interface{}{"skill": "x"})
+	if res.IsError {
+		t.Fatalf("load x failed: %s", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, "### Skill: x") {
+		t.Fatalf("load_skill did not report the requested name: %s", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, "workspace x body") {
+		t.Fatalf("load_skill served the folder alias instead of the name LoadSkill resolves: %s", res.ForLLM)
+	}
+	if strings.Contains(res.ForLLM, "global y body") {
+		t.Fatalf("load_skill served another skill's body: %s", res.ForLLM)
+	}
+	if !slices.Equal(pinned, []string{"x"}) {
+		t.Fatalf("pin got %v, want only x", pinned)
 	}
 }
 

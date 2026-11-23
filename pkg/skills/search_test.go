@@ -24,8 +24,8 @@ func TestSearch_NameOutranksDescriptionAndBody(t *testing.T) {
 		searchSkillInfo("weather", "unrelated words"),
 	}
 	bodies := map[string]string{"body-only": "secret weather notes"}
-	matches := Search(all, "weather", func(name string) (string, bool) {
-		b, ok := bodies[name]
+	matches := Search(all, "weather", func(skill SkillInfo) (string, bool) {
+		b, ok := bodies[skill.Name]
 		return b, ok
 	})
 

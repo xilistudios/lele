@@ -417,3 +417,70 @@ func TestReload_UnchangedSpawnAgentReclonesSubagentTools(t *testing.T) {
 		t.Fatalf("the clone's load never reached the surviving builder: %s", prompt)
 	}
 }
+
+func reloadCapabilitiesCfg(t *testing.T, name, workspace string, vision, video bool) *config.Config {
+	t.Helper()
+	cfg := testCfg(t, []config.AgentConfig{{
+		ID:        "skill-agent",
+		Default:   true,
+		Name:      name,
+		Workspace: workspace,
+	}})
+	cfg.Agents.Defaults.Workspace = workspace
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"testprovider": {
+			Type: "openai",
+			ProviderConfig: config.ProviderConfig{
+				APIKey:  "test-key",
+				APIBase: "https://test.example.com/v1",
+			},
+			Models: map[string]config.ProviderModelConfig{
+				"test-model": {Vision: vision, Video: video},
+			},
+		},
+	}
+	return cfg
+}
+
+func TestReload_ReappliesModelCapabilities(t *testing.T) {
+	cfg, _ := newSkillReloadFixture(t, "first", nil)
+	registry := NewAgentRegistry(cfg)
+	first, ok := registry.GetAgent("skill-agent")
+	if !ok {
+		t.Fatal("expected the agent to be registered")
+	}
+	if prompt := first.ContextBuilder.GetInitialContext(); strings.Contains(prompt, "`read_image`") || strings.Contains(prompt, "`read_video`") {
+		t.Fatalf("precondition: a model without vision or video must not advertise the media tools: %s", prompt)
+	}
+
+	registry.ReloadAgents(reloadCapabilitiesCfg(t, "second", first.Workspace, true, false))
+	vision, _ := registry.GetAgent("skill-agent")
+	if vision == first {
+		t.Fatal("precondition: a name change must recreate the instance")
+	}
+	if vision.ContextBuilder != first.ContextBuilder {
+		t.Fatal("precondition: the context builder is expected to survive the reload")
+	}
+	if !vision.SupportsImages {
+		t.Fatal("precondition: the recreated instance must carry the new vision capability")
+	}
+	if prompt := vision.ContextBuilder.GetInitialContext(); !strings.Contains(prompt, "`read_image`") {
+		t.Fatalf("the surviving builder did not get SetVisionSupported re-applied: %s", prompt)
+	}
+
+	registry.ReloadAgents(reloadCapabilitiesCfg(t, "third", first.Workspace, false, true))
+	video, _ := registry.GetAgent("skill-agent")
+	if video.SupportsImages || !video.SupportsVideo {
+		t.Fatalf("precondition: the recreated instance must carry the new video capability: images=%t video=%t", video.SupportsImages, video.SupportsVideo)
+	}
+	if video.ContextBuilder != first.ContextBuilder {
+		t.Fatal("precondition: the context builder is expected to survive the reload")
+	}
+	prompt := video.ContextBuilder.GetInitialContext()
+	if !strings.Contains(prompt, "`read_video`") {
+		t.Fatalf("the surviving builder did not get SetVideoSupported re-applied: %s", prompt)
+	}
+	if strings.Contains(prompt, "`read_image`") {
+		t.Fatalf("the surviving builder kept the stale vision capability: %s", prompt)
+	}
+}
