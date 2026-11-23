@@ -162,7 +162,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         aria-hidden={!mobileOpen}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col max-md:overflow-y-auto safe-area-y border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col max-md:w-full max-md:h-dvh max-md:overflow-hidden safe-area-y border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
@@ -290,7 +290,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         )}
         <div
           data-testid="sidebar-history-section"
-          className={collapsed ? 'px-2' : 'flex min-h-0 flex-1 flex-col px-3 py-3 max-md:flex-none'}
+          className={collapsed ? 'px-2' : 'flex min-h-0 flex-1 flex-col px-3 py-3'}
         >
           {collapsed ? (
             <Popover
@@ -396,6 +396,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         </nav>
 
         <div
+          data-testid="sidebar-footer"
           className={`mt-auto border-t border-border px-2 py-3 ${collapsed ? 'flex justify-center' : ''}`}
         >
           <Popover
