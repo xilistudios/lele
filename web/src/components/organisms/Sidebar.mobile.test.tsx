@@ -13,20 +13,29 @@ const FULL_WIDTH = 'w-[280px]'
 
 const authValue = { session: { device_name: 'Phone' } } as unknown as AuthContextValue
 
-const logicValue = {
-  sessions: [],
-  currentSessionKey: 'native:client-1:1',
-  parentSessionKey: null,
-  processingSessions: new Set<string>(),
-  chatMode: 'agent',
-  groupsEnabled: false,
-  onCreateSession: () => undefined,
-  onDeleteSession: () => undefined,
-  onToggleSidebar: () => undefined,
-  onSelectMode: () => undefined,
-  onSelectSession: () => undefined,
-  onLogout: async () => undefined,
-} as unknown as AppLogicContextValue
+const sessions = Array.from({ length: 30 }, (_, i) => ({
+  key: `native:client-${i}`,
+  name: `Session ${i}`,
+  kind: 'chat',
+  mode: 'agent',
+  updated: new Date(Date.now() - i * 60_000).toISOString(),
+}))
+
+const logicValue = (list: unknown[] = []) =>
+  ({
+    sessions: list,
+    currentSessionKey: 'native:client-1:1',
+    parentSessionKey: null,
+    processingSessions: new Set<string>(),
+    chatMode: 'agent',
+    groupsEnabled: false,
+    onCreateSession: () => undefined,
+    onDeleteSession: () => undefined,
+    onToggleSidebar: () => undefined,
+    onSelectMode: () => undefined,
+    onSelectSession: () => undefined,
+    onLogout: async () => undefined,
+  }) as unknown as AppLogicContextValue
 
 const originalInnerWidth = window.innerWidth
 
@@ -34,14 +43,14 @@ function setViewport(width: number) {
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
 }
 
-function renderSidebar(collapsed: boolean) {
+function renderSidebar(collapsed: boolean, list: unknown[] = []) {
   return render(
     createElement(
       AuthContext.Provider,
       { value: authValue },
       createElement(
         AppLogicContext.Provider,
-        { value: logicValue },
+        { value: logicValue(list) },
         createElement(
           MemoryRouter,
           { initialEntries: ['/'] },
@@ -143,5 +152,55 @@ describe('Sidebar — desktop rail keeps working', () => {
     expect(cls).toContain(FULL_WIDTH)
     expect(view.getByText('Agente')).not.toBeNull()
     expect(view.container.querySelectorAll('button[title="Agentes"]').length).toBe(0)
+  })
+})
+describe('Sidebar — only the session list scrolls on mobile', () => {
+  test('the drawer clips instead of scrolling as a whole', () => {
+    setViewport(390)
+
+    const classes = asideClass(renderSidebar(false).container).split(/\s+/)
+
+    expect(classes).toContain('max-md:overflow-hidden')
+    expect(classes).not.toContain('max-md:overflow-y-auto')
+  })
+
+  test('the history section flexes on mobile so the nav and footer stay put', () => {
+    setViewport(390)
+
+    const { container } = renderSidebar(false)
+    const history = container.querySelector('[data-testid="sidebar-history-section"]')
+    if (!history) throw new Error('history section not rendered')
+    const classes = history.className.split(/\s+/)
+
+    expect(classes).toContain('flex-1')
+    expect(classes).toContain('min-h-0')
+    expect(classes).not.toContain('max-md:flex-none')
+  })
+
+  test('the session list is the scroll surface that is clipped by the drawer', () => {
+    setViewport(390)
+
+    const { container } = renderSidebar(false, sessions)
+    const list = container.querySelector('[data-testid="sidebar-history-section"] nav')
+    if (!list) throw new Error('session list not rendered')
+    const classes = list.className.split(/\s+/)
+
+    expect(classes).toContain('overflow-y-auto')
+    expect(classes).toContain('min-h-0')
+    expect(list.querySelector('[data-testid="sidebar-history-sentinel"]')).not.toBeNull()
+  })
+
+  test('the nav entry and the footer carry no clipped height on mobile', () => {
+    setViewport(390)
+
+    const { container } = renderSidebar(false)
+    const nav = container.querySelector('[data-testid="sidebar-nav-section"]')
+    const footer = container.querySelector('[data-testid="sidebar-footer"]')
+    if (!nav || !footer) throw new Error('nav section or footer not rendered')
+
+    for (const token of nav.className.split(/\s+/)) expect(token).not.toMatch(/^max-md:/)
+    expect(nav.className.split(/\s+/)).toContain('shrink-0')
+    for (const token of footer.className.split(/\s+/)) expect(token).not.toMatch(/^max-md:/)
+    expect(footer.className.split(/\s+/)).toContain('mt-auto')
   })
 })
