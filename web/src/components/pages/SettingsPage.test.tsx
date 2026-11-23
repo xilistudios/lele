@@ -223,3 +223,14 @@ describe('SettingsPage — new tabs', () => {
     expect(ids[ids.indexOf('settings-tab-tools') + 1]).toBe('settings-tab-mcp')
   })
 })
+describe('SettingsPage — scroll area containment', () => {
+  test('the scroll area is a containment block for absolutely positioned descendants', async () => {
+    const view = renderLayout('/settings/mcp', { config: 0 })
+    await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
+
+    const scrollArea = view.getByTestId('settings-scroll-area')
+    expect(scrollArea.className).toContain('overflow-y-auto')
+    expect(scrollArea.className).toContain('relative')
+    expect(scrollArea.contains(view.getByTestId('probe-tab'))).toBe(true)
+  })
+})

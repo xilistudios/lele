@@ -63,7 +63,10 @@ export function SettingsPage() {
             )}
 
             <div className="flex flex-1 flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-4 md:p-6">
+              <div
+                data-testid="settings-scroll-area"
+                className="relative flex-1 overflow-y-auto p-4 md:p-6"
+              >
                 <Outlet />
               </div>
 
