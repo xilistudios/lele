@@ -108,7 +108,7 @@ export function SubagentsSettings() {
             <Link
               data-testid="subagents-open-agent"
               to={`/settings/agents/${encodeURIComponent(selection.id)}/subagents`}
-              className="text-xs text-accent-primary hover:underline"
+              className="text-xs text-accent-text hover:underline"
             >
               {t('settings.subagentsPage.openAgent')}
             </Link>
@@ -129,7 +129,7 @@ export function SubagentsSettings() {
           <p>{t('settings.subagentsPage.noAgents')}</p>
           <Link
             to="/settings/agents"
-            className="inline-block rounded-md border border-border px-3 py-1.5 text-xs font-medium text-accent-primary hover:underline"
+            className="inline-block rounded-md border border-border px-3 py-1.5 text-xs font-medium text-accent-text hover:underline"
           >
             {t('settings.subagentsPage.noAgentsAction')}
           </Link>
