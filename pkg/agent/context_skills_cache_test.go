@@ -28,6 +28,7 @@ func removeAgentSkill(t *testing.T, workspace, name string) {
 }
 
 func TestSkillsLoader_IsThePromptSource(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "alpha")
 
@@ -56,6 +57,7 @@ func TestSkillsLoader_IsThePromptSource(t *testing.T) {
 }
 
 func TestInvalidatePromptCache_PicksUpInstalledSkill(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "first")
 
@@ -84,6 +86,7 @@ func TestInvalidatePromptCache_PicksUpInstalledSkill(t *testing.T) {
 }
 
 func TestInvalidatePromptCache_DropsRemovedSkill(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "doomed")
 	writeAgentSkill(t, workspace, "keeper")
@@ -106,6 +109,7 @@ func TestInvalidatePromptCache_DropsRemovedSkill(t *testing.T) {
 }
 
 func TestInvalidatePromptCache_ReflectsToggle(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "switchable")
 
@@ -128,6 +132,7 @@ func TestInvalidatePromptCache_ReflectsToggle(t *testing.T) {
 }
 
 func TestInvalidatePromptCache_IsIdempotentWhenUncached(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	cb := NewContextBuilder(workspace)
 

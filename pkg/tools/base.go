@@ -12,7 +12,18 @@ const (
 
 	bypassGuardCtxKey     contextKey = "exec_bypass_guard"
 	approvedCommandCtxKey contextKey = "exec_approved_command"
+
+	subagentScopeCtxKey contextKey = "tool_subagent_scope"
 )
+
+func WithSubagentScope(ctx context.Context) context.Context {
+	return context.WithValue(ctx, subagentScopeCtxKey, true)
+}
+
+func SubagentScopeFromCtx(ctx context.Context) bool {
+	v, _ := ctx.Value(subagentScopeCtxKey).(bool)
+	return v
+}
 
 func WithToolContext(ctx context.Context, channel, chatID string) context.Context {
 	ctx = context.WithValue(ctx, channelCtxKey, channel)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,12 @@ type mcpDiscoveryPerms struct {
 	Get  bool
 }
 
+type skillsDiscoveryPerms struct {
+	List   bool
+	Search bool
+	Load   bool
+}
+
 type ContextBuilder struct {
 	workspace          string
 	skillsLoader       *skills.SkillsLoader
@@ -41,6 +48,8 @@ type ContextBuilder struct {
 	mcpServers []tools.MCPServerInfo
 
 	mcpDiscovery mcpDiscoveryPerms
+
+	skillsDiscovery *skillsDiscoveryPerms
 
 	harnessContext      string
 	harnessContextValid bool
@@ -53,7 +62,10 @@ type ContextBuilder struct {
 
 	videoSupported bool
 
-	skillsFilter []string
+	skillsFilter    []string
+	skillUsage      *skills.UsageStore
+	skillUsageAgent string
+	loadedSkills    map[string][]string
 
 	folderResolver func(sessionKey string) string
 	folderMu       sync.RWMutex
@@ -63,6 +75,8 @@ type ContextBuilder struct {
 }
 
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
+
+const maxContextSkills = 5
 
 func getGlobalConfigDir() string {
 	return config.GetLeleDir()
@@ -74,14 +88,18 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 
 	return &ContextBuilder{
-		workspace:    workspace,
-		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
-		memory:       NewMemoryStore(workspace),
+		workspace:       workspace,
+		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
+		memory:          NewMemoryStore(workspace),
+		skillsDiscovery: &skillsDiscoveryPerms{List: true, Search: true, Load: true},
 	}
 }
 
 func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
+	cb.initialMu.Lock()
 	cb.tools = registry
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
 }
 
 func (cb *ContextBuilder) SetVisionSupported(v bool) {
@@ -132,6 +150,56 @@ func (cb *ContextBuilder) SetMCPDiscovery(list, get bool) {
 	}
 	cb.mcpDiscovery = next
 	cb.initialContext = ""
+}
+
+func (cb *ContextBuilder) SetSkillsDiscovery(list, search, load bool) {
+	next := skillsDiscoveryPerms{List: list, Search: search, Load: load}
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	if cb.skillsDiscovery != nil && *cb.skillsDiscovery == next {
+		return
+	}
+	cb.skillsDiscovery = &next
+	cb.initialContext = ""
+}
+
+func (cb *ContextBuilder) resolvedSkillsDiscovery() skillsDiscoveryPerms {
+	if cb.skillsDiscovery == nil {
+		return skillsDiscoveryPerms{List: true, Search: true, Load: true}
+	}
+	return *cb.skillsDiscovery
+}
+
+func skillsSection(summary string, perms skillsDiscoveryPerms) string {
+	const loadHint = "`load_skill` with {\"skill\": \"<name>\"} — or \"skills\": [\"<a>\", \"<b>\"] for several — "
+
+	var sb strings.Builder
+	sb.WriteString("# Skills\n\n")
+	sb.WriteString("The skills below are the ones this agent uses most.")
+	switch {
+	case perms.List && perms.Search && perms.Load:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first) or " +
+			"`search_skill` to find skills by keyword, and " + loadHint +
+			"to load their full instructions into the context.")
+	case perms.List && perms.Search:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first) or " +
+			"`search_skill` to find skills by keyword.")
+	case perms.List && perms.Load:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first), and " + loadHint +
+			"to load their full instructions into the context.")
+	case perms.Search && perms.Load:
+		sb.WriteString(" The catalog has more: use `search_skill` to find skills by keyword, and " + loadHint +
+			"to load their full instructions into the context.")
+	case perms.List:
+		sb.WriteString(" The catalog has more: use `list_skills` to browse it (most used first).")
+	case perms.Search:
+		sb.WriteString(" The catalog has more: use `search_skill` to find skills by keyword.")
+	case perms.Load:
+		sb.WriteString(" " + loadHint + "brings the full instructions of a skill you know by name into the context.")
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(summary)
+	return sb.String()
 }
 
 func mcpServersSection(servers []tools.MCPServerInfo, perms mcpDiscoveryPerms) string {
@@ -190,6 +258,144 @@ func (cb *ContextBuilder) SkillsLoader() *skills.SkillsLoader {
 	return cb.skillsLoader
 }
 
+func (cb *ContextBuilder) SetSkillUsage(agentID string, store *skills.UsageStore) {
+	cb.initialMu.Lock()
+	cb.skillUsageAgent = agentID
+	cb.skillUsage = store
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+}
+
+func (cb *ContextBuilder) SkillUsageStore() *skills.UsageStore {
+	cb.initialMu.RLock()
+	defer cb.initialMu.RUnlock()
+	return cb.skillUsage
+}
+
+func (cb *ContextBuilder) PinSkills(sessionKey string, names []string) (pinned, already, rejected []string) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+
+	if cb.loadedSkills == nil {
+		cb.loadedSkills = make(map[string][]string)
+	}
+	cur := cb.loadedSkills[sessionKey]
+	total := 0
+	for _, name := range cur {
+		if content, ok := cb.skillsLoader.LoadSkill(name); ok {
+			total += len(content)
+		}
+	}
+
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if slices.Contains(cur, name) {
+			already = append(already, name)
+			continue
+		}
+		content, ok := cb.skillsLoader.LoadSkill(name)
+		if !ok {
+			rejected = append(rejected, name)
+			continue
+		}
+		if len(cur) >= skills.MaxPinnedSkillsPerSession || total+len(content) > skills.MaxPinnedSkillBytesPerSession {
+			rejected = append(rejected, name)
+			continue
+		}
+		cur = append(cur, name)
+		total += len(content)
+		pinned = append(pinned, name)
+	}
+
+	if len(cur) == 0 {
+		delete(cb.loadedSkills, sessionKey)
+	} else {
+		cb.loadedSkills[sessionKey] = cur
+	}
+	if len(pinned) > 0 {
+		cb.initialContext = ""
+	}
+	return pinned, already, rejected
+}
+
+func (cb *ContextBuilder) UnpinSkills(sessionKey string, names []string) (removed, absent []string) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+
+	cur := cb.loadedSkills[sessionKey]
+	for _, name := range names {
+		idx := slices.Index(cur, name)
+		if idx < 0 {
+			absent = append(absent, name)
+			continue
+		}
+		cur = slices.Delete(cur, idx, idx+1)
+		removed = append(removed, name)
+	}
+
+	if len(cur) == 0 {
+		delete(cb.loadedSkills, sessionKey)
+	} else {
+		cb.loadedSkills[sessionKey] = cur
+	}
+	if len(removed) > 0 {
+		cb.initialContext = ""
+	}
+	return removed, absent
+}
+
+func (cb *ContextBuilder) PinnedSkills(sessionKey string) []string {
+	cb.initialMu.RLock()
+	defer cb.initialMu.RUnlock()
+	return append([]string(nil), cb.loadedSkills[sessionKey]...)
+}
+
+func (cb *ContextBuilder) ClearLoadedSkills(sessionKey string) {
+	cb.initialMu.Lock()
+	delete(cb.loadedSkills, sessionKey)
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+}
+
+func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
+	cb.initialMu.RLock()
+	filter := cb.skillsFilter
+	pinned := append([]string(nil), cb.loadedSkills[sessionKey]...)
+	cb.initialMu.RUnlock()
+
+	if len(pinned) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(pinned))
+	for _, name := range pinned {
+		if cb.skillsLoader.SkillResolvable(filter, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func (cb *ContextBuilder) SkillsInContext(sessionKey string) []string {
+	cb.initialMu.RLock()
+	filter := cb.skillsFilter
+	usage := cb.skillUsage
+	agentID := cb.skillUsageAgent
+	cb.initialMu.RUnlock()
+
+	var names []string
+	for _, s := range cb.skillsLoader.TopSkills(filter, usage.CountsFor(agentID), maxContextSkills) {
+		names = append(names, s.Name)
+	}
+	for _, name := range cb.renderablePinned(sessionKey) {
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (cb *ContextBuilder) InvalidatePromptCache() {
 	cb.initialMu.Lock()
 	cb.initialContext = ""
@@ -225,13 +431,9 @@ func (cb *ContextBuilder) GetInitialContext() string {
 		parts = append(parts, bootstrapContent)
 	}
 
-	skillsSummary := cb.skillsLoader.BuildSkillsSummary(cb.skillsFilter)
+	skillsSummary := cb.skillsLoader.BuildTopSkillsSummary(cb.skillsFilter, cb.skillUsage.CountsFor(cb.skillUsageAgent), maxContextSkills)
 	if skillsSummary != "" {
-		parts = append(parts, fmt.Sprintf(`# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-
-%s`, skillsSummary))
+		parts = append(parts, skillsSection(skillsSummary, cb.resolvedSkillsDiscovery()))
 	}
 
 	if len(cb.availableSubagents) > 0 {
@@ -324,6 +526,11 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 
 func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string) string {
 	prompt := cb.BuildSystemPrompt()
+	if names := cb.renderablePinned(sessionKey); len(names) > 0 {
+		if content := cb.skillsLoader.LoadSkillsForContext(names); content != "" {
+			prompt = prompt + "\n\n---\n\n# Loaded Skills\n\n" + content
+		}
+	}
 	isNative := channel == "native" || strings.HasPrefix(sessionKey, "tui:") || strings.HasPrefix(sessionKey, "native:")
 	if isNative {
 		if harnessCtx := cb.getHarnessContext(); harnessCtx != "" {

@@ -719,12 +719,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		applyToolsAllowlist(agent.Tools, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
 	}
 
-	subagentManager.SetTools(agent.Tools.CloneWithout(
-		"send_file",
-		"wait_for_subagent",
-		"list_active_subagents",
-		"cancel_subagent",
-	))
+	subagentManager.SetTools(subagentToolClone(agent.Tools))
 	subagentManager.SetSessionRecorder(agent.Sessions)
 	subagentManager.SetSessionCompactor(agent.Sessions)
 	subagentManager.SetTokenUsageReporter(newSubagentTokenReporter(agent.Sessions))
@@ -854,6 +849,15 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 	return subagents, bgManagers
 }
 
+func subagentToolClone(reg *tools.ToolRegistry) *tools.ToolRegistry {
+	return reg.CloneWithout(
+		"send_file",
+		"wait_for_subagent",
+		"list_active_subagents",
+		"cancel_subagent",
+	)
+}
+
 func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) *tools.SubagentManager {
 	agent, ok := registry.GetAgent(agentID)
 	if !ok {
@@ -863,6 +867,7 @@ func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, regis
 	if _, hasSpawn := agent.Tools.Get("spawn"); hasSpawn {
 		syncGroupChatTool(agent, cfg, registry, agentID, groupManager)
 		if existingSm, ok := existingSubagents[agentID]; ok {
+			existingSm.SetTools(subagentToolClone(agent.Tools))
 			return existingSm
 		}
 		return nil

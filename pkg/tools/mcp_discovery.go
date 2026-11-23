@@ -200,6 +200,10 @@ func (t *GetMCPToolTool) Execute(ctx context.Context, args map[string]interface{
 }
 
 func requestedToolNames(args map[string]interface{}) []string {
+	return namesFromArgs(args, "tool", "tools")
+}
+
+func namesFromArgs(args map[string]interface{}, singleKey, listKey string) []string {
 	names := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
 	add := func(name string) {
@@ -214,10 +218,10 @@ func requestedToolNames(args map[string]interface{}) []string {
 		names = append(names, name)
 	}
 
-	if name, ok := args["tool"].(string); ok {
+	if name, ok := args[singleKey].(string); ok {
 		add(name)
 	}
-	switch list := args["tools"].(type) {
+	switch list := args[listKey].(type) {
 	case []string:
 		for _, name := range list {
 			add(name)

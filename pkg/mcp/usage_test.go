@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/xilistudios/lele/pkg/utils/filelock"
 )
 
 func usagePath(t *testing.T) string {
@@ -298,7 +300,7 @@ func TestUsageLockReclaimsStaleSidecar(t *testing.T) {
 	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
 		t.Fatalf("seed the sidecar: %v", err)
 	}
-	old := time.Now().Add(-2 * usageLockStale)
+	old := time.Now().Add(-2 * filelock.StaleAfter)
 	if err := os.Chtimes(lockPath, old, old); err != nil {
 		t.Fatalf("age the sidecar: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/voice"
 )
@@ -207,17 +208,6 @@ func NewAgentInstance(
 	}
 	toolsRegistry.Register(tools.NewReadVideoTool(workspace, restrict, videoCaps, transcribe))
 
-	if agentCfg != nil {
-		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
-	}
-
-	sessionsManager := session.NewSessionManager()
-
-	contextBuilder := NewContextBuilder(workspace)
-	contextBuilder.SetToolsRegistry(toolsRegistry)
-	contextBuilder.SetVisionSupported(videoCaps.Vision)
-	contextBuilder.SetVideoSupported(videoCaps.Video)
-
 	agentID := routing.DefaultAgentID
 	agentName := ""
 	var agentDescription string
@@ -234,7 +224,23 @@ func NewAgentInstance(
 		isDefault = agentCfg.Default
 	}
 
+	sessionsManager := session.NewSessionManager()
+
+	contextBuilder := NewContextBuilder(workspace)
+	contextBuilder.SetToolsRegistry(toolsRegistry)
+	contextBuilder.SetVisionSupported(videoCaps.Vision)
+	contextBuilder.SetVideoSupported(videoCaps.Video)
 	contextBuilder.SetSkillsFilter(skillsFilter)
+
+	skillUsage := skills.NewUsageStore(filepath.Join(config.GetLeleDir(), "skills_usage.json"))
+	contextBuilder.SetSkillUsage(agentID, skillUsage)
+	registerSkillTools(toolsRegistry, contextBuilder, agentID, skillsFilter)
+
+	if agentCfg != nil {
+		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, agentID)
+	}
+
+	syncSkillsDiscovery(toolsRegistry, contextBuilder)
 
 	if subagents != nil && len(subagents.AllowAgents) > 0 {
 		available := resolveAvailableSubagents(agentCfg, cfg)
@@ -399,6 +405,20 @@ func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config)
 		}
 	}
 	return result
+}
+
+func registerSkillTools(reg *tools.ToolRegistry, cb *ContextBuilder, agentID string, filter []string) {
+	usage := cb.SkillUsageStore()
+	reg.Register(tools.NewSearchSkillTool(cb.SkillsLoader(), usage, agentID, filter))
+	reg.Register(tools.NewListSkillsTool(cb.SkillsLoader(), usage, agentID, filter, cb.SkillsInContext))
+	reg.Register(tools.NewLoadSkillTool(cb.SkillsLoader(), usage, agentID, filter, cb.PinSkills, cb.UnpinSkills, cb.PinnedSkills))
+}
+
+func syncSkillsDiscovery(reg *tools.ToolRegistry, cb *ContextBuilder) {
+	_, hasList := reg.Get(tools.ListSkillsName)
+	_, hasSearch := reg.Get(tools.SearchSkillName)
+	_, hasLoad := reg.Get(tools.LoadSkillName)
+	cb.SetSkillsDiscovery(hasList, hasSearch, hasLoad)
 }
 
 func applyToolsAllowlist(registry *tools.ToolRegistry, allowed []string, agentID string) {
