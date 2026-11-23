@@ -40,7 +40,7 @@ Three tools cover the rest of the catalog:
 
 - `list_skills` — browses the catalog paginated (20 per page, `page` argument),
   ordered by usage frequency (most used first), excluding the skills already
-  in the context (the top-5 summary and the loaded ones).
+  in this session's context (the top-5 summary and the loaded ones).
 - `search_skill` — keyword search over skill names, descriptions and SKILL.md
   bodies, ranked by relevance (name matches weigh most). Returns metadata only.
 - `load_skill` — loads the full SKILL.md instructions of one or several skills
@@ -50,6 +50,31 @@ Three tools cover the rest of the catalog:
 
 These tools respect the agent's `skills` filter and the workspace
 enabled/disabled configuration.
+
+### Session Pins
+
+A loaded skill is **pinned to the session that loaded it**: one chat's load
+never shows up in another chat's or another user's context, and `/new` (or any
+session reset) drops the retired session's pins while leaving every other
+session alone. A session may pin at most **8 skills / 32 KiB of SKILL.md text**;
+a load that would exceed the budget is refused with a message naming the skills
+and the unload call to make room. Loading a skill that is already pinned is a
+no-op: no second copy of the body and no extra usage count.
+
+To remove a pin, call `load_skill` with `unload` set:
+
+```text
+load_skill
+{"skill": "dagu", "unload": true}
+
+load_skill
+{"skills": ["dagu", "lele"], "unload": true}
+```
+
+Unloading never changes the usage counters — those record how often a skill was
+loaded, not how long it stays pinned. Subagents receive the full instructions in
+their own result when they load a skill, but a subagent never pins into the
+session that spawned it.
 
 ## Authoring Approach
 

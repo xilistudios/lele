@@ -206,6 +206,7 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
 	if agent.ContextBuilder != nil {
 		agent.ContextBuilder.ResetMemoryContext()
+		agent.ContextBuilder.ClearLoadedSkills(sessionKey)
 	}
 	return lelecontext.ContextRefreshedMessage
 }

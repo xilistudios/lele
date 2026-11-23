@@ -65,7 +65,7 @@ type ContextBuilder struct {
 	skillsFilter    []string
 	skillUsage      *skills.UsageStore
 	skillUsageAgent string
-	loadedSkills    []string
+	loadedSkills    map[string][]string
 
 	folderResolver func(sessionKey string) string
 	folderMu       sync.RWMutex
@@ -263,31 +263,133 @@ func (cb *ContextBuilder) SetSkillUsage(agentID string, store *skills.UsageStore
 	cb.initialMu.Unlock()
 }
 
-func (cb *ContextBuilder) AddLoadedSkills(names []string) {
-	cb.initialMu.Lock()
-	defer cb.initialMu.Unlock()
-	for _, name := range names {
-		if name == "" || slices.Contains(cb.loadedSkills, name) {
-			continue
-		}
-		cb.loadedSkills = append(cb.loadedSkills, name)
-	}
-	cb.initialContext = ""
+func (cb *ContextBuilder) SkillUsageStore() *skills.UsageStore {
+	cb.initialMu.RLock()
+	defer cb.initialMu.RUnlock()
+	return cb.skillUsage
 }
 
-func (cb *ContextBuilder) SkillsInContext() []string {
+func (cb *ContextBuilder) PinSkills(sessionKey string, names []string) (pinned, already, rejected []string) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+
+	if cb.loadedSkills == nil {
+		cb.loadedSkills = make(map[string][]string)
+	}
+	cur := cb.loadedSkills[sessionKey]
+	total := 0
+	for _, name := range cur {
+		if content, ok := cb.skillsLoader.LoadSkill(name); ok {
+			total += len(content)
+		}
+	}
+
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if slices.Contains(cur, name) {
+			already = append(already, name)
+			continue
+		}
+		content, ok := cb.skillsLoader.LoadSkill(name)
+		if !ok {
+			rejected = append(rejected, name)
+			continue
+		}
+		if len(cur) >= skills.MaxPinnedSkillsPerSession || total+len(content) > skills.MaxPinnedSkillBytesPerSession {
+			rejected = append(rejected, name)
+			continue
+		}
+		cur = append(cur, name)
+		total += len(content)
+		pinned = append(pinned, name)
+	}
+
+	if len(cur) == 0 {
+		delete(cb.loadedSkills, sessionKey)
+	} else {
+		cb.loadedSkills[sessionKey] = cur
+	}
+	if len(pinned) > 0 {
+		cb.initialContext = ""
+	}
+	return pinned, already, rejected
+}
+
+func (cb *ContextBuilder) UnpinSkills(sessionKey string, names []string) (removed, absent []string) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+
+	cur := cb.loadedSkills[sessionKey]
+	for _, name := range names {
+		idx := slices.Index(cur, name)
+		if idx < 0 {
+			absent = append(absent, name)
+			continue
+		}
+		cur = slices.Delete(cur, idx, idx+1)
+		removed = append(removed, name)
+	}
+
+	if len(cur) == 0 {
+		delete(cb.loadedSkills, sessionKey)
+	} else {
+		cb.loadedSkills[sessionKey] = cur
+	}
+	if len(removed) > 0 {
+		cb.initialContext = ""
+	}
+	return removed, absent
+}
+
+func (cb *ContextBuilder) PinnedSkills(sessionKey string) []string {
+	cb.initialMu.RLock()
+	defer cb.initialMu.RUnlock()
+	return append([]string(nil), cb.loadedSkills[sessionKey]...)
+}
+
+func (cb *ContextBuilder) ClearLoadedSkills(sessionKey string) {
+	cb.initialMu.Lock()
+	delete(cb.loadedSkills, sessionKey)
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+}
+
+func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
+	cb.initialMu.RLock()
+	filter := cb.skillsFilter
+	pinned := append([]string(nil), cb.loadedSkills[sessionKey]...)
+	cb.initialMu.RUnlock()
+
+	if len(pinned) == 0 {
+		return nil
+	}
+	visible := make(map[string]struct{})
+	for _, s := range cb.skillsLoader.VisibleSkills(filter) {
+		visible[s.Name] = struct{}{}
+	}
+	out := make([]string, 0, len(pinned))
+	for _, name := range pinned {
+		if _, ok := visible[name]; ok {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func (cb *ContextBuilder) SkillsInContext(sessionKey string) []string {
 	cb.initialMu.RLock()
 	filter := cb.skillsFilter
 	usage := cb.skillUsage
 	agentID := cb.skillUsageAgent
-	loaded := cb.loadedSkills
 	cb.initialMu.RUnlock()
 
 	var names []string
 	for _, s := range cb.skillsLoader.TopSkills(filter, usage.CountsFor(agentID), maxContextSkills) {
 		names = append(names, s.Name)
 	}
-	for _, name := range loaded {
+	for _, name := range cb.renderablePinned(sessionKey) {
 		if !slices.Contains(names, name) {
 			names = append(names, name)
 		}
@@ -333,12 +435,6 @@ func (cb *ContextBuilder) GetInitialContext() string {
 	skillsSummary := cb.skillsLoader.BuildTopSkillsSummary(cb.skillsFilter, cb.skillUsage.CountsFor(cb.skillUsageAgent), maxContextSkills)
 	if skillsSummary != "" {
 		parts = append(parts, skillsSection(skillsSummary, cb.resolvedSkillsDiscovery()))
-	}
-
-	if len(cb.loadedSkills) > 0 {
-		if content := cb.skillsLoader.LoadSkillsForContext(cb.loadedSkills); content != "" {
-			parts = append(parts, "# Loaded Skills\n\n"+content)
-		}
 	}
 
 	if len(cb.availableSubagents) > 0 {
@@ -431,6 +527,11 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 
 func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string) string {
 	prompt := cb.BuildSystemPrompt()
+	if names := cb.renderablePinned(sessionKey); len(names) > 0 {
+		if content := cb.skillsLoader.LoadSkillsForContext(names); content != "" {
+			prompt = prompt + "\n\n---\n\n# Loaded Skills\n\n" + content
+		}
+	}
 	isNative := channel == "native" || strings.HasPrefix(sessionKey, "tui:") || strings.HasPrefix(sessionKey, "native:")
 	if isNative {
 		if harnessCtx := cb.getHarnessContext(); harnessCtx != "" {

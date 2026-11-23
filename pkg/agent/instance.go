@@ -236,7 +236,7 @@ func NewAgentInstance(
 	contextBuilder.SetSkillUsage(agentID, skillUsage)
 	toolsRegistry.Register(tools.NewSearchSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter))
 	toolsRegistry.Register(tools.NewListSkillsTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.SkillsInContext))
-	toolsRegistry.Register(tools.NewLoadSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.AddLoadedSkills))
+	toolsRegistry.Register(tools.NewLoadSkillTool(contextBuilder.SkillsLoader(), skillUsage, agentID, skillsFilter, contextBuilder.PinSkills, contextBuilder.UnpinSkills, contextBuilder.PinnedSkills))
 
 	if agentCfg != nil {
 		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, agentID)

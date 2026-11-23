@@ -279,6 +279,9 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 				}
 				al.sessionThinking.Delete(baseSessionKey)
 				al.dropSessionTools(baseSessionKey)
+				if sessionAgent != nil && sessionAgent.ContextBuilder != nil {
+					sessionAgent.ContextBuilder.ClearLoadedSkills(baseSessionKey)
+				}
 
 				return baseSessionKey
 			}
@@ -298,6 +301,9 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
 	al.setSessionAlias(baseSessionKey, newSessionKey)
 	al.dropSessionTools(baseSessionKey)
+	if sessionAgent != nil && sessionAgent.ContextBuilder != nil {
+		sessionAgent.ContextBuilder.ClearLoadedSkills(baseSessionKey)
+	}
 
 	if agentID != "" {
 		al.setSessionAgent(newSessionKey, agentID)
@@ -1115,6 +1121,9 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)
 	al.dropSessionTools(sessionKey)
+	if agent.ContextBuilder != nil {
+		agent.ContextBuilder.ClearLoadedSkills(sessionKey)
+	}
 	if agent.Sessions != nil {
 		agent.Sessions.SetThinkingLevel(sessionKey, "")
 		agent.Sessions.SetModel(sessionKey, "")

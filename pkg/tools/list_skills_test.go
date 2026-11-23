@@ -64,7 +64,7 @@ func TestListSkillsTool_OrdersByUsageMostUsedFirst(t *testing.T) {
 
 func TestListSkillsTool_ExcludesSkillsAlreadyInContext(t *testing.T) {
 	loader := newSkillToolLoader(t, "alpha", "beta", "gamma")
-	inContext := func() []string { return []string{"alpha", "gamma"} }
+	inContext := func(string) []string { return []string{"alpha", "gamma"} }
 	tool := NewListSkillsTool(loader, nil, "coder", nil, inContext)
 
 	res := tool.Execute(context.Background(), map[string]interface{}{})
@@ -78,7 +78,7 @@ func TestListSkillsTool_ExcludesSkillsAlreadyInContext(t *testing.T) {
 
 func TestListSkillsTool_AllInContextReportsNothingToList(t *testing.T) {
 	loader := newSkillToolLoader(t, "alpha")
-	tool := NewListSkillsTool(loader, nil, "coder", nil, func() []string { return []string{"alpha"} })
+	tool := NewListSkillsTool(loader, nil, "coder", nil, func(string) []string { return []string{"alpha"} })
 
 	res := tool.Execute(context.Background(), map[string]interface{}{})
 	if res.IsError || !strings.Contains(res.ForLLM, "already in the context") {
@@ -106,5 +106,33 @@ func TestListSkillsTool_RespectsAgentFilter(t *testing.T) {
 	res := tool.Execute(context.Background(), map[string]interface{}{})
 	if strings.Contains(res.ForLLM, "- alpha") || !strings.Contains(res.ForLLM, "- beta") {
 		t.Fatalf("filtered catalog must only offer beta: %s", res.ForLLM)
+	}
+}
+func TestListSkillsTool_ExclusionUsesContextSessionKey(t *testing.T) {
+	loader := newSkillToolLoader(t, "alpha", "beta")
+	var keys []string
+	inContext := func(sessionKey string) []string {
+		keys = append(keys, sessionKey)
+		if sessionKey == "chat-b" {
+			return []string{"alpha"}
+		}
+		return nil
+	}
+	tool := NewListSkillsTool(loader, nil, "coder", nil, inContext)
+
+	res := tool.Execute(WithAgentToolContext(context.Background(), "coder", "chat-b"), map[string]interface{}{})
+	if res.IsError {
+		t.Fatalf("list failed: %s", res.ForLLM)
+	}
+	if len(keys) != 1 || keys[0] != "chat-b" {
+		t.Fatalf("inContext saw session keys %v, want [chat-b]", keys)
+	}
+	if strings.Contains(res.ForLLM, "- alpha") || !strings.Contains(res.ForLLM, "- beta") {
+		t.Fatalf("exclusion must follow the calling session: %s", res.ForLLM)
+	}
+
+	bare := tool.Execute(context.Background(), map[string]interface{}{})
+	if !strings.Contains(bare.ForLLM, "- alpha") {
+		t.Fatalf("a bare context has no pins, alpha must be listed: %s", bare.ForLLM)
 	}
 }

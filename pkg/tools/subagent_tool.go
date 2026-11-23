@@ -126,6 +126,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 
 	taskCtx = WithVideoCaps(taskCtx, VideoCapabilities{Video: videoSupported, Vision: visionSupported})
+	taskCtx = WithSubagentScope(taskCtx)
 
 	loopResult, err := RunToolLoop(taskCtx, ToolLoopConfig{
 		Provider:                   agentProvider,

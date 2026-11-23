@@ -8,6 +8,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/skills"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 func TestContextSkills_ShowsOnlyTopFiveByUsage(t *testing.T) {
@@ -51,28 +52,31 @@ func TestContextSkills_NoUsageStillListsFive(t *testing.T) {
 	}
 }
 
-func TestAddLoadedSkills_PinsFullInstructionsIntoPrompt(t *testing.T) {
+func TestPinSkills_PinsFullInstructionsIntoSessionPrompt(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	writeTestSkill(t, workspace, "alpha", "the alpha skill")
 
 	cb := NewContextBuilder(workspace)
-	cb.AddLoadedSkills([]string{"alpha", "alpha"})
+	cb.PinSkills("", []string{"alpha", "alpha"})
 
-	prompt := cb.GetInitialContext()
+	prompt := cb.BuildSystemPromptForSession("", "")
 	if !strings.Contains(prompt, "# Loaded Skills") {
-		t.Fatalf("prompt missing the loaded skills section: %s", prompt)
+		t.Fatalf("session prompt missing the loaded skills section: %s", prompt)
 	}
 	if !strings.Contains(prompt, "### Skill: alpha") {
-		t.Fatalf("prompt missing the full instructions of the loaded skill: %s", prompt)
+		t.Fatalf("session prompt missing the full instructions of the loaded skill: %s", prompt)
 	}
 	if got := strings.Count(prompt, "### Skill: alpha"); got != 1 {
 		t.Fatalf("loaded skill appears %d times, want duplicates collapsed", got)
 	}
+	if strings.Contains(cb.GetInitialContext(), "# Loaded Skills") {
+		t.Fatal("the global prompt cache must never carry session pins")
+	}
 
 	cb.InvalidatePromptCache()
-	if !strings.Contains(cb.GetInitialContext(), "### Skill: alpha") {
-		t.Fatal("loaded skill must survive a prompt rebuild")
+	if !strings.Contains(cb.BuildSystemPromptForSession("", ""), "### Skill: alpha") {
+		t.Fatal("loaded skill must survive a prompt cache invalidation")
 	}
 }
 
@@ -101,7 +105,7 @@ func TestNewAgentInstance_LoadSkillPromotesIntoTopFive(t *testing.T) {
 		t.Fatal("search_skill tool not registered on the agent")
 	}
 
-	res := loadTool.Execute(context.Background(), map[string]interface{}{"skill": "zeta"})
+	res := loadTool.Execute(tools.WithAgentToolContext(context.Background(), agent.ID, "s1"), map[string]interface{}{"skill": "zeta"})
 	if res.IsError {
 		t.Fatalf("load_skill failed: %s", res.ForLLM)
 	}
@@ -111,8 +115,11 @@ func TestNewAgentInstance_LoadSkillPromotesIntoTopFive(t *testing.T) {
 	if len(names) != 5 || names[0] != "zeta" {
 		t.Fatalf("prompt skills after load = %v, want zeta promoted into the top 5", names)
 	}
-	if !strings.Contains(after, "### Skill: zeta") {
-		t.Fatal("loaded skill instructions must be pinned into the prompt")
+	if strings.Contains(after, "### Skill: zeta") {
+		t.Fatal("the global prompt cache must not carry the loaded skill body")
+	}
+	if !strings.Contains(agent.ContextBuilder.BuildSystemPromptForSession("s1", ""), "### Skill: zeta") {
+		t.Fatal("loaded skill instructions must be pinned into the session prompt")
 	}
 
 	persisted := skills.NewUsageStore(filepath.Join(configDir, "skills_usage.json"))
@@ -133,9 +140,9 @@ func TestSkillsInContext_TopFivePlusLoadedWithoutDuplicates(t *testing.T) {
 
 	cb := NewContextBuilder(workspace)
 	cb.SetSkillUsage("coder", usage)
-	cb.AddLoadedSkills([]string{"gamma", "zeta"})
+	cb.PinSkills("", []string{"gamma", "zeta"})
 
-	got := cb.SkillsInContext()
+	got := cb.SkillsInContext("")
 	if len(got) != 6 {
 		t.Fatalf("SkillsInContext = %v, want the top 5 plus the loaded skill outside it, without duplicates", got)
 	}
@@ -166,7 +173,7 @@ func TestNewAgentInstance_ListSkillsExcludesWhatIsAlreadyInContext(t *testing.T)
 		t.Fatal("list_skills tool not registered on the agent")
 	}
 
-	before := listTool.Execute(context.Background(), map[string]interface{}{})
+	before := listTool.Execute(tools.WithAgentToolContext(context.Background(), agent.ID, "s1"), map[string]interface{}{})
 	if before.IsError {
 		t.Fatalf("list_skills failed: %s", before.ForLLM)
 	}
@@ -181,13 +188,17 @@ func TestNewAgentInstance_ListSkillsExcludesWhatIsAlreadyInContext(t *testing.T)
 	}
 
 	loadTool, _ := agent.Tools.Get("load_skill")
-	if res := loadTool.Execute(context.Background(), map[string]interface{}{"skill": "zeta"}); res.IsError {
+	if res := loadTool.Execute(tools.WithAgentToolContext(context.Background(), agent.ID, "s1"), map[string]interface{}{"skill": "zeta"}); res.IsError {
 		t.Fatalf("load_skill failed: %s", res.ForLLM)
 	}
 
-	after := listTool.Execute(context.Background(), map[string]interface{}{})
+	after := listTool.Execute(tools.WithAgentToolContext(context.Background(), agent.ID, "s1"), map[string]interface{}{})
 	if strings.Contains(after.ForLLM, "- zeta ") {
 		t.Fatalf("loaded skill must disappear from list_skills: %s", after.ForLLM)
+	}
+
+	if prompt := agent.ContextBuilder.BuildSystemPromptForSession("s2", ""); strings.Contains(prompt, "### Skill: zeta") {
+		t.Fatalf("the pin loaded in s1 leaked into s2's prompt: %s", prompt)
 	}
 }
 

@@ -20,12 +20,12 @@ type ListSkillsTool struct {
 	usage     *skills.UsageStore
 	agentID   string
 	filter    []string
-	inContext func() []string
+	inContext func(sessionKey string) []string
 }
 
 var _ Tool = (*ListSkillsTool)(nil)
 
-func NewListSkillsTool(loader *skills.SkillsLoader, usage *skills.UsageStore, agentID string, filter []string, inContext func() []string) *ListSkillsTool {
+func NewListSkillsTool(loader *skills.SkillsLoader, usage *skills.UsageStore, agentID string, filter []string, inContext func(sessionKey string) []string) *ListSkillsTool {
 	return &ListSkillsTool{loader: loader, usage: usage, agentID: agentID, filter: filter, inContext: inContext}
 }
 
@@ -33,7 +33,7 @@ func (t *ListSkillsTool) Name() string { return ListSkillsName }
 
 func (t *ListSkillsTool) Description() string {
 	return "List the skill catalog, paginated and ordered by usage frequency (most used first), " +
-		"excluding skills already in the context. Returns names and short descriptions only. " +
+		"excluding skills already in this session's context. Returns names and short descriptions only. " +
 		"Use search_skill to find skills by keyword, and load_skill to load full instructions into the context."
 }
 
@@ -66,7 +66,8 @@ func (t *ListSkillsTool) Execute(ctx context.Context, args map[string]interface{
 
 	excluded := make(map[string]struct{})
 	if t.inContext != nil {
-		for _, name := range t.inContext() {
+		_, sessionKey := AgentToolContextFromCtx(ctx)
+		for _, name := range t.inContext(sessionKey) {
 			excluded[name] = struct{}{}
 		}
 	}
