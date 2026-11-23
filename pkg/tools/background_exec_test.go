@@ -512,3 +512,22 @@ func TestBackgroundProcessVisibleTo_SessionFamily(t *testing.T) {
 		})
 	}
 }
+
+func TestBackgroundProcessManager_MarkCompletedKeepsStopped(t *testing.T) {
+	mgr := NewBackgroundProcessManager()
+
+	registerTestProcess(t, mgr, "killed-cmd")
+	if !mgr.Stop("bg-1") {
+		t.Fatal("expected Stop('bg-1') to return true")
+	}
+
+	mgr.MarkCompleted("bg-1", -1)
+
+	p, _ := mgr.Get("bg-1")
+	if p.Status != BgExecStatusStopped {
+		t.Fatalf("expected a late MarkCompleted to keep status 'stopped', got %q", p.Status)
+	}
+	if p.ExitCode != 0 {
+		t.Fatalf("expected the kill exit code to be discarded, got %d", p.ExitCode)
+	}
+}

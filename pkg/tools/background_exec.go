@@ -363,6 +363,10 @@ func (m *BackgroundProcessManager) MarkCompleted(id string, exitCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.Status != BgExecStatusRunning {
+		return
+	}
+
 	if exitCode == 0 {
 		p.Status = BgExecStatusCompleted
 	} else {
