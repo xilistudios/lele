@@ -234,7 +234,11 @@ const (
 func rawDocumentFromFile(path string) (map[string]json.RawMessage, documentState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, documentMissing, nil
+		if os.IsNotExist(err) {
+			return nil, documentMissing, nil
+		}
+		// unreadable is treated as corrupt: refuse to save rather than clobber
+		return nil, documentCorrupt, err
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
