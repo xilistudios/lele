@@ -245,7 +245,7 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 			candidateHasImages := getSupportsImages(lc.al.cfg(), candidateModel, provider)
 			candidateHasVideo := getSupportsVideo(lc.al.cfg(), candidateModel, provider)
 			if !candidateHasImages || !candidateHasVideo {
-				messages = stripContentParts(messages, !candidateHasImages, !candidateHasVideo)
+				messages = providers.StripContentParts(messages, !candidateHasImages, !candidateHasVideo)
 			}
 
 			providerInst, err := providers.CreateProviderForCandidate(lc.al.cfg(), provider)

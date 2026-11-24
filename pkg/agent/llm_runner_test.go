@@ -2679,7 +2679,7 @@ func partTypes(messages []providers.Message) []string {
 }
 
 func TestStripContentParts_DropsVideoOnly(t *testing.T) {
-	got := stripContentParts(stripTestMessages(), false, true)
+	got := providers.StripContentParts(stripTestMessages(), false, true)
 	types := partTypes(got)
 	want := []string{"text", "image_url"}
 	if !reflect.DeepEqual(types, want) {
@@ -2691,7 +2691,7 @@ func TestStripContentParts_DropsVideoOnly(t *testing.T) {
 }
 
 func TestStripContentParts_DropsImageOnly(t *testing.T) {
-	got := stripContentParts(stripTestMessages(), true, false)
+	got := providers.StripContentParts(stripTestMessages(), true, false)
 	types := partTypes(got)
 	want := []string{"text", "video_url"}
 	if !reflect.DeepEqual(types, want) {
@@ -2700,7 +2700,7 @@ func TestStripContentParts_DropsImageOnly(t *testing.T) {
 }
 
 func TestStripContentParts_DropsBoth(t *testing.T) {
-	got := stripContentParts(stripTestMessages(), true, true)
+	got := providers.StripContentParts(stripTestMessages(), true, true)
 	types := partTypes(got)
 	want := []string{"text"}
 	if !reflect.DeepEqual(types, want) {
@@ -2710,7 +2710,7 @@ func TestStripContentParts_DropsBoth(t *testing.T) {
 
 func TestStripContentParts_NeitherFlagIsIdentity(t *testing.T) {
 	msgs := stripTestMessages()
-	got := stripContentParts(msgs, false, false)
+	got := providers.StripContentParts(msgs, false, false)
 	if &got[0] != &msgs[0] {
 		t.Error("expected input returned unchanged (same backing array) when no flags are set")
 	}
@@ -2728,18 +2728,9 @@ func TestStripContentParts_PreservesNonMediaParts(t *testing.T) {
 			{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4"}},
 		}},
 	}
-	got := stripContentParts(msgs, true, true)
+	got := providers.StripContentParts(msgs, true, true)
 	types := partTypes(got)
 	want := []string{"text", "input_audio"}
-	if !reflect.DeepEqual(types, want) {
-		t.Errorf("part types = %v, want %v", types, want)
-	}
-}
-
-func TestStripImageContentParts_Wrapper(t *testing.T) {
-	got := stripImageContentParts(stripTestMessages())
-	types := partTypes(got)
-	want := []string{"text", "video_url"}
 	if !reflect.DeepEqual(types, want) {
 		t.Errorf("part types = %v, want %v", types, want)
 	}

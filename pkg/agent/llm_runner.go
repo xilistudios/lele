@@ -499,7 +499,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, modelHasVideo, nil)
 
 		if !modelHasVision || !modelHasVideo {
-			messages = stripContentParts(messages, !modelHasVision, !modelHasVideo)
+			messages = providers.StripContentParts(messages, !modelHasVision, !modelHasVideo)
 		}
 
 		if agent.Sessions.GetMode(opts.SessionKey) == "chat" {
@@ -804,7 +804,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		}
 
 		if !modelHasVision || !modelHasVideo {
-			allContextMsgs = stripContentParts(allContextMsgs, !modelHasVision, !modelHasVideo)
+			allContextMsgs = providers.StripContentParts(allContextMsgs, !modelHasVision, !modelHasVideo)
 		}
 		for _, ctxMsg := range allContextMsgs {
 			messages = append(messages, ctxMsg)
@@ -869,36 +869,6 @@ func iterationMsgID(baseID string, iteration int) string {
 		return fmt.Sprintf("%s-%d", baseID, iteration)
 	}
 	return baseID
-}
-
-func stripContentParts(messages []providers.Message, dropImage, dropVideo bool) []providers.Message {
-	if !dropImage && !dropVideo {
-		return messages
-	}
-	stripped := make([]providers.Message, len(messages))
-	for i, msg := range messages {
-		if len(msg.ContentParts) == 0 {
-			stripped[i] = msg
-			continue
-		}
-		filtered := make([]providers.ContentPart, 0, len(msg.ContentParts))
-		for _, part := range msg.ContentParts {
-			if dropImage && part.Type == "image_url" {
-				continue
-			}
-			if dropVideo && part.Type == "video_url" {
-				continue
-			}
-			filtered = append(filtered, part)
-		}
-		stripped[i] = msg
-		stripped[i].ContentParts = filtered
-	}
-	return stripped
-}
-
-func stripImageContentParts(messages []providers.Message) []providers.Message {
-	return stripContentParts(messages, true, false)
 }
 
 func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *AgentInstance, messages []providers.Message, model string, opts processOptions, iteration int) []providers.Message {
