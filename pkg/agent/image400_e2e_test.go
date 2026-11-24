@@ -145,7 +145,7 @@ func newImage400Env(t *testing.T, routerCap int64) *image400Env {
 		},
 	}
 	if !getSupportsImages(cfg, "test-provider:test-model", "test-provider") {
-		t.Fatal("test setup: model must resolve as vision-capable, or stripContentParts defeats the budget")
+		t.Fatal("test setup: model must resolve as vision-capable, or providers.StripContentParts defeats the budget")
 	}
 
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)

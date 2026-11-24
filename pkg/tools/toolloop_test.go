@@ -2,7 +2,10 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -32,14 +35,18 @@ type scriptedProvider struct {
 	mu        sync.Mutex
 	responses []*providers.LLMResponse
 	calls     int
+	msgs      [][]providers.Message // messages received on each Chat call
 }
 
-func (p *scriptedProvider) Chat(_ context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
+func (p *scriptedProvider) Chat(_ context.Context, messages []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.calls >= len(p.responses) {
 		return nil, fmt.Errorf("unexpected extra Chat call")
 	}
+	snapshot := make([]providers.Message, len(messages))
+	copy(snapshot, messages)
+	p.msgs = append(p.msgs, snapshot)
 	resp := p.responses[p.calls]
 	p.calls++
 	return resp, nil
@@ -614,5 +621,254 @@ func TestEstimateLoopTokens_TextOnlyUnchanged(t *testing.T) {
 	}
 	if want := (wantChars - oldChars) * 2 / 5; want == 0 {
 		t.Fatalf("test fixture too small: expected a nonzero documented delta, got 0")
+	}
+}
+
+// messagesAt returns the messages the provider received on call i (0-based).
+func (p *scriptedProvider) messagesAt(i int) []providers.Message {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if i >= len(p.msgs) {
+		return nil
+	}
+	return p.msgs[i]
+}
+
+// onePixelPNG is a valid 1x1 PNG used by image-injection tests.
+const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+func writeTestPNG(t *testing.T, dir string) string {
+	t.Helper()
+	data, err := base64.StdEncoding.DecodeString(onePixelPNG)
+	if err != nil {
+		t.Fatalf("decode test png: %v", err)
+	}
+	path := filepath.Join(dir, "pixel.png")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write test png: %v", err)
+	}
+	return path
+}
+
+// imagePartIn returns the first image_url ContentPart found in any message,
+// or nil when the conversation carries no image.
+func imagePartIn(msgs []providers.Message) *providers.ContentPart {
+	for _, m := range msgs {
+		for i, part := range m.ContentParts {
+			if part.Type == "image_url" && part.ImageURL != nil {
+				return &m.ContentParts[i]
+			}
+		}
+	}
+	return nil
+}
+
+// TestRunToolLoop_InjectsImageContextMessages is the regression test for the
+// subagent vision bug: read_image returns the image in ToolResult.ContextMessages,
+// and the loop must inject those messages into the conversation so the NEXT
+// LLM call actually receives the image — not just the textual "Image loaded"
+// tool result.
+func TestRunToolLoop_InjectsImageContextMessages(t *testing.T) {
+	dir := t.TempDir()
+	imgPath := writeTestPNG(t, dir)
+
+	registry := NewToolRegistry()
+	registry.Register(NewReadImageTool(dir, false))
+
+	p := &scriptedProvider{
+		responses: []*providers.LLMResponse{
+			{ToolCalls: []providers.ToolCall{{
+				ID:        "call-img",
+				Name:      "read_image",
+				Arguments: map[string]interface{}{"path": imgPath},
+			}}},
+			{Content: "I can see the image"},
+		},
+	}
+	rec := &recordingSessionRecorder{}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        p,
+		Model:           "test-model",
+		Tools:           registry,
+		MaxIterations:   5,
+		VisionSupported: true,
+		SessionRecorder: rec,
+		SessionKey:      "sess",
+	}, []providers.Message{{Role: "user", Content: "describe the image"}}, "", "")
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+	if result.Content != "I can see the image" {
+		t.Fatalf("unexpected final content: %q", result.Content)
+	}
+
+	// The second LLM call must carry the image as multimodal content.
+	second := p.messagesAt(1)
+	part := imagePartIn(second)
+	if part == nil {
+		t.Fatalf("second LLM call has no image_url content part; image never reached the model. messages: %+v", second)
+	}
+	if !strings.HasPrefix(part.ImageURL.URL, "data:image/png;base64,") {
+		t.Fatalf("image part URL is not a png data URL: %.60q", part.ImageURL.URL)
+	}
+
+	// Ordering: the tool result must immediately follow the assistant
+	// tool_calls message, and the image context message must come after all
+	// tool results (providers reject interleaved user messages).
+	assistantIdx, toolIdx, imageIdx := -1, -1, -1
+	for i, m := range second {
+		switch {
+		case m.Role == "assistant" && len(m.ToolCalls) > 0:
+			assistantIdx = i
+		case m.Role == "tool":
+			toolIdx = i
+		case m.Role == "user" && imagePartIn([]providers.Message{m}) != nil:
+			imageIdx = i
+		}
+	}
+	if assistantIdx < 0 || toolIdx != assistantIdx+1 || imageIdx != toolIdx+1 {
+		t.Fatalf("bad message ordering: assistant=%d tool=%d image=%d", assistantIdx, toolIdx, imageIdx)
+	}
+
+	// The image message must also be persisted in the subagent session.
+	if imagePartIn(rec.History("sess")) == nil {
+		t.Fatal("image context message was not recorded in the subagent session")
+	}
+}
+
+// contextMsgTool returns a multimodal context message regardless of vision
+// support, to exercise the capability stripping in the loop.
+type contextMsgTool struct{}
+
+func (contextMsgTool) Name() string        { return "ctxmedia" }
+func (contextMsgTool) Description() string { return "returns image context" }
+func (contextMsgTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{"type": "object"}
+}
+func (contextMsgTool) Execute(_ context.Context, _ map[string]interface{}) *ToolResult {
+	return &ToolResult{
+		ForLLM: "media loaded",
+		ContextMessages: []providers.Message{{
+			Role: "user",
+			ContentParts: []providers.ContentPart{
+				{Type: "text", Text: "look at this"},
+				{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64," + onePixelPNG}},
+			},
+		}},
+	}
+}
+
+// TestRunToolLoop_StripsImageContextWithoutVision ensures multimodal context
+// messages are stripped of image parts when the subagent model lacks vision,
+// so a non-vision model never receives image content (API error) — and the
+// stripped copy is what gets persisted, not the raw media.
+func TestRunToolLoop_StripsImageContextWithoutVision(t *testing.T) {
+	registry := NewToolRegistry()
+	registry.Register(contextMsgTool{})
+
+	p := &scriptedProvider{
+		responses: []*providers.LLMResponse{
+			{ToolCalls: []providers.ToolCall{{
+				ID:        "call-media",
+				Name:      "ctxmedia",
+				Arguments: map[string]interface{}{},
+			}}},
+			{Content: "done"},
+		},
+	}
+	rec := &recordingSessionRecorder{}
+
+	_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        p,
+		Model:           "test-model",
+		Tools:           registry,
+		MaxIterations:   5,
+		VisionSupported: false,
+		SessionRecorder: rec,
+		SessionKey:      "sess",
+	}, []providers.Message{{Role: "user", Content: "task"}}, "", "")
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+
+	second := p.messagesAt(1)
+	if imagePartIn(second) != nil {
+		t.Fatal("image_url part reached a non-vision model")
+	}
+	// The text part of the context message must survive the strip.
+	foundText := false
+	for _, m := range second {
+		for _, part := range m.ContentParts {
+			if part.Type == "text" && part.Text == "look at this" {
+				foundText = true
+			}
+		}
+	}
+	if !foundText {
+		t.Fatal("text part of the context message was lost during stripping")
+	}
+	// The persisted session must hold the stripped copy, never the raw image.
+	if imagePartIn(rec.History("sess")) != nil {
+		t.Fatal("raw image part was persisted in a non-vision subagent session")
+	}
+}
+
+// TestRunToolLoop_ContextMessagesAfterAllToolResults pins the ordering
+// invariant with TWO tool calls in one iteration: the context message must
+// come after ALL tool results, never interleaved between them (providers
+// reject a user message inside a tool-result block). A per-call injection
+// would pass a single-call fixture but fail here. The assertion runs against
+// the RECORDED session, not the provider's messages: HealToolCallPairs
+// repairs interleaved messages before each Chat call, so the wire copy
+// looks right even when the loop injected in the wrong place — the session
+// copy is never rewritten by the healer.
+func TestRunToolLoop_ContextMessagesAfterAllToolResults(t *testing.T) {
+	registry := NewToolRegistry()
+	registry.Register(contextMsgTool{})
+	registry.Register(mockTool{}) // "echo", plain text result
+
+	p := &scriptedProvider{
+		responses: []*providers.LLMResponse{
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-media", Name: "ctxmedia", Arguments: map[string]interface{}{}},
+				{ID: "call-echo", Name: "echo", Arguments: map[string]interface{}{}},
+			}},
+			{Content: "done"},
+		},
+	}
+	rec := &recordingSessionRecorder{}
+
+	_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        p,
+		Model:           "test-model",
+		Tools:           registry,
+		MaxIterations:   5,
+		VisionSupported: true,
+		SessionRecorder: rec,
+		SessionKey:      "sess",
+	}, []providers.Message{{Role: "user", Content: "task"}}, "", "")
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+
+	// Expected recorded sequence: user(task) → assistant(tool_calls) →
+	// tool → tool → user(image) → assistant(final).
+	history := rec.History("sess")
+	var roles []string
+	for _, m := range history {
+		roles = append(roles, m.Role)
+	}
+	want := []string{"user", "assistant", "tool", "tool", "user", "assistant"}
+	if len(roles) != len(want) {
+		t.Fatalf("recorded roles = %v, want %v", roles, want)
+	}
+	for i := range want {
+		if roles[i] != want[i] {
+			t.Fatalf("recorded roles = %v, want %v (context message interleaved between tool results)", roles, want)
+		}
+	}
+	if imagePartIn(history[4:5]) == nil {
+		t.Fatal("fifth recorded message is not the image context message")
 	}
 }

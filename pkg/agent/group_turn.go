@@ -228,7 +228,7 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			if toolResult != nil && len(toolResult.ContextMessages) > 0 {
 				ctxMsgs := toolResult.ContextMessages
 				if !modelHasVision || !modelHasVideo {
-					ctxMsgs = stripContentParts(ctxMsgs, !modelHasVision, !modelHasVideo)
+					ctxMsgs = providers.StripContentParts(ctxMsgs, !modelHasVision, !modelHasVideo)
 				}
 				messages = append(messages, ctxMsgs...)
 			}

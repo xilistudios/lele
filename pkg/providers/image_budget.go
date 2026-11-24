@@ -341,3 +341,35 @@ func ReduceImageParts(messages []Message, keepLastImages int) ([]Message, int) {
 	}
 	return reduced, evicted
 }
+
+// StripContentParts returns a copy of messages with the requested multimodal
+// ContentParts removed (image_url when dropImage, video_url when dropVideo).
+// It is used when the target model does not support the corresponding
+// modality: sending image/video content to a model without that capability
+// causes API errors, and historical messages may carry parts produced by a
+// different model or tool.
+func StripContentParts(messages []Message, dropImage, dropVideo bool) []Message {
+	if !dropImage && !dropVideo {
+		return messages
+	}
+	stripped := make([]Message, len(messages))
+	for i, msg := range messages {
+		if len(msg.ContentParts) == 0 {
+			stripped[i] = msg
+			continue
+		}
+		filtered := make([]ContentPart, 0, len(msg.ContentParts))
+		for _, part := range msg.ContentParts {
+			if dropImage && part.Type == "image_url" {
+				continue
+			}
+			if dropVideo && part.Type == "video_url" {
+				continue
+			}
+			filtered = append(filtered, part)
+		}
+		stripped[i] = msg
+		stripped[i].ContentParts = filtered
+	}
+	return stripped
+}

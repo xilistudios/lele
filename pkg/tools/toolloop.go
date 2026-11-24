@@ -479,6 +479,13 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		messages = append(messages, assistantMsg)
 		recordMessage(config, assistantMsg)
 
+		// Multimodal context messages (e.g. the image loaded by read_image)
+		// are collected here and injected after ALL tool results, mirroring
+		// the main agent loop (pkg/agent/llm_runner.go). Without this the
+		// subagent only sees the tool's textual ForLLM summary and never the
+		// image itself.
+		var contextMsgs []providers.Message
+
 		for _, tc := range assistantMsg.ToolCalls {
 			argsJSON, _ := json.Marshal(tc.Arguments)
 			argsPreview := utils.Truncate(string(argsJSON), 200)
@@ -562,6 +569,21 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 			if config.SessionRecorder != nil && config.SessionKey != "" {
 				config.SessionRecorder.AddFullMessage(config.SessionKey, toolResultMsg)
+			}
+
+			contextMsgs = append(contextMsgs, toolResult.ContextMessages...)
+		}
+
+		// Inject context messages (role "user") after all tool messages so the
+		// tool results stay contiguous right after the assistant tool_calls
+		// message, as providers require. Strip modalities the model lacks.
+		if len(contextMsgs) > 0 {
+			if !config.VisionSupported || !config.VideoSupported {
+				contextMsgs = providers.StripContentParts(contextMsgs, !config.VisionSupported, !config.VideoSupported)
+			}
+			for _, ctxMsg := range contextMsgs {
+				messages = append(messages, ctxMsg)
+				recordMessage(config, ctxMsg)
 			}
 		}
 
