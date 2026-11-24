@@ -141,7 +141,9 @@ type Config struct {
 	Commands map[string]CommandDefinition `json:"commands,omitempty"`
 	Harness  HarnessConfig                `json:"harness,omitempty"`
 
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	rawDoc map[string]json.RawMessage
+	base   *Config
 }
 
 type CommandDefinition struct {
@@ -178,6 +180,8 @@ func (c *Config) clone() *Config {
 	if err := json.Unmarshal(data, &cloned); err != nil {
 		return nil
 	}
+	cloned.rawDoc = c.rawDoc
+	cloned.base = c.base
 	return &cloned
 }
 
@@ -1303,26 +1307,45 @@ func DefaultConfig() *Config {
 
 var envVarRegex = regexp.MustCompile(`\{\{ENV_([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}\}`)
 
-func expandEnvVars(data []byte) []byte {
-	return envVarRegex.ReplaceAllFunc(data, func(match []byte) []byte {
-		submatches := envVarRegex.FindSubmatch(match)
+func expandEnvString(value string) string {
+	if !strings.Contains(value, "{{ENV_") {
+		return value
+	}
+	return envVarRegex.ReplaceAllStringFunc(value, func(match string) string {
+		submatches := envVarRegex.FindStringSubmatch(match)
 		if len(submatches) < 2 {
 			return match
 		}
 
-		envName := string(submatches[1])
-		envValue := os.Getenv(envName)
-
+		envValue := os.Getenv(submatches[1])
 		if envValue != "" {
-			return []byte(envValue)
+			return envValue
 		}
 
-		if len(submatches) > 2 && string(submatches[2]) != "" {
+		if len(submatches) > 2 && submatches[2] != "" {
 			return submatches[2]
 		}
 
-		return []byte{}
+		return ""
 	})
+}
+
+func expandEnvTree(node interface{}) interface{} {
+	switch value := node.(type) {
+	case string:
+		return expandEnvString(value)
+	case map[string]interface{}:
+		for key, item := range value {
+			value[key] = expandEnvTree(item)
+		}
+		return value
+	case []interface{}:
+		for i, item := range value {
+			value[i] = expandEnvTree(item)
+		}
+		return value
+	}
+	return node
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -1336,24 +1359,34 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	data = expandEnvVars(data)
+	var tree interface{}
+	if err := decodeJSONValue(data, &tree); err != nil {
+		return nil, err
+	}
+
+	var rawDoc map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawDoc); err != nil {
+		return nil, err
+	}
+
+	expanded, err := json.Marshal(expandEnvTree(tree))
+	if err != nil {
+		return nil, err
+	}
 
 	sessionEphemeralConfigured := false
 	providersConfigured := false
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err == nil {
-		if sessionRaw, ok := raw["session"]; ok {
-			var rawSession map[string]json.RawMessage
-			if err := json.Unmarshal(sessionRaw, &rawSession); err == nil {
-				_, sessionEphemeralConfigured = rawSession["ephemeral"]
-			}
-		}
-		if providersRaw, ok := raw["providers"]; ok && len(providersRaw) > 2 {
-			providersConfigured = true
+	if sessionRaw, ok := rawDoc["session"]; ok {
+		var rawSession map[string]json.RawMessage
+		if err := json.Unmarshal(sessionRaw, &rawSession); err == nil {
+			_, sessionEphemeralConfigured = rawSession["ephemeral"]
 		}
 	}
+	if providersRaw, ok := rawDoc["providers"]; ok && len(providersRaw) > 2 {
+		providersConfigured = true
+	}
 
-	if err := json.Unmarshal(data, cfg); err != nil {
+	if err := json.Unmarshal(expanded, cfg); err != nil {
 		return nil, err
 	}
 	if !sessionEphemeralConfigured {
@@ -1374,6 +1407,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.base = cfg.clone()
+	cfg.rawDoc = rawDoc
 	return cfg, nil
 }
 
@@ -1392,15 +1427,25 @@ func (c *Config) Reload(path string) error {
 
 	c.Agents = loaded.Agents
 	c.Bindings = loaded.Bindings
+	c.Groups = loaded.Groups
 	c.Session = loaded.Session
 	c.Channels = loaded.Channels
 	c.Providers = loaded.Providers
 	c.Gateway = loaded.Gateway
+	c.Server = loaded.Server
 	c.Tools = loaded.Tools
 	c.Heartbeat = loaded.Heartbeat
 	c.Devices = loaded.Devices
 	c.Logs = loaded.Logs
 	c.Keyring = loaded.Keyring
+	c.Updates = loaded.Updates
+	c.Goal = loaded.Goal
+	c.Language = loaded.Language
+	c.TUI = loaded.TUI
+	c.Commands = loaded.Commands
+	c.Harness = loaded.Harness
+	c.rawDoc = loaded.rawDoc
+	c.base = loaded.base
 	return nil
 }
 
@@ -1414,53 +1459,55 @@ func DefaultConfigPath() string {
 	return filepath.Join(GetLeleDir(), "config.json")
 }
 
+var errConfigIsNil = fmt.Errorf("config is nil")
+
 func SaveConfig(path string, cfg *Config) error {
+	if cfg == nil {
+		return errConfigIsNil
+	}
+
 	cfg.mu.RLock()
-	defer cfg.mu.RUnlock()
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	tmp, err := os.CreateTemp(dir, ".lele-config-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			os.Remove(tmpName)
+	next, err := jsonTreeOf(cfg)
+	var base map[string]interface{}
+	if err == nil {
+		snapshot := cfg.base
+		if snapshot == nil {
+			snapshot = DefaultConfig()
 		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
+		base, err = jsonTreeOf(snapshot)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
+	raw := rawDocumentOr(path, cfg.rawDoc)
+	cfg.mu.RUnlock()
+	if err != nil {
 		return err
 	}
 
-	if err := os.Rename(tmpName, path); err != nil {
+	merged, err := mergeConfigDocument(raw, base, next)
+	if err != nil {
 		return err
 	}
-	committed = true
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeConfigFile(path, data); err != nil {
+		return err
+	}
+	cfg.markSaved(merged)
 	return nil
+}
+
+func (c *Config) markSaved(raw map[string]json.RawMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snapshot := c.clone()
+	if snapshot == nil {
+		return
+	}
+	snapshot.base = nil
+	snapshot.rawDoc = nil
+	c.rawDoc = raw
+	c.base = snapshot
 }
 
 func (c *Config) TelegramVerbose() VerboseLevel {

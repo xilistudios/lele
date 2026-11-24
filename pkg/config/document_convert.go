@@ -3,8 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 )
 
 func (doc *EditableDocument) ToConfig() (*Config, error) {
@@ -222,23 +220,49 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 }
 
 func SaveEditableDocument(path string, doc *EditableDocument) error {
-	serializable := doc.toSerializable()
-
-	data, err := json.MarshalIndent(serializable, "", "  ")
+	next, err := jsonTreeOf(doc.toSerializable())
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+	raw, exists := rawDocumentFromFile(path)
+	var base map[string]interface{}
+	if exists {
+		base, err = baseDocumentForFile(path)
+		if err != nil {
+			return err
+		}
+	} else {
+		raw = map[string]json.RawMessage{}
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	merged, err := mergeConfigDocument(raw, base, next)
+	if err != nil {
+		return fmt.Errorf("failed to merge config: %w", err)
+	}
+
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := writeConfigFile(path, data); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	return nil
+}
+
+func baseDocumentForFile(path string) (map[string]interface{}, error) {
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load current config: %w", err)
+	}
+	base, err := jsonTreeOf(editableDocumentFromConfig(loaded).toSerializable())
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return base, nil
 }
 
 func SaveMinimalConfig(path string, cfg *Config) error {

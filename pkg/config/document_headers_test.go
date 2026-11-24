@@ -153,7 +153,7 @@ func TestEditableDocument_WebUIPartialSaveKeepsProviderHeaders(t *testing.T) {
 	saved := readSavedJSON(t, path)
 	providers := savedSection(t, saved, "providers")
 	block := savedBlock(t, providers, "llmproxy",
-		"type", "api_base", "proxy", "auth_method", "api_key", "headers")
+		"type", "api_base", "api_key", "headers")
 	if got := block["headers"]; !reflect.DeepEqual(got, toRawJSONMap(wantProxyHeaders)) {
 		t.Fatalf("saved headers = %v, want %v", got, wantProxyHeaders)
 	}
@@ -367,7 +367,7 @@ func TestEditableDocument_EnvPlaceholderHeaderSurvivesWebUIPartialSave(t *testin
 	}
 	saved := readSavedJSON(t, path)
 	block := savedBlock(t, savedSection(t, saved, "providers"), "llmproxy",
-		"type", "api_base", "proxy", "auth_method", "api_key", "headers")
+		"type", "api_base", "api_key", "headers")
 	want := map[string]string{"x-gw-token": "{{ENV_LELE_TEST_GW_TOKEN}}", "x-opencode-session": "{{session}}"}
 	if got := block["headers"]; !reflect.DeepEqual(got, toRawJSONMap(want)) {
 		t.Fatalf("saved headers = %v, want %v", got, want)
