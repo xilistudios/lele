@@ -158,6 +158,10 @@ func TestMigrations_UpgradeV7ToV8_PreservesSessions(t *testing.T) {
 		db.Close()
 		t.Fatalf("DROP agent_id: %v", err)
 	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS usage_counters`); err != nil {
+		db.Close()
+		t.Fatalf("DROP usage_counters: %v", err)
+	}
 	if _, err := db.Exec(`UPDATE schema_meta SET value = '7' WHERE key = 'schema_version'`); err != nil {
 		db.Close()
 		t.Fatalf("downgrade schema_version: %v", err)

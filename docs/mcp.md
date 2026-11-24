@@ -1009,33 +1009,44 @@ Rules of the bridge:
 The listing ranking comes from counters the client keeps, not from the
 (tiny, per-session) loaded set:
 
-- **Where:** `<LeleDir>/mcp_usage.json` — next to `mcp.json` and the auth
-  store — as a nested object `{"<server>": {"<remoteTool>": <call count>}}`
-  keyed by the **remote** tool name (the name on the server, not the
-  namespaced registry name).
+- **Where:** the shared SQLite store (`<LeleDir>/lele.db`, table
+  `usage_counters`, scope `mcp`), keyed by server and the **remote** tool
+  name (the name on the server, not the namespaced registry name). On
+  platforms without SQLite support (linux/mips64) the backend falls back to
+  the legacy `<LeleDir>/mcp_usage.json` file — a nested object
+  `{"<server>": {"<remoteTool>": <call count>}}`.
 - **When:** every call that actually reaches the server increments its
   counter **once**, in `Manager.CallRemote`. A result carrying `isError` still
   counts (the tool *was* used, and a tool that keeps failing is exactly what a
   ranking should surface); a transport failure, an auth challenge or a
   cancelled caller counts nothing.
-- **How it is written:** `0600`, atomically — the JSON goes to a temp file in
-  the same directory and is renamed over the target, so a reader always sees a
-  complete file and a crash can never leave a half-written one. No `fsync`:
-  losing one increment after a hard crash is harmless, the counts only rank
-  tools. Each write is a **read/merge/replace** of the pending increments
-  rather than a dump of one manager's snapshot, and the whole sequence runs
-  under a cross-process lock on a `mcp_usage.json.lock` sidecar (an
-  `O_CREATE|O_EXCL` sentinel, so it behaves the same on every platform), so
-  several managers sharing a `LeleDir` (an agent's manager plus a probe, or a
-  second `lele` process) keep each other's counts — including when they write
-  at the same moment. The lock is best-effort like the rest of the file: a
-  sidecar older than 10 s is reclaimed, and a lock that cannot be taken within
-  1 s is logged and the increment stays pending, so it goes out with the next
-  increment instead of being written unlocked.
+- **How it is written:** increments are merged **inside SQLite**
+  (`INSERT … ON CONFLICT DO UPDATE SET count = count + …` in one
+  transaction), so several managers sharing a `LeleDir` (an agent's manager
+  plus a probe, or a second `lele` process) keep each other's counts even
+  when they write at the same moment — no read/merge/replace cycle over a
+  shared file. A legacy `mcp_usage.json` found next to the store is imported
+  **once** (guarded by the cross-process file lock) and renamed to
+  `mcp_usage.json.migrated`; the database is authoritative afterwards — a
+  stale file found next to an already-populated scope is retired (renamed)
+  without merging, with a warning. In
+  the file fallback each write is a read/merge/replace of the pending
+  increments under a `mcp_usage.json.lock` sidecar (an `O_CREATE|O_EXCL`
+  sentinel, so it behaves the same on every platform), written `0600` and
+  atomically (temp file + rename, no `fsync`: losing one increment after a
+  hard crash is harmless, the counts only rank tools). The lock is
+  best-effort: a sidecar older than 10 s is reclaimed, and a lock that
+  cannot be taken within 1 s is logged and the increment stays pending, so
+  it goes out with the next increment instead of being written unlocked.
+  SQLite writes share the store's `busy_timeout(5000)`: a write colliding
+  with another process's write transaction waits up to 5 s and then keeps
+  the increment pending; lele's write transactions are sub-millisecond, so
+  contention resolves immediately in practice.
 - **Best-effort by contract:** usage tracking never breaks a tool call. A
-  missing or corrupt file starts from empty counts with a single warning, a
-  failed write is a logged warning and a delayed increment, and a manager with
-  no known `LeleDir` keeps its counters in memory only.
+  missing or corrupt counter source starts from empty counts with a single
+  warning, a failed write is a logged warning and a delayed increment, and a
+  manager with no known `LeleDir` keeps its counters in memory only when no
+  store is wired; with the shared store wired they persist there.
 
 ### Allowlist
 

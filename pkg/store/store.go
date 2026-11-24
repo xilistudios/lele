@@ -15,6 +15,8 @@ type Store struct {
 	clients  *NativeClientRepo
 	sessions *SessionRepo
 	spool    *SpoolRepo
+
+	usage *UsageRepo
 }
 
 func Open(path string) (*Store, error) {
@@ -50,6 +52,8 @@ func Open(path string) (*Store, error) {
 		clients:  &NativeClientRepo{db: db},
 		sessions: &SessionRepo{db: db},
 		spool:    &SpoolRepo{db: db},
+
+		usage: &UsageRepo{db: db},
 	}, nil
 }
 
@@ -87,6 +91,10 @@ func (s *Store) Sessions() *SessionRepo {
 
 func (s *Store) Spool() *SpoolRepo {
 	return s.spool
+}
+
+func (s *Store) Usage() *UsageRepo {
+	return s.usage
 }
 
 func (s *Store) Close() error {

@@ -15,6 +15,7 @@ import (
 
 func newSkillReloadFixture(t *testing.T, name string, allowedTools []string) (*config.Config, string) {
 	t.Helper()
+	pinFileUsageMode(t)
 	workspace := t.TempDir()
 	for _, skillName := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"} {
 		writeTestSkill(t, workspace, skillName, "the "+skillName+" skill")
@@ -310,6 +311,7 @@ func TestSubagentUnloadKeepsOwnerSessionPins(t *testing.T) {
 
 func newSpawnSkillReloadFixture(t *testing.T, name string) (*config.Config, string) {
 	t.Helper()
+	pinFileUsageMode(t)
 	workspace := t.TempDir()
 	for _, skillName := range []string{"alpha", "beta", "zeta"} {
 		writeTestSkill(t, workspace, skillName, "the "+skillName+" skill")

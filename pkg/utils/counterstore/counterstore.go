@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/utils/filelock"
@@ -101,4 +102,75 @@ func warn(label, message, path string, err error) {
 		"path":  path,
 		"error": err.Error(),
 	})
+}
+
+// UsageRepo is the subset of *store.UsageRepo needed to persist counters in
+// SQLite. It is declared as an interface so this utility package does not
+// depend on pkg/store.
+type UsageRepo interface {
+	LoadUsage(scope string) (map[string]map[string]uint64, error)
+	MergeUsage(scope string, pending map[string]map[string]uint64) (map[string]map[string]uint64, error)
+	ReplaceUsage(scope string, counts map[string]map[string]uint64) error
+}
+
+// LoadWithRepo loads counters from the SQLite repo, importing the legacy
+// JSON file once when the scope is still empty. After a successful import
+// the legacy file is renamed to <path>.migrated so it stops being live JSON
+// state. The import is guarded by the same file lock used by MergeAndSave,
+// so concurrent processes import exactly once. repo must not be nil.
+func LoadWithRepo(path, label, scope string, repo UsageRepo) map[string]map[string]uint64 {
+	counts, err := repo.LoadUsage(scope)
+	if err != nil {
+		warn(label, "could not load usage from the store, starting with empty counts", path, err)
+		counts = make(map[string]map[string]uint64)
+	}
+	if path == "" {
+		return counts
+	}
+	if _, err := os.Stat(path); err != nil {
+		return counts
+	}
+
+	release, lockErr := filelock.Acquire(path)
+	defer release()
+	if lockErr != nil {
+		warn(label, "could not lock the legacy usage file for import", path, lockErr)
+		return counts
+	}
+	// Re-check under the lock: another process may have imported already.
+	if _, err := os.Stat(path); err != nil {
+		return counts
+	}
+
+	legacy := Load(path, label)
+	if len(counts) == 0 {
+		if len(legacy) > 0 {
+			merged, mergeErr := repo.MergeUsage(scope, legacy)
+			if mergeErr != nil {
+				warn(label, "could not import the legacy usage file into the store", path, mergeErr)
+				return counts
+			}
+			counts = merged
+		}
+	} else if len(legacy) > 0 {
+		// The store is authoritative once it holds counters for this scope:
+		// retire the stale file instead of leaving a second source of truth
+		// that a fallback-mode process would keep writing.
+		warn(label, "legacy usage file ignored and retired: the store already holds counters for this scope", path, fmt.Errorf("scope %q populated", scope))
+	}
+	if err := retireLegacyFile(path); err != nil {
+		warn(label, "could not rename the legacy usage file after import", path, err)
+	}
+	return counts
+}
+
+// retireLegacyFile renames the legacy file out of the way without ever
+// clobbering an existing .migrated backup (a previous retirement may hold
+// the only copy of counts the store never merged).
+func retireLegacyFile(path string) error {
+	target := path + ".migrated"
+	if _, err := os.Stat(target); err == nil {
+		target = fmt.Sprintf("%s.migrated.%d", path, time.Now().UnixNano())
+	}
+	return os.Rename(path, target)
 }

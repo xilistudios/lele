@@ -8,7 +8,9 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/store"
 )
 
@@ -54,6 +56,12 @@ func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 			t.Errorf("store.Close: %v", err)
 		}
 	}()
+	// The loop wires the usage repos globally; undo that so later tests
+	// do not inherit this (soon closed) store.
+	t.Cleanup(func() {
+		skills.SetUsageRepo(nil)
+		mcp.SetUsageRepo(nil)
+	})
 
 	al := NewAgentLoopWithStore(twoAgentConfig(t, tmpDir), bus.NewMessageBus(), db)
 	for _, id := range []string{"main", "coder"} {

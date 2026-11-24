@@ -33,7 +33,10 @@ lele skills list-builtin
 ## How Skills Reach the Agent Context
 
 To keep the system prompt small, the agent only sees the **5 most used skills**
-for its agent ID (usage is tracked per agent in `~/.lele/skills_usage.json`).
+for its agent ID (usage is tracked per agent in the SQLite `usage_counters`
+table, scope `skills`; the legacy `~/.lele/skills_usage.json` is imported once
+and renamed to `.migrated`, and remains the backend only where SQLite is
+unsupported).
 Until enough usage accumulates the window is filled in alphabetical order, so a
 fresh install shows the first five skills by name rather than the busiest ones.
 Three tools cover the rest of the catalog:

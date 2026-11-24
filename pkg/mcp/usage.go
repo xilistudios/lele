@@ -14,14 +14,42 @@ func warnUsage(message, path string, err error) {
 	})
 }
 
+var (
+	usageRepoMu sync.RWMutex
+	usageRepo   counterstore.UsageRepo
+)
+
+// SetUsageRepo switches MCP usage persistence to the shared SQLite store.
+// Passing nil restores the legacy JSON file backend (used on platforms
+// without SQLite support and in tests).
+func SetUsageRepo(repo counterstore.UsageRepo) {
+	usageRepoMu.Lock()
+	defer usageRepoMu.Unlock()
+	usageRepo = repo
+}
+
+func currentUsageRepo() counterstore.UsageRepo {
+	usageRepoMu.RLock()
+	defer usageRepoMu.RUnlock()
+	return usageRepo
+}
+
 type usageStore struct {
 	mu      sync.Mutex
 	path    string
+	repo    counterstore.UsageRepo
 	counts  map[string]map[string]uint64
 	pending map[string]map[string]uint64
 }
 
 func loadUsageStore(path string) *usageStore {
+	if repo := currentUsageRepo(); repo != nil {
+		return &usageStore{
+			path:   path,
+			repo:   repo,
+			counts: counterstore.LoadWithRepo(path, "mcp", "mcp", repo),
+		}
+	}
 	return &usageStore{path: path, counts: counterstore.Load(path, "mcp")}
 }
 
@@ -43,11 +71,11 @@ func (s *usageStore) inc(server, remote string) {
 	tools[remote]++
 	s.addPendingLocked(server, remote)
 
-	if s.path == "" {
+	if s.path == "" && s.repo == nil {
 		return
 	}
 	if err := s.saveLocked(); err != nil {
-		warnUsage("could not persist the MCP usage file", s.path, err)
+		warnUsage("could not persist the MCP usage counters", s.path, err)
 	}
 }
 
@@ -64,6 +92,15 @@ func (s *usageStore) addPendingLocked(server, remote string) {
 }
 
 func (s *usageStore) saveLocked() error {
+	if s.repo != nil {
+		merged, err := s.repo.MergeUsage("mcp", s.pending)
+		if err != nil {
+			return err
+		}
+		s.counts = merged
+		s.pending = nil
+		return nil
+	}
 	merged, err := counterstore.MergeAndSave(s.path, "mcp", s.pending)
 	if err != nil {
 		return err

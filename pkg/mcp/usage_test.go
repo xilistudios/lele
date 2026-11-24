@@ -14,6 +14,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/xilistudios/lele/pkg/store"
+	"github.com/xilistudios/lele/pkg/utils/counterstore"
 	"github.com/xilistudios/lele/pkg/utils/filelock"
 )
 
@@ -603,5 +605,94 @@ func TestToolUsageMemoryOnlyWithoutLeleDir(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "mcp_usage.json")); !os.IsNotExist(err) {
 			t.Errorf("a usage file was written to %s, want memory-only (err=%v)", dir, err)
 		}
+	}
+}
+func newTestUsageRepo(t *testing.T) *store.UsageRepo {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "usage.db"))
+	if err != nil {
+		if errors.Is(err, store.ErrUnsupportedPlatform) {
+			t.Skip("SQLite not supported on this platform")
+		}
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s.Usage()
+}
+
+func TestUsageStore_SQLite_PersistsAcrossReload(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	path := usagePath(t)
+	s := loadUsageStore(path)
+	s.inc("srv", "tool_a")
+	s.inc("srv", "tool_a")
+	s.inc("srv", "tool_b")
+
+	reloaded := loadUsageStore(path)
+	counts := reloaded.countsFor("srv")
+	if counts["tool_a"] != 2 || counts["tool_b"] != 1 {
+		t.Fatalf("reloaded counts = %v, want tool_a:2 tool_b:1", counts)
+	}
+
+	stored, err := repo.LoadUsage("mcp")
+	if err != nil {
+		t.Fatalf("LoadUsage: %v", err)
+	}
+	if stored["srv"]["tool_a"] != 2 || stored["srv"]["tool_b"] != 1 {
+		t.Fatalf("stored counts = %v, want tool_a:2 tool_b:1", stored)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("JSON usage file was created despite SQLite mode (stat err = %v)", err)
+	}
+}
+
+func TestUsageStore_SQLite_ImportsLegacyFile(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	path := usagePath(t)
+	if _, err := counterstore.MergeAndSave(path, "mcp", map[string]map[string]uint64{
+		"srv": {"tool_a": 3},
+	}); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	s := loadUsageStore(path)
+	if got := s.countsFor("srv")["tool_a"]; got != 3 {
+		t.Fatalf("imported count = %d, want 3", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("legacy file still present after import (stat err = %v)", err)
+	}
+	if _, err := os.Stat(path + ".migrated"); err != nil {
+		t.Fatalf("legacy file not renamed to .migrated: %v", err)
+	}
+
+	s.inc("srv", "tool_a")
+	if got := s.countsFor("srv")["tool_a"]; got != 4 {
+		t.Fatalf("count after inc = %d, want 4 (accumulates onto imported counts)", got)
+	}
+}
+
+func TestUsageStore_SQLite_EmptyPathPersists(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	// A manager with no known LeleDir still persists through the wired
+	// store (the counters live in the shared DB, not next to a LeleDir).
+	s := loadUsageStore("")
+	s.inc("srv", "tool_a")
+
+	stored, err := repo.LoadUsage("mcp")
+	if err != nil {
+		t.Fatalf("LoadUsage: %v", err)
+	}
+	if stored["srv"]["tool_a"] != 1 {
+		t.Fatalf("stored = %v, want srv.tool_a=1", stored)
 	}
 }
