@@ -42,8 +42,8 @@ func TestSerializeMessagesReloadNoDuplicateText(t *testing.T) {
 	}
 
 	reloaded := jsonRoundTripMessage(t, live)
-	if reloaded.Content == "" {
-		t.Fatal("expected reloaded message to carry synthesized Content")
+	if len(reloaded.ContentParts) != len(live.ContentParts) {
+		t.Fatalf("reloaded content parts = %+v, want the %d stored parts", reloaded.ContentParts, len(live.ContentParts))
 	}
 
 	liveWire := wireJSON(t, []Message{live})

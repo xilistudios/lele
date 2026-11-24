@@ -134,8 +134,17 @@ func TestEvictImageContent_PersistsAcrossReload(t *testing.T) {
 	if len(reloaded) != len(seeded) {
 		t.Fatalf("reloaded len = %d, want %d", len(reloaded), len(seeded))
 	}
-	if count, _ := providers.LiveMultimodalParts(reloaded); count != 0 {
-		t.Errorf("reloaded heavy parts = %d, want 0 (WEAK check: reload drops content_parts by construction; the durable proof is the row assertions above)", count)
+	if count, _ := providers.LiveMultimodalParts(reloaded); count != 1 {
+		t.Errorf("reloaded heavy parts = %d, want 1 (only the kept image survives the reload)", count)
+	}
+	if got := reloaded[0].ContentParts; len(got) != 1 || got[0].Text != "[image omitted from context]" {
+		t.Errorf("reloaded message 0 parts = %+v, want the placeholder text part", got)
+	}
+	if len(reloaded[1].ContentParts) != 0 || reloaded[1].Content != seeded[1].Content {
+		t.Errorf("reloaded message 1 = %+v, want the evicted parts gone and Content %q kept", reloaded[1], seeded[1].Content)
+	}
+	if got := reloaded[2].ContentParts; len(got) != 1 || got[0].ImageURL == nil {
+		t.Errorf("reloaded message 2 parts = %+v, want the kept image part", got)
 	}
 
 	n2, err := sm.EvictImageContent(key, 0)
@@ -154,8 +163,12 @@ func TestEvictImageContent_PersistsAcrossReload(t *testing.T) {
 	}
 	fresh2 := NewSessionManager()
 	fresh2.SetSessionRepo(st.Sessions())
-	if count, _ := providers.LiveMultimodalParts(fresh2.GetHistory(key)); count != 0 {
-		t.Errorf("reloaded heavy parts after keepLast=0 = %d, want 0 (WEAK check, see above)", count)
+	reloadedFinal := fresh2.GetHistory(key)
+	if count, _ := providers.LiveMultimodalParts(reloadedFinal); count != 0 {
+		t.Errorf("reloaded heavy parts after keepLast=0 = %d, want 0", count)
+	}
+	if got := reloadedFinal[2].ContentParts; len(got) != 1 || got[0].Type != "text" || got[0].Text != "[image omitted from context]" {
+		t.Errorf("reloaded message 2 parts after keepLast=0 = %+v, want the placeholder text part", got)
 	}
 }
 

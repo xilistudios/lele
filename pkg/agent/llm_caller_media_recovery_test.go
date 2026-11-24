@@ -226,7 +226,10 @@ func TestExecuteWithRetry_SizeRejectionCleansStoredSession(t *testing.T) {
 		t.Fatalf("reloaded history len = %d, want %d", len(reloaded), len(messages))
 	}
 	if count, _ := providers.LiveMultimodalParts(reloaded); count != 0 {
-		t.Errorf("reloaded history heavy parts = %d, want 0 (WEAK check: reload drops content_parts by construction; the durable proof is the row bytes below)", count)
+		t.Errorf("reloaded history heavy parts = %d, want 0", count)
+	}
+	if got := reloaded[1].ContentParts; len(got) != 2 || got[1].Type != "text" || got[1].Text != mediaRecoveryPlaceholder {
+		t.Errorf("reloaded image turn parts = %+v, want the prompt text plus the %q placeholder", got, mediaRecoveryPlaceholder)
 	}
 
 	rows, rErr := st.Sessions().LoadMessagesFromSeq(sessionKey, 0)

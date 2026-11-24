@@ -81,8 +81,8 @@ func TestBuildRequestBodyReloadedNoDuplication(t *testing.T) {
 	}
 
 	reloaded := jsonRoundTripMessage(t, live)
-	if reloaded.Content == "" {
-		t.Fatal("expected reloaded message to carry synthesized Content")
+	if len(reloaded.ContentParts) != len(live.ContentParts) {
+		t.Fatalf("reloaded content parts = %+v, want the %d stored parts", reloaded.ContentParts, len(live.ContentParts))
 	}
 
 	liveBody, err := buildRequestBody([]Message{live}, nil, "claude-sonnet-4-6", map[string]any{"max_tokens": 1024})
