@@ -41,6 +41,7 @@ type PendingPIN struct {
 	DeviceName string    `json:"device_name"`
 	Created    time.Time `json:"created"`
 	Expires    time.Time `json:"expires"`
+	Attempts   int       `json:"attempts,omitempty"`
 }
 
 type ClientStore struct {

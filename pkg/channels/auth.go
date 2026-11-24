@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,10 +36,15 @@ var ErrPairingUnavailable = errors.New("pairing unavailable")
 const DesktopClientID = "desktop-local"
 
 func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, error) {
+	secret, err := generateSecret()
+	if err != nil {
+		return nil, err
+	}
+
 	am := &AuthManager{
 		cfg:       cfg,
 		storePath: filepath.Join(leleDir, "native_clients.json"),
-		secret:    generateSecret(),
+		secret:    secret,
 	}
 
 	if err := am.loadStore(); err != nil {
@@ -124,38 +128,48 @@ func (am *AuthManager) pairingUnavailableErrLocked() error {
 	return fmt.Errorf("%w: this gateway could not open its SQLite store (%s) — pairing PINs live in that database, so none can be minted or redeemed here until the store is reachable again", ErrPairingUnavailable, am.storeUnavailable)
 }
 
-func generateSecret() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		log.Printf("[auth] CRITICAL: crypto/rand failed (%v); using a time-derived client secret fallback", err)
-		return fmt.Sprintf("fallback-secret-%d", time.Now().UnixNano())
+var errEntropyUnavailable = errors.New("crypto/rand unavailable")
+
+var randRead = rand.Read
+
+func readRandom(b []byte) error {
+	if _, err := randRead(b); err != nil {
+		return fmt.Errorf("%w: %v", errEntropyUnavailable, err)
 	}
-	return hex.EncodeToString(b)
+	return nil
 }
 
-func generatePIN() string {
+func generateSecret() (string, error) {
+	b := make([]byte, 32)
+	if err := readRandom(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func generatePIN() (string, error) {
 	b := make([]byte, 3)
-	if _, err := rand.Read(b); err != nil {
-		return "123456"
+	if err := readRandom(b); err != nil {
+		return "", err
 	}
 	num := int(b[0])<<16 | int(b[1])<<8 | int(b[2])
-	return fmt.Sprintf("%06d", num%1000000)
+	return fmt.Sprintf("%06d", num%1000000), nil
 }
 
-func generateToken() string {
+func generateToken() (string, error) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("fallback-token-%d", time.Now().UnixNano())
+	if err := readRandom(b); err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
-func generateClientID() string {
+func generateClientID() (string, error) {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("fallback-id-%d", time.Now().UnixNano())
+	if err := readRandom(b); err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 func hashToken(token string) string {
@@ -326,6 +340,21 @@ func (am *AuthManager) cleanupExpired() {
 
 const maxPendingPINs = 10
 
+const maxPINRetries = 20
+
+func (am *AuthManager) uniquePINLocked() (string, error) {
+	for i := 0; i < maxPINRetries; i++ {
+		pin, err := generatePIN()
+		if err != nil {
+			return "", err
+		}
+		if _, exists := am.store.PendingPINs[pin]; !exists {
+			return pin, nil
+		}
+	}
+	return "", fmt.Errorf("generate PIN: exhausted %d retries due to collisions", maxPINRetries)
+}
+
 func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -378,7 +407,10 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 			}
 		}
 
-		pin := generatePIN()
+		pin, err := generatePIN()
+		if err != nil {
+			return nil, err
+		}
 		createdAt := now.UnixNano()
 		expiresAt := now.Add(time.Duration(expiryMinutes) * time.Minute).UnixNano()
 		pendingJSON, _ := json.Marshal(&PendingPIN{
@@ -388,8 +420,7 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 			Expires:    now.Add(time.Duration(expiryMinutes) * time.Minute),
 		})
 
-		const maxRetries = 20
-		for i := 0; i < maxRetries; i++ {
+		for i := 0; i < maxPINRetries; i++ {
 			err := am.repo.InsertPendingPIN(pin, string(pendingJSON), createdAt, expiresAt)
 			if err == nil {
 				var pending PendingPIN
@@ -403,7 +434,10 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 				})
 				return nil, fmt.Errorf("generate PIN: %w", err)
 			}
-			pin = generatePIN()
+			pin, err = generatePIN()
+			if err != nil {
+				return nil, err
+			}
 			pendingJSON, _ = json.Marshal(&PendingPIN{
 				PIN:        pin,
 				DeviceName: deviceName,
@@ -412,7 +446,7 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 			})
 		}
 
-		return nil, fmt.Errorf("generate PIN: exhausted %d retries due to collisions", maxRetries)
+		return nil, fmt.Errorf("generate PIN: exhausted %d retries due to collisions", maxPINRetries)
 	}
 
 	am.cleanupExpired()
@@ -435,9 +469,9 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 		}
 	}
 
-	pin := generatePIN()
-	for _, exists := am.store.PendingPINs[pin]; exists; {
-		pin = generatePIN()
+	pin, err := am.uniquePINLocked()
+	if err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
@@ -459,6 +493,136 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 	return pending, nil
 }
 
+var errInvalidPIN = errors.New("invalid PIN")
+
+const maxPairAttempts = 5
+
+func (am *AuthManager) maxClients() int {
+	if am.cfg.MaxClients <= 0 {
+		return 5
+	}
+	return am.cfg.MaxClients
+}
+
+func resolveDeviceName(requested, fromPIN string) string {
+	if requested != "" {
+		return requested
+	}
+	if fromPIN != "" {
+		return fromPIN
+	}
+	return "Unknown Device"
+}
+
+func deviceNameRejection(pinDeviceName, requested string) string {
+	if pinDeviceName != "" && requested != "" && pinDeviceName != requested {
+		return "device name mismatch"
+	}
+	if pinDeviceName == "" && strings.TrimSpace(requested) == "" {
+		return "device_name is required"
+	}
+	return ""
+}
+
+func (am *AuthManager) newCredentials() (string, string, string, error) {
+	clientID, err := generateClientID()
+	if err != nil {
+		return "", "", "", err
+	}
+	token, err := generateToken()
+	if err != nil {
+		return "", "", "", err
+	}
+	refreshToken, err := generateToken()
+	if err != nil {
+		return "", "", "", err
+	}
+	return clientID, token, refreshToken, nil
+}
+
+func (am *AuthManager) newClient(clientID, token, refreshToken, deviceName string) *ClientInfo {
+	expiryDays := am.cfg.TokenExpiryDays
+	if expiryDays <= 0 {
+		expiryDays = 30
+	}
+	now := time.Now()
+	return &ClientInfo{
+		ClientID:    clientID,
+		TokenHash:   hashToken(token),
+		RefreshHash: hashToken(refreshToken),
+		DeviceName:  deviceName,
+		Created:     now,
+		Expires:     now.AddDate(0, 0, expiryDays),
+		LastSeen:    now,
+		SessionKeys: []string{clientID},
+	}
+}
+
+func (am *AuthManager) dropPendingPINLocked(pin string) {
+	delete(am.store.PendingPINs, pin)
+	if am.repo != nil {
+		if err := am.repo.DeletePendingPIN(pin); err != nil {
+			logger.ErrorCF("native", "Failed to delete pending PIN", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+		return
+	}
+	if err := am.saveStoreUnlocked(); err != nil {
+		logger.ErrorCF("native", "Failed to save store after deleting pending PIN", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+}
+
+func (am *AuthManager) persistPendingPINLocked(pin string, pending *PendingPIN) {
+	if am.repo == nil {
+		if err := am.saveStoreUnlocked(); err != nil {
+			logger.ErrorCF("native", "Failed to save store after a rejected pairing attempt", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+		return
+	}
+	blob, err := json.Marshal(pending)
+	if err != nil {
+		logger.ErrorCF("native", "Failed to marshal pending PIN", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err := am.repo.UpdatePendingPIN(pin, string(blob)); err != nil {
+		logger.ErrorCF("native", "Failed to persist rejected pairing attempt", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+}
+
+func (am *AuthManager) rejectPairAttemptLocked(pin string, pending *PendingPIN, requestedDevice, reason string) {
+	pending.Attempts++
+	burned := pending.Attempts >= maxPairAttempts
+
+	logger.WarnCF("native", "Pairing attempt rejected", map[string]interface{}{
+		"reason":          reason,
+		"device_name":     requestedDevice,
+		"failed_attempts": pending.Attempts,
+		"pin_burned":      burned,
+	})
+
+	if burned {
+		am.dropPendingPINLocked(pin)
+		return
+	}
+	am.persistPendingPINLocked(pin, pending)
+}
+
+func logPairingRejection(deviceName, reason string) {
+	logger.WarnCF("native", "Pairing attempt rejected", map[string]interface{}{
+		"reason":      reason,
+		"device_name": deviceName,
+	})
+}
+
 func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string, string, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -470,114 +634,95 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	}
 
 	if am.repo != nil {
+		return am.pairWithPINSQLiteLocked(pin, deviceName)
+	}
+	return am.pairWithPINJSONLocked(pin, deviceName)
+}
 
-		pendingJSON, expiresAt, found, err := am.repo.GetPendingPIN(pin)
-		if err != nil {
-			logger.ErrorCF("native", "PairWithPIN: GetPendingPIN failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return nil, "", "", fmt.Errorf("invalid PIN")
-		}
-		if !found {
-			return nil, "", "", fmt.Errorf("invalid PIN")
-		}
-
-		var pending PendingPIN
-		if err := json.Unmarshal([]byte(pendingJSON), &pending); err != nil {
-			logger.WarnCF("native", fmt.Sprintf("PairWithPIN: unmarshal pending PIN: %v", err), nil)
-			am.repo.DeletePendingPIN(pin)
-			return nil, "", "", fmt.Errorf("invalid PIN")
-		}
-
-		if expiresAt <= time.Now().UnixNano() {
-			am.repo.DeletePendingPIN(pin)
-			return nil, "", "", fmt.Errorf("PIN expired")
-		}
-
-		if pending.DeviceName != "" && deviceName != "" && pending.DeviceName != deviceName {
-			return nil, "", "", fmt.Errorf("device name mismatch")
-		}
-		if pending.DeviceName == "" && strings.TrimSpace(deviceName) == "" {
-			return nil, "", "", fmt.Errorf("device_name is required")
-		}
-
-		if deleted, err := am.repo.DeleteExpiredPendingPINs(time.Now().UnixNano()); err != nil {
-			logger.WarnCF("native", "PairWithPIN: DeleteExpiredPendingPINs failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-		} else if deleted > 0 {
-			logger.DebugCF("native", fmt.Sprintf("PairWithPIN: purged %d expired pending PINs", deleted), nil)
-		}
-
-		maxClients := am.cfg.MaxClients
-		if maxClients <= 0 {
-			maxClients = 5
-		}
-		clientCount, err := am.repo.CountClients()
-		if err != nil {
-			logger.ErrorCF("native", "PairWithPIN: CountClients failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return nil, "", "", fmt.Errorf("maximum clients reached")
-		}
-		if clientCount >= maxClients {
-			return nil, "", "", fmt.Errorf("maximum clients reached")
-		}
-
-		_, taken, err := am.repo.TakePendingPIN(pin, time.Now().UnixNano())
-		if err != nil {
-			logger.ErrorCF("native", "PairWithPIN: TakePendingPIN failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return nil, "", "", fmt.Errorf("invalid PIN")
-		}
-		if !taken {
-			return nil, "", "", fmt.Errorf("invalid PIN")
-		}
-
-		delete(am.store.PendingPINs, pin)
-
-		clientID := generateClientID()
-		token := generateToken()
-		refreshToken := generateToken()
-
-		expiryDays := am.cfg.TokenExpiryDays
-		if expiryDays <= 0 {
-			expiryDays = 30
-		}
-
-		finalDeviceName := deviceName
-		if finalDeviceName == "" {
-			finalDeviceName = pending.DeviceName
-		}
-		if finalDeviceName == "" {
-			finalDeviceName = "Unknown Device"
-		}
-
-		client := &ClientInfo{
-			ClientID:    clientID,
-			TokenHash:   hashToken(token),
-			RefreshHash: hashToken(refreshToken),
-			DeviceName:  finalDeviceName,
-			Created:     time.Now(),
-			Expires:     time.Now().AddDate(0, 0, expiryDays),
-			LastSeen:    time.Now(),
-			SessionKeys: []string{clientID},
-		}
-
-		am.store.Clients[clientID] = client
-
-		if err := am.persistClientLocked(clientID); err != nil {
-			delete(am.store.Clients, clientID)
-			logger.ErrorCF("native", "Failed to save store after pairing; removing in-memory client", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return nil, "", "", fmt.Errorf("pairing failed: could not persist client")
-		}
-
-		return client, token, refreshToken, nil
+func (am *AuthManager) pairWithPINSQLiteLocked(pin, deviceName string) (*ClientInfo, string, string, error) {
+	pendingJSON, expiresAt, found, err := am.repo.GetPendingPIN(pin)
+	if err != nil {
+		logger.ErrorCF("native", "PairWithPIN: GetPendingPIN failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, "", "", errInvalidPIN
+	}
+	if !found {
+		return nil, "", "", errInvalidPIN
 	}
 
+	var pending PendingPIN
+	if err := json.Unmarshal([]byte(pendingJSON), &pending); err != nil {
+		logger.WarnCF("native", fmt.Sprintf("PairWithPIN: unmarshal pending PIN: %v", err), nil)
+		am.dropPendingPINLocked(pin)
+		return nil, "", "", errInvalidPIN
+	}
+
+	if expiresAt <= time.Now().UnixNano() {
+		logPairingRejection(deviceName, "PIN expired")
+		am.dropPendingPINLocked(pin)
+		return nil, "", "", errInvalidPIN
+	}
+
+	if reason := deviceNameRejection(pending.DeviceName, deviceName); reason != "" {
+		am.rejectPairAttemptLocked(pin, &pending, deviceName, reason)
+		return nil, "", "", errInvalidPIN
+	}
+
+	if deleted, err := am.repo.DeleteExpiredPendingPINs(time.Now().UnixNano()); err != nil {
+		logger.WarnCF("native", "PairWithPIN: DeleteExpiredPendingPINs failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+	} else if deleted > 0 {
+		logger.DebugCF("native", fmt.Sprintf("PairWithPIN: purged %d expired pending PINs", deleted), nil)
+	}
+
+	clientCount, err := am.repo.CountClients()
+	if err != nil {
+		logger.ErrorCF("native", "PairWithPIN: CountClients failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, "", "", errInvalidPIN
+	}
+	if clientCount >= am.maxClients() {
+		am.rejectPairAttemptLocked(pin, &pending, deviceName, "maximum clients reached")
+		return nil, "", "", errInvalidPIN
+	}
+
+	clientID, token, refreshToken, err := am.newCredentials()
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	_, taken, err := am.repo.TakePendingPIN(pin, time.Now().UnixNano())
+	if err != nil {
+		logger.ErrorCF("native", "PairWithPIN: TakePendingPIN failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, "", "", errInvalidPIN
+	}
+	if !taken {
+		logPairingRejection(deviceName, "PIN already redeemed")
+		return nil, "", "", errInvalidPIN
+	}
+
+	delete(am.store.PendingPINs, pin)
+
+	client := am.newClient(clientID, token, refreshToken, resolveDeviceName(deviceName, pending.DeviceName))
+	am.store.Clients[clientID] = client
+
+	if err := am.persistClientLocked(clientID); err != nil {
+		delete(am.store.Clients, clientID)
+		logger.ErrorCF("native", "Failed to save store after pairing; removing in-memory client", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, "", "", fmt.Errorf("pairing failed: could not persist client")
+	}
+
+	return client, token, refreshToken, nil
+}
+
+func (am *AuthManager) pairWithPINJSONLocked(pin, deviceName string) (*ClientInfo, string, string, error) {
 	if err := am.loadStore(); err != nil {
 		logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
 			"error": err.Error(),
@@ -586,61 +731,33 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 
 	pending, exists := am.store.PendingPINs[pin]
 	if !exists {
-		return nil, "", "", fmt.Errorf("invalid PIN")
+		return nil, "", "", errInvalidPIN
 	}
 
 	if time.Now().After(pending.Expires) {
-		delete(am.store.PendingPINs, pin)
-		return nil, "", "", fmt.Errorf("PIN expired")
+		logPairingRejection(deviceName, "PIN expired")
+		am.dropPendingPINLocked(pin)
+		return nil, "", "", errInvalidPIN
 	}
 
-	if pending.DeviceName != "" && deviceName != "" && pending.DeviceName != deviceName {
-		return nil, "", "", fmt.Errorf("device name mismatch")
-	}
-
-	if pending.DeviceName == "" && strings.TrimSpace(deviceName) == "" {
-		return nil, "", "", fmt.Errorf("device_name is required")
+	if reason := deviceNameRejection(pending.DeviceName, deviceName); reason != "" {
+		am.rejectPairAttemptLocked(pin, pending, deviceName, reason)
+		return nil, "", "", errInvalidPIN
 	}
 
 	am.cleanupExpired()
 
-	maxClients := am.cfg.MaxClients
-	if maxClients <= 0 {
-		maxClients = 5
+	if len(am.store.Clients) >= am.maxClients() {
+		am.rejectPairAttemptLocked(pin, pending, deviceName, "maximum clients reached")
+		return nil, "", "", errInvalidPIN
 	}
 
-	if len(am.store.Clients) >= maxClients {
-		return nil, "", "", fmt.Errorf("maximum clients reached")
+	clientID, token, refreshToken, err := am.newCredentials()
+	if err != nil {
+		return nil, "", "", err
 	}
 
-	clientID := generateClientID()
-	token := generateToken()
-	refreshToken := generateToken()
-
-	expiryDays := am.cfg.TokenExpiryDays
-	if expiryDays <= 0 {
-		expiryDays = 30
-	}
-
-	finalDeviceName := deviceName
-	if finalDeviceName == "" {
-		finalDeviceName = pending.DeviceName
-	}
-	if finalDeviceName == "" {
-		finalDeviceName = "Unknown Device"
-	}
-
-	client := &ClientInfo{
-		ClientID:    clientID,
-		TokenHash:   hashToken(token),
-		RefreshHash: hashToken(refreshToken),
-		DeviceName:  finalDeviceName,
-		Created:     time.Now(),
-		Expires:     time.Now().AddDate(0, 0, expiryDays),
-		LastSeen:    time.Now(),
-		SessionKeys: []string{clientID},
-	}
-
+	client := am.newClient(clientID, token, refreshToken, resolveDeviceName(deviceName, pending.DeviceName))
 	am.store.Clients[clientID] = client
 	delete(am.store.PendingPINs, pin)
 
@@ -870,8 +987,14 @@ func (am *AuthManager) rotateClientLocked(clientID string, client *ClientInfo) (
 		return nil, "", "", fmt.Errorf("client expired")
 	}
 
-	newToken := generateToken()
-	newRefreshToken := generateToken()
+	newToken, err := generateToken()
+	if err != nil {
+		return nil, "", "", err
+	}
+	newRefreshToken, err := generateToken()
+	if err != nil {
+		return nil, "", "", err
+	}
 
 	expiryDays := am.cfg.TokenExpiryDays
 	if expiryDays <= 0 {

@@ -8,7 +8,14 @@ import (
 	"time"
 )
 
-const errorCodeStoreUnavailable = "store_unavailable"
+const (
+	errorCodeStoreUnavailable   = "store_unavailable"
+	errorCodePairingUnavailable = "pairing_unavailable"
+)
+
+func writeEntropyUnavailable(w http.ResponseWriter) {
+	writeError(w, http.StatusInternalServerError, "pairing unavailable: this server could not read from crypto/rand", errorCodePairingUnavailable)
+}
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
 	deviceName := getQueryParam(r, "device_name")
@@ -17,6 +24,10 @@ func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, ErrPairingUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, err.Error(), errorCodeStoreUnavailable)
+			return
+		}
+		if errors.Is(err, errEntropyUnavailable) {
+			writeEntropyUnavailable(w)
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error(), "pin_error")
@@ -40,6 +51,10 @@ func (n *NativeChannel) handlePair(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, ErrPairingUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, err.Error(), errorCodeStoreUnavailable)
+			return
+		}
+		if errors.Is(err, errEntropyUnavailable) {
+			writeEntropyUnavailable(w)
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error(), "pair_error")
@@ -66,6 +81,10 @@ func (n *NativeChannel) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errRefreshUnavailable) {
 			w.Header().Set("Retry-After", "1")
 			writeError(w, http.StatusTooManyRequests, "auth store busy, retry", "refresh_unavailable")
+			return
+		}
+		if errors.Is(err, errEntropyUnavailable) {
+			writeEntropyUnavailable(w)
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error(), "refresh_error")

@@ -319,15 +319,15 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			}
 		}
 	}
-	command = resolvedCommand
+	execCommand := resolvedCommand
 
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
+		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", execCommand)
 	} else {
-		cmd = exec.CommandContext(bgCtx, "sh", "-c", command)
+		cmd = exec.CommandContext(bgCtx, "sh", "-c", execCommand)
 	}
 	if cwd != "" {
 		cmd.Dir = cwd

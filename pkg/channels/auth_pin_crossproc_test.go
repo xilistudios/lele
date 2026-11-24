@@ -223,8 +223,8 @@ func TestPinFlow_ExpiredPINNotRedeemable_SharedSQLite(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for expired PIN, got nil")
 	}
-	if err.Error() != "PIN expired" {
-		t.Errorf("expected 'PIN expired', got %q", err.Error())
+	if err.Error() != "invalid PIN" {
+		t.Errorf("expired PIN must answer the uniform error, got %q", err.Error())
 	}
 }
 
@@ -245,8 +245,8 @@ func TestPinFlow_DeviceNameMismatchDoesNotConsumePIN_SharedSQLite(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected error for mismatched name, got nil")
 	}
-	if err.Error() != "device name mismatch" {
-		t.Errorf("expected 'device name mismatch', got %q", err.Error())
+	if err.Error() != "invalid PIN" {
+		t.Errorf("device name mismatch must answer the uniform error, got %q", err.Error())
 	}
 
 	client, token, _, err := serverAuth.PairWithPIN(pending.PIN, "correct-name")

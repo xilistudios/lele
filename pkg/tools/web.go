@@ -459,6 +459,103 @@ func (t *WebFetchTool) Parameters() map[string]interface{} {
 	}
 }
 
+const (
+	fetchTimeout      = 60 * time.Second
+	fetchDialTimeout  = 15 * time.Second
+	maxFetchRedirects = 5
+)
+
+func isPublicIP(ip net.IP) bool {
+	return !(ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || ip.IsPrivate())
+}
+
+func isLocalHostName(host string) bool {
+	h := strings.ToLower(host)
+	return h == "localhost" || h == "0.0.0.0" || h == "::1" || strings.HasPrefix(h, "127.")
+}
+
+func checkFetchTarget(u *url.URL) error {
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("access denied: only http/https URLs are allowed, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		if !isPublicIP(ip) {
+			return fmt.Errorf("access denied: requests to private, loopback or link-local addresses are not allowed")
+		}
+		return nil
+	}
+	if isLocalHostName(host) {
+		return fmt.Errorf("access denied: requests to localhost are not allowed")
+	}
+	return nil
+}
+
+func checkFetchRedirectCount(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxFetchRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxFetchRedirects)
+	}
+	return nil
+}
+
+func checkFetchRedirect(req *http.Request, via []*http.Request) error {
+	if err := checkFetchRedirectCount(req, via); err != nil {
+		return err
+	}
+	return checkFetchTarget(req.URL)
+}
+
+func publicDialContext(dialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			if !isPublicIP(ip) {
+				return nil, fmt.Errorf("access denied: %s is a non-public address", host)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("no addresses found for %s", host)
+		}
+		for _, resolved := range ips {
+			if !isPublicIP(resolved.IP) {
+				return nil, fmt.Errorf("access denied: %s resolves to a non-public address", host)
+			}
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+	}
+}
+
+func newFetchHTTPClient(allowPrivate bool) *http.Client {
+	transport := &http.Transport{
+		MaxIdleConns:        10,
+		IdleConnTimeout:     30 * time.Second,
+		DisableCompression:  false,
+		TLSHandshakeTimeout: fetchDialTimeout,
+	}
+	client := &http.Client{
+		Timeout:       fetchTimeout,
+		Transport:     transport,
+		CheckRedirect: checkFetchRedirectCount,
+	}
+
+	if allowPrivate {
+		return client
+	}
+
+	transport.DialContext = publicDialContext(&net.Dialer{Timeout: fetchDialTimeout})
+	client.CheckRedirect = checkFetchRedirect
+	return client
+}
+
 func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	urlStr, ok := args["url"].(string)
 	if !ok {
@@ -478,14 +575,9 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult("missing domain in URL")
 	}
 
-	host := parsedURL.Hostname()
 	if !t.allowPrivate {
-		if ip := net.ParseIP(host); ip != nil {
-			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsPrivate() {
-				return ErrorResult("access denied: requests to private, loopback or link-local addresses are not allowed")
-			}
-		} else if host == "localhost" || host == "0.0.0.0" || strings.HasPrefix(host, "127.") || strings.EqualFold(host, "::1") {
-			return ErrorResult("access denied: requests to localhost are not allowed")
+		if err := checkFetchTarget(parsedURL); err != nil {
+			return ErrorResult(err.Error())
 		}
 	}
 
@@ -503,23 +595,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 
 	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        10,
-			IdleConnTimeout:     30 * time.Second,
-			DisableCompression:  false,
-			TLSHandshakeTimeout: 15 * time.Second,
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("stopped after 5 redirects")
-			}
-			return nil
-		},
-	}
-
-	resp, err := client.Do(req)
+	resp, err := newFetchHTTPClient(t.allowPrivate).Do(req)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("request failed: %v", err))
 	}
