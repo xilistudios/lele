@@ -492,6 +492,8 @@ func TestNativeWSMessageStillPublishesWhenSpoolFails(t *testing.T) {
 	spooler.setFail(true)
 	ts.channel.SetInboundSpooler(spooler)
 
+	ts.channel.auth.TrackSessionKey(ts.clientID, "native:spool-fail")
+
 	client := &WSClient{
 		ID:         "fake-client",
 		SessionKey: "native:spool-fail",

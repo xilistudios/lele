@@ -1302,29 +1302,78 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 	return attachments
 }
 
+const maxSubagentOwnershipDepth = 8
+
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
-	_, ok := n.auth.GetClient(clientID)
+	client, ok := n.auth.GetClient(clientID)
 	if !ok {
 		return false
 	}
-
-	isSubagent := strings.HasPrefix(sessionKey, "subagent:")
-	if !isSubagent {
-		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
-			isSubagent = true
-		}
+	if n.clientOwnsKey(client, sessionKey) {
+		return true
 	}
-	if isSubagent {
+
+	// Trust model: per-client isolation protects user-attributed native chat sessions
+	// (bare UUIDs and native:<clientID>:... keys). Installation-scoped sessions carry no
+	// user attribution — heartbeat/cron automation and channel conversations such as
+	// agent:main:telegram:direct:<id> — so every paired client reads and drives them;
+	// the console lists them, replies into them, approves their tool calls and rebinds
+	// their agent/model.
+	if isInstallationScopedKey(sessionKey) {
+		return true
+	}
+
+	for depth := 0; depth < maxSubagentOwnershipDepth && isSubagentKey(sessionKey); depth++ {
 		if n.agentLoop == nil {
 			return false
 		}
-		resolvedParent := n.agentLoop.GetSubagentParentSessionKey(sessionKey)
-		if resolvedParent == "" {
+		parent := n.agentLoop.GetSubagentParentSessionKey(sessionKey)
+		if parent == "" {
 			return false
+		}
+		if n.clientOwnsKey(client, parent) {
+			return true
+		}
+		sessionKey = parent
+	}
+
+	return false
+}
+
+func (n *NativeChannel) clientOwnsKey(client *ClientInfo, key string) bool {
+	if client == nil || key == "" {
+		return false
+	}
+
+	for _, owned := range client.SessionKeys {
+		if n.keysShareSession(owned, key) {
+			return true
 		}
 	}
 
-	return true
+	return false
+}
+
+func (n *NativeChannel) keysShareSession(owned, requested string) bool {
+	if sessionKeyMatches(owned, requested) {
+		return true
+	}
+	resolvedRequested := n.resolveSessionAlias(requested)
+	return resolvedRequested != "" && n.resolveSessionAlias(owned) == resolvedRequested
+}
+
+func (n *NativeChannel) resolveSessionAlias(sessionKey string) string {
+	if n.agentLoop == nil || sessionKey == "" {
+		return sessionKey
+	}
+	return n.agentLoop.ResolveSessionKey(sessionKey)
+}
+
+func isSubagentKey(sessionKey string) bool {
+	if strings.HasPrefix(sessionKey, "subagent:") {
+		return true
+	}
+	return strings.LastIndex(sessionKey, ":subagent-") > 0
 }
 
 func (c *WSClient) Send(data []byte) error {

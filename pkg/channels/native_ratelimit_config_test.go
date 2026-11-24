@@ -308,6 +308,8 @@ func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 		t.Fatal("wsMessageLimiter must be nil when rate limiting is disabled")
 	}
 
+	ts.channel.auth.TrackSessionKey(ts.clientID, "test-session")
+
 	client := &WSClient{
 		ID:         "ws-rl-test",
 		SessionKey: "test-session",
@@ -689,6 +691,8 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 	}
 
 	t.Run("ws_message (WSMessagesPerMinute=5)", func(t *testing.T) {
+		ts.channel.auth.TrackSessionKey(ts.clientID, "test-session")
+
 		client := &WSClient{
 			ID:         "ws-bucket-test",
 			SessionKey: "test-session",

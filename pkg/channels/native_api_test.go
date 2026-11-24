@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
@@ -750,6 +751,10 @@ func TestHandleTools_ReadVideoGating(t *testing.T) {
 		return names
 	}
 
+	for _, key := range []string{"native:gating-no-video", "native:gating-video", "native:gating-vision"} {
+		ts.channel.auth.TrackSessionKey(ts.clientID, key)
+	}
+
 	noVideo := fetchToolNames(t, "native:gating-no-video")
 	if noVideo["read_video"] {
 		t.Fatal("expected read_video to be absent for a model without video: true and vision: true")
@@ -1344,42 +1349,70 @@ func TestNativeChannelCreateSession(t *testing.T) {
 	}
 }
 
-func TestNativeChannelCreateSessionAllowsAnyValidKey(t *testing.T) {
+func TestNativeChannelCreateSessionRejectsForeignKey(t *testing.T) {
 	ts := newNativeTestServer(t)
+	otherClientID, _ := pairNativeTestClient(t, ts, "Other Device")
 
-	body, _ := json.Marshal(CreateSessionRequest{SessionKey: "native:otherclient:123"})
-	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+ts.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	createSession := func(t *testing.T, sessionKey string) int {
+		t.Helper()
+		body, _ := json.Marshal(CreateSessionRequest{SessionKey: sessionKey})
+		resp := nativeAuthedRequest(t, http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", ts.token, body)
+		defer resp.Body.Close()
+		return resp.StatusCode
 	}
 
-	client, ok := ts.channel.auth.GetClient(ts.clientID)
-	if !ok {
-		t.Fatal("client not found")
-	}
-
-	var found bool
-	for _, sk := range client.SessionKeys {
-		if sk == "native:otherclient:123" {
-			found = true
-			break
+	t.Run("another_known_client_prefix", func(t *testing.T) {
+		key := "native:" + otherClientID + ":123"
+		if status := createSession(t, key); status != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d for %q", status, http.StatusForbidden, key)
 		}
+		if keys := clientSessionKeys(t, ts, ts.clientID); containsKey(keys, key) {
+			t.Fatalf("rejected create still tracked the key: %v", keys)
+		}
+	})
+
+	t.Run("key_with_existing_messages", func(t *testing.T) {
+		key := uuid.New().String()
+		ts.loop.histories[key] = []providers.Message{{Role: "user", Content: "secret"}}
+		if status := createSession(t, key); status != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d for %q", status, http.StatusForbidden, key)
+		}
+	})
+
+	t.Run("system_kind_shape", func(t *testing.T) {
+		if status := createSession(t, "heartbeat"); status != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d for heartbeat", status, http.StatusForbidden)
+		}
+	})
+
+	for _, key := range []string{
+		"agent:main:telegram:direct:777001",
+		"telegram:777001",
+		"agent:main:telegram:group:-100200",
+		"agent:main:discord:direct:4242",
+		"agent:main:telegram:direct:888002:chat:1",
+		"cron-not-a-real-job",
+		"arbitrary-bare-token",
+	} {
+		t.Run("preclaim_"+key, func(t *testing.T) {
+			if status := createSession(t, key); status != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d for %q", status, http.StatusForbidden, key)
+			}
+			if keys := clientSessionKeys(t, ts, ts.clientID); containsKey(keys, key) {
+				t.Fatalf("rejected pre-claim still tracked the key: %v", keys)
+			}
+		})
 	}
-	if !found {
-		t.Fatal("session key not tracked for client")
-	}
+
+	t.Run("fresh_uuid", func(t *testing.T) {
+		key := uuid.New().String()
+		if status := createSession(t, key); status != http.StatusCreated {
+			t.Fatalf("status = %d, want %d for %q", status, http.StatusCreated, key)
+		}
+		if keys := clientSessionKeys(t, ts, ts.clientID); !containsKey(keys, key) {
+			t.Fatalf("created session %q not tracked: %v", key, keys)
+		}
+	})
 }
 
 func TestNativeChannelSessionModelEndpoints(t *testing.T) {

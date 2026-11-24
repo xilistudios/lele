@@ -81,6 +81,7 @@ func TestChatHistoryEndpoint_ErrorDetail(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := newNativeTestServer(t)
 			sessionKey := "native:" + ts.clientID + "-errordetail"
+			ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 			ts.loop.histories[sessionKey] = tc.messages
 
 			status, body := getChatHistoryRaw(t, ts, sessionKey)

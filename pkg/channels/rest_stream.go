@@ -124,12 +124,13 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	if sessionKey == "" {
 		sessionKey = clientID
 	}
-	n.auth.TrackSessionKey(clientID, sessionKey)
 
 	if !n.validateSessionOwnership(clientID, sessionKey) {
 		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
 		return
 	}
+
+	n.auth.TrackSessionKey(clientID, sessionKey)
 
 	if req.AgentID != "" {
 		n.agentLoop.HintSessionAgent(sessionKey, req.AgentID)

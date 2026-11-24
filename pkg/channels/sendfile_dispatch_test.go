@@ -153,6 +153,7 @@ func TestDispatchPersistsAttachmentRowInHistory(t *testing.T) {
 	ts.loop.sessions = newAttachmentSessionManager(t)
 
 	sessionKey := "native:" + ts.clientID + "-history"
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 	ts.loop.sessions.AddMessage(sessionKey, "user", "send me the chart")
 	ts.loop.sessions.AddFullMessage(sessionKey, providers.Message{
 		Role: "assistant",

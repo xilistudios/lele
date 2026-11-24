@@ -144,6 +144,7 @@ func TestRESTApprove_SameSessionAllowed(t *testing.T) {
 	am := NewApprovalManager()
 	ts.channel.approvalManager = am
 	sessionKey := "test-session-" + ts.clientID
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 	approval := am.CreateApproval(sessionKey, "echo hi", "trivial", 0)
 
 	body := mustMarshal(ApproveRequest{RequestID: approval.ID, Approved: true})

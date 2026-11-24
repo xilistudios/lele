@@ -36,12 +36,13 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	if sessionKey == "" {
 		sessionKey = clientID
 	}
-	n.auth.TrackSessionKey(clientID, sessionKey)
 
 	if !n.validateSessionOwnership(clientID, sessionKey) {
 		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
 		return
 	}
+
+	n.auth.TrackSessionKey(clientID, sessionKey)
 
 	if req.AgentID != "" {
 		n.agentLoop.HintSessionAgent(sessionKey, req.AgentID)
@@ -428,7 +429,7 @@ func (n *NativeChannel) writeEvictedHistory(w http.ResponseWriter, sessionKey st
 
 func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 	clientID := getClientID(r)
-	_, ok := n.auth.GetClient(clientID)
+	client, ok := n.auth.GetClient(clientID)
 	if !ok {
 		writeJSON(w, http.StatusOK, ChatSessionsResponse{Sessions: []ChatSession{}})
 		return
@@ -440,16 +441,8 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 	kindFilter := r.URL.Query().Get("kind")
 	includeSystem := r.URL.Query().Get("include_system") == "true"
 
-	allClients := n.auth.ListClients()
-	sessionKeySet := make(map[string]bool)
-	for _, c := range allClients {
-		for _, sk := range c.SessionKeys {
-			sessionKeySet[sk] = true
-		}
-	}
-
-	sessions := make([]ChatSession, 0, len(sessionKeySet))
-	for sk := range sessionKeySet {
+	sessions := make([]ChatSession, 0, len(client.SessionKeys))
+	for _, sk := range client.SessionKeys {
 		if !n.agentLoop.HasMessages(sk) {
 			continue
 		}
@@ -490,6 +483,9 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 		}
 		for _, info := range allSessions {
 			if seen[info.Key] {
+				continue
+			}
+			if !n.validateSessionOwnership(clientID, info.Key) {
 				continue
 			}
 			if modeFilter != "" {
@@ -538,7 +534,7 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 
 func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Request) {
 	clientID := getClientID(r)
-	_, ok := n.auth.GetClient(clientID)
+	client, ok := n.auth.GetClient(clientID)
 	if !ok {
 		writeJSON(w, http.StatusOK, ChatSessionsResponse{Sessions: []ChatSession{}})
 		return
@@ -563,51 +559,52 @@ func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Re
 	sessions := make([]ChatSession, 0, len(index))
 	seen := make(map[string]bool, len(index))
 
-	for _, c := range n.auth.ListClients() {
-		for _, sk := range c.SessionKeys {
-			if seen[sk] {
-				continue
-			}
-			seen[sk] = true
-
-			resolved := n.agentLoop.ResolveSessionKey(sk)
-			info, known := indexByKey[resolved]
-			kind := classifySessionKeyKind(sk)
-			if !known {
-				if !n.agentLoop.HasMessages(resolved) {
-					continue
-				}
-				info = SessionKindInfo{
-					Name:        n.agentLoop.GetName(resolved),
-					Mode:        n.agentLoop.GetSessionMode(resolved),
-					Folder:      n.agentLoop.GetSessionFolder(resolved),
-					Created:     n.agentLoop.GetCreated(resolved),
-					Updated:     n.agentLoop.GetUpdated(resolved),
-					Kind:        kind,
-					HasMessages: true,
-				}
-			}
-			if !info.HasMessages {
-				continue
-			}
-			if !sessionPassesFilters(info.Mode, kind, modeFilter, kindFilter) {
-				continue
-			}
-			sessions = append(sessions, ChatSession{
-				Key:     sk,
-				Name:    info.Name,
-				Mode:    info.Mode,
-				Kind:    kind,
-				Folder:  info.Folder,
-				Created: info.Created,
-				Updated: info.Updated,
-			})
+	for _, sk := range client.SessionKeys {
+		if seen[sk] {
+			continue
 		}
+		seen[sk] = true
+
+		resolved := n.agentLoop.ResolveSessionKey(sk)
+		info, known := indexByKey[resolved]
+		kind := classifySessionKeyKind(sk)
+		if !known {
+			if !n.agentLoop.HasMessages(resolved) {
+				continue
+			}
+			info = SessionKindInfo{
+				Name:        n.agentLoop.GetName(resolved),
+				Mode:        n.agentLoop.GetSessionMode(resolved),
+				Folder:      n.agentLoop.GetSessionFolder(resolved),
+				Created:     n.agentLoop.GetCreated(resolved),
+				Updated:     n.agentLoop.GetUpdated(resolved),
+				Kind:        kind,
+				HasMessages: true,
+			}
+		}
+		if !info.HasMessages {
+			continue
+		}
+		if !sessionPassesFilters(info.Mode, kind, modeFilter, kindFilter) {
+			continue
+		}
+		sessions = append(sessions, ChatSession{
+			Key:     sk,
+			Name:    info.Name,
+			Mode:    info.Mode,
+			Kind:    kind,
+			Folder:  info.Folder,
+			Created: info.Created,
+			Updated: info.Updated,
+		})
 	}
 
 	if kindFilter != "" || includeSystem {
 		for _, info := range index {
 			if seen[info.Key] {
+				continue
+			}
+			if !n.validateSessionOwnership(clientID, info.Key) {
 				continue
 			}
 			if !sessionPassesFilters(info.Mode, info.Kind, modeFilter, kindFilter) {
@@ -687,6 +684,41 @@ func classifySessionKeyKind(sessionKey string) string {
 	return "chat"
 }
 
+var channelSessionKeyChannels = map[string]bool{
+	"telegram": true,
+	"discord":  true,
+	"slack":    true,
+	"whatsapp": true,
+	"feishu":   true,
+	"dingtalk": true,
+	"onebot":   true,
+	"qq":       true,
+	"line":     true,
+	"maixcam":  true,
+}
+
+func isInstallationScopedKey(sessionKey string) bool {
+	switch classifySessionKeyKind(sessionKey) {
+	case "heartbeat", "cron", "cron-spawn":
+		return true
+	}
+	return isChannelScopedSessionKey(sessionKey)
+}
+
+func isChannelScopedSessionKey(sessionKey string) bool {
+	parts := strings.Split(sessionKey, ":")
+	if len(parts) < 2 {
+		return false
+	}
+	if parts[0] == "agent" {
+		if len(parts) < 4 {
+			return false
+		}
+		return channelSessionKeyChannels[parts[2]]
+	}
+	return channelSessionKeyChannels[parts[0]]
+}
+
 func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -701,6 +733,15 @@ func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Reque
 
 	clientID := getClientID(r)
 
+	if !isValidSessionKeyFormat(req.SessionKey) {
+		writeError(w, http.StatusBadRequest, "invalid session_key format", "session_key_invalid")
+		return
+	}
+	if conflict := n.sessionCreateConflict(clientID, req.SessionKey); conflict != "" {
+		writeError(w, http.StatusForbidden, "session key is not available to this client", conflict)
+		return
+	}
+
 	n.auth.TrackSessionKey(clientID, req.SessionKey)
 
 	if req.Mode != "" {
@@ -710,6 +751,43 @@ func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusCreated, CreateSessionResponse{
 		SessionKey: req.SessionKey,
 	})
+}
+
+// A client may only create sessions in its own namespace: a fresh bare UUID or
+// native:<callerClientID>:<suffix>. Channel, system, subagent and alias-target keys are
+// derived by the server, so rejecting them wholesale removes the possibility of
+// pre-claiming a session that belongs to an external peer.
+func isCreatableSessionKey(clientID, sessionKey string) bool {
+	if rest, ok := strings.CutPrefix(sessionKey, "native:"); ok {
+		ownerID, suffix, found := strings.Cut(rest, ":")
+		return found && suffix != "" && ownerID == clientID
+	}
+
+	parsed, err := uuid.Parse(sessionKey)
+	return err == nil && parsed.String() == sessionKey
+}
+
+func (n *NativeChannel) sessionCreateConflict(clientID, sessionKey string) string {
+	if !isCreatableSessionKey(clientID, sessionKey) {
+		return "session_key_unavailable"
+	}
+
+	for _, other := range n.auth.ListClients() {
+		if other.ClientID == clientID {
+			continue
+		}
+		for _, owned := range other.SessionKeys {
+			if n.keysShareSession(owned, sessionKey) {
+				return "session_key_unavailable"
+			}
+		}
+	}
+
+	if n.agentLoop != nil && n.agentLoop.HasMessages(n.resolveSessionAlias(sessionKey)) {
+		return "session_key_unavailable"
+	}
+
+	return ""
 }
 
 func (n *NativeChannel) handleChatSessionGet(w http.ResponseWriter, r *http.Request) {
@@ -744,14 +822,7 @@ func (n *NativeChannel) handleChatSessionDelete(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	removed := false
-	for _, c := range n.auth.ListClients() {
-		if err := n.auth.RemoveSessionKey(c.ClientID, sessionKey); err == nil {
-			removed = true
-		}
-	}
-	if !removed {
-	}
+	_ = n.auth.RemoveSessionKey(clientID, sessionKey)
 
 	n.agentLoop.ClearSession(sessionKey)
 

@@ -224,6 +224,14 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return fmt.Errorf("message sender (user) is nil")
 	}
 
+	if !c.IsAllowed(telegramSenderID(user.ID, user.Username)) {
+		logger.DebugCF("telegram", "Command rejected by allowlist", map[string]interface{}{
+			"user_id": user.ID,
+			"command": cmd,
+		})
+		return nil
+	}
+
 	senderID := fmt.Sprintf("%d", user.ID)
 	chatID := message.Chat.ID
 
@@ -347,6 +355,12 @@ func (c *TelegramChannel) sendReplyText(ctx context.Context, message *telego.Mes
 
 func (c *TelegramChannel) publishSystemCommand(senderID string, chatID int64, messageID int, content string, metadata map[string]string, sessionKey string) {
 	if c.bus == nil || strings.TrimSpace(content) == "" {
+		return
+	}
+	if !c.IsAllowed(senderID) {
+		logger.DebugCF("telegram", "System command rejected by allowlist", map[string]interface{}{
+			"sender_id": senderID,
+		})
 		return
 	}
 	if metadata == nil {

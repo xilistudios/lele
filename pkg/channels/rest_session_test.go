@@ -358,8 +358,8 @@ func TestHandleSession_Forbidden(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d for a session the caller does not own", resp.StatusCode, http.StatusForbidden)
 	}
 }
 

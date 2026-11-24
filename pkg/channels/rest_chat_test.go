@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -61,6 +63,7 @@ func TestHandleChatSend_WithSessionKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	sessionKey := "test-session-" + ts.clientID
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 	body := mustMarshal(ChatSendRequest{Content: "Hello", SessionKey: sessionKey})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/send", strings.NewReader(string(body)))
 	req.Header.Set("Authorization", "Bearer "+ts.token)
@@ -268,7 +271,7 @@ func TestHandleChatSessions_Empty(t *testing.T) {
 func TestHandleCreateSession(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	sessionKey := "new-session-" + ts.clientID
+	sessionKey := uuid.New().String()
 	body := mustMarshal(CreateSessionRequest{SessionKey: sessionKey})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", strings.NewReader(string(body)))
 	req.Header.Set("Authorization", "Bearer "+ts.token)
