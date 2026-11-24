@@ -1304,8 +1304,10 @@
     "auditEmpty": "Sem registros de acesso",
     "action": "Ação",
     "agent": "Agente",
+    "access": "Acesso",
     "granted": "Concedido",
     "denied": "Negado",
+    "time": "Hora",
     "errorName": "O nome é obrigatório",
     "errorValue": "O valor é obrigatório"
   }

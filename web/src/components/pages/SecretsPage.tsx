@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useSecrets } from '../../hooks/useSecrets'
@@ -28,6 +28,15 @@ function BackendBadge({ backend }: { backend?: string }) {
     </span>
   )
 }
+
+const CARD_ACTION_CLS =
+  'flex-1 whitespace-nowrap rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 sm:flex-none sm:py-1.5'
+
+const CARD_DANGER_CLS =
+  'flex-1 whitespace-nowrap rounded-lg border border-border px-2.5 py-2 text-xs font-medium text-state-error transition-colors hover:bg-state-error/10 disabled:opacity-40 sm:flex-none sm:py-1.5'
+
+const CARD_CONFIRM_CLS =
+  'flex-1 whitespace-nowrap rounded-lg bg-state-error-fill px-2.5 py-2 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40 sm:flex-none sm:py-1.5'
 
 function SecretCard({
   secret,
@@ -89,10 +98,12 @@ function SecretCard({
 
   return (
     <div className="rounded-xl border border-border bg-background-secondary transition-colors hover:bg-background-secondary">
-      <div className="flex items-start gap-4 px-4 py-3">
+      <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-sm font-semibold text-text-primary">{secret.name}</span>
+            <span className="min-w-0 break-all font-mono text-sm font-semibold text-text-primary">
+              {secret.name}
+            </span>
             {scope.length === 0 ? (
               <span className="inline-flex items-center rounded-full border border-state-error bg-background-tertiary px-2 py-0.5 text-xs text-text-tertiary">
                 {t('secrets.allAgents', 'all agents')}
@@ -150,12 +161,12 @@ function SecretCard({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex items-center gap-1 sm:shrink-0">
           <button
             type="button"
             onClick={() => onEdit(secret)}
             disabled={busy}
-            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            className={CARD_ACTION_CLS}
           >
             {t('common.edit', 'Edit')}
           </button>
@@ -163,7 +174,7 @@ function SecretCard({
             type="button"
             onClick={handleReveal}
             disabled={revealing || busy}
-            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            className={CARD_ACTION_CLS}
           >
             {revealing
               ? '…'
@@ -172,12 +183,12 @@ function SecretCard({
                 : t('secrets.reveal', 'Reveal')}
           </button>
           {confirmDelete ? (
-            <div className="flex items-center gap-1">
+            <div className="flex flex-1 items-center gap-1 sm:flex-none">
               <button
                 type="button"
                 onClick={() => onDelete(secret.name)}
                 disabled={busy}
-                className="rounded-lg bg-state-error-fill px-2.5 py-1.5 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
+                className={CARD_CONFIRM_CLS}
               >
                 {t('common.confirm', 'Confirm')}
               </button>
@@ -185,7 +196,7 @@ function SecretCard({
                 type="button"
                 onClick={() => setConfirmDelete(false)}
                 disabled={busy}
-                className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover"
+                className={CARD_ACTION_CLS}
               >
                 {t('common.cancel', 'Cancel')}
               </button>
@@ -195,7 +206,7 @@ function SecretCard({
               type="button"
               onClick={() => setConfirmDelete(true)}
               disabled={busy}
-              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error/10 disabled:opacity-40"
+              className={CARD_DANGER_CLS}
             >
               {t('secrets.delete', 'Delete')}
             </button>
@@ -366,7 +377,7 @@ export function SecretFormModal({
         )}
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+      <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border bg-background-primary px-6 py-4">
         <button
           type="button"
           onClick={onClose}
@@ -382,6 +393,25 @@ export function SecretFormModal({
   )
 }
 
+function AuditCell({
+  label,
+  className = '',
+  children,
+}: {
+  label: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <td className="flex items-baseline justify-between gap-3 py-0.5 md:table-cell md:px-3 md:py-2">
+      <span className="shrink-0 text-xs uppercase text-text-tertiary md:hidden">{label}</span>
+      <span className={`min-w-0 break-all text-right md:break-normal md:text-left ${className}`}>
+        {children}
+      </span>
+    </td>
+  )
+}
+
 function AuditLog({ records }: { records: SecretAuditRecord[] }) {
   const { t } = useTranslation()
   if (records.length === 0) {
@@ -392,33 +422,42 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
     )
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-border bg-background-secondary text-xs uppercase text-text-tertiary">
+    <div className="md:overflow-x-auto rounded-xl border border-border">
+      <table className="block w-full text-left text-sm md:table">
+        <thead className="hidden border-b border-border bg-background-secondary text-xs uppercase text-text-tertiary md:table-header-group">
           <tr>
             <th className="px-3 py-2 font-medium">{t('secrets.name', 'Name')}</th>
             <th className="px-3 py-2 font-medium">{t('secrets.action', 'Action')}</th>
             <th className="px-3 py-2 font-medium">{t('secrets.agent', 'Agent')}</th>
-            <th className="px-3 py-2 font-medium">{t('secrets.granted', 'Granted')}</th>
-            <th className="px-3 py-2 font-medium">Time</th>
+            <th className="px-3 py-2 font-medium">{t('secrets.access', 'Access')}</th>
+            <th className="px-3 py-2 font-medium">{t('secrets.time', 'Time')}</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="block md:table-row-group">
           {records.map((r, i) => (
-            <tr key={`${r.timestamp}-${i}`} className="border-b border-border last:border-0">
-              <td className="px-3 py-2 font-mono text-text-primary">{r.secret_name}</td>
-              <td className="px-3 py-2 text-text-secondary">{r.action}</td>
-              <td className="px-3 py-2 text-text-secondary">{r.agent_id || '—'}</td>
-              <td className="px-3 py-2">
+            <tr
+              key={`${r.timestamp}-${i}`}
+              className="block border-b border-border p-3 last:border-0 md:table-row md:p-0"
+            >
+              <AuditCell label={t('secrets.name', 'Name')} className="font-mono text-text-primary">
+                {r.secret_name}
+              </AuditCell>
+              <AuditCell label={t('secrets.action', 'Action')} className="text-text-secondary">
+                {r.action}
+              </AuditCell>
+              <AuditCell label={t('secrets.agent', 'Agent')} className="text-text-secondary">
+                {r.agent_id || '—'}
+              </AuditCell>
+              <AuditCell label={t('secrets.access', 'Access')}>
                 {r.granted ? (
                   <span className="text-state-success">{t('secrets.granted', 'Granted')}</span>
                 ) : (
                   <span className="text-state-error">{t('secrets.denied', 'Denied')}</span>
                 )}
-              </td>
-              <td className="px-3 py-2 text-xs text-text-tertiary">
+              </AuditCell>
+              <AuditCell label={t('secrets.time', 'Time')} className="text-xs text-text-tertiary">
                 {formatTimestamp(r.timestamp)}
-              </td>
+              </AuditCell>
             </tr>
           ))}
         </tbody>
@@ -495,7 +534,7 @@ export function SecretsPage() {
   }, [refresh, refreshAudit])
 
   const tabCls = (active: boolean) =>
-    `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+    `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
       active
         ? 'bg-focus text-text-on-accent'
         : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -509,12 +548,12 @@ export function SecretsPage() {
         onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-between border-b border-border bg-background-secondary px-4 py-3 md:px-6 md:py-4">
-          <div className="flex items-center gap-3">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-b border-border bg-background-secondary px-4 py-3 md:flex-nowrap md:gap-x-3 md:px-6 md:py-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
             <button
               type="button"
               onClick={() => onOpenMobileSidebar()}
-              className="flex rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary md:hidden"
+              className="flex shrink-0 rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary md:hidden"
               title={t('chat.toggleSidebar')}
             >
               <svg
@@ -531,33 +570,20 @@ export function SecretsPage() {
               </svg>
             </button>
             <BackButton />
-            <h1 className="text-base font-semibold text-text-primary">
+            <h1 className="min-w-0 truncate text-base font-semibold text-text-primary">
               {t('secrets.title', 'Secrets')}
             </h1>
             {status && (
-              <span className="flex items-center gap-2 text-xs text-text-tertiary">
+              <span className="hidden items-center gap-2 text-xs text-text-tertiary lg:flex">
                 <BackendBadge backend={status.backend} />
-                {status.count} {t('secrets.count', 'secrets')}
+                <span className="whitespace-nowrap">
+                  {status.count} {t('secrets.count', 'secrets')}
+                </span>
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
-              <button
-                type="button"
-                className={tabCls(tab === 'secrets')}
-                onClick={() => setTab('secrets')}
-              >
-                {t('secrets.title', 'Secrets')}
-              </button>
-              <button
-                type="button"
-                className={tabCls(tab === 'audit')}
-                onClick={() => setTab('audit')}
-              >
-                {t('secrets.audit', 'Audit Log')}
-              </button>
-            </div>
+
+          <div className="flex shrink-0 items-center gap-1.5 md:order-2 md:gap-2">
             {tab === 'secrets' && (
               <Button type="button" variant="primary" size="md" onClick={openCreate}>
                 <svg
@@ -579,7 +605,9 @@ export function SecretsPage() {
               type="button"
               onClick={handleRefresh}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              aria-label={t('common.refresh', 'Refresh')}
+              title={t('common.refresh', 'Refresh')}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary p-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 lg:px-3 lg:py-2"
             >
               <svg
                 className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
@@ -593,11 +621,34 @@ export function SecretsPage() {
                 <title>Refresh</title>
                 <path d="M21 12a9 9 0 1 1-6.219-8.56" />
               </svg>
-              {t('common.refresh', 'Refresh')}
+              <span className="hidden lg:inline">{t('common.refresh', 'Refresh')}</span>
             </button>
           </div>
-        </header>
 
+          <div className="order-3 flex w-full min-w-0 items-center gap-2 md:order-1 md:ml-auto md:w-auto">
+            <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg border border-border p-0.5 md:flex-none">
+              <button
+                type="button"
+                className={`${tabCls(tab === 'secrets')} flex-1 md:flex-none`}
+                onClick={() => setTab('secrets')}
+              >
+                {t('secrets.title', 'Secrets')}
+              </button>
+              <button
+                type="button"
+                className={`${tabCls(tab === 'audit')} flex-1 md:flex-none`}
+                onClick={() => setTab('audit')}
+              >
+                {t('secrets.audit', 'Audit Log')}
+              </button>
+            </div>
+            {status && (
+              <span className="whitespace-nowrap text-xs text-text-tertiary lg:hidden">
+                {status.count} {t('secrets.count', 'secrets')}
+              </span>
+            )}
+          </div>
+        </header>
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {error && <ErrorBanner message={error} />}
 

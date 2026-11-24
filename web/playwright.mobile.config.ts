@@ -1,5 +1,9 @@
 /**
- * Mobile-viewport gate for the WebUI shell-height fix.
+ * Mobile-viewport gate for the WebUI.
+ *
+ * One spec per view that has a mobile contract: `viewport.e2e.ts` covers the
+ * chat shell height and composer, `secrets.e2e.ts` the Secrets layout (plus
+ * its tablet/md header). Add a spec here whenever a view gains a phone layout.
  *
  * Deliberately separate from playwright.config.ts: that one is a no-server
  * instrumentation harness (file:// + setContent), while this gate needs the
