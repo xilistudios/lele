@@ -46,6 +46,7 @@ func TestOpen_CreatesSchema(t *testing.T) {
 		"native_clients",
 		"native_pending_pins",
 		"kv",
+		"usage_counters",
 		"schema_meta",
 	}
 
@@ -187,6 +188,10 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE IF EXISTS native_pending_pins`); err != nil {
 		db.Close()
 		t.Fatalf("DROP native_pending_pins: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS usage_counters`); err != nil {
+		db.Close()
+		t.Fatalf("DROP usage_counters: %v", err)
 	}
 	if _, err := db.Exec(`ALTER TABLE sessions DROP COLUMN agent_id`); err != nil {
 		db.Close()

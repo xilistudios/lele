@@ -57,6 +57,9 @@ func tuiCmd(sessionID string) {
 	}
 	if s == nil {
 		defer storeCleanup()
+		tui.SetUsageRepo(nil)
+	} else {
+		tui.SetUsageRepo(s.Usage())
 	}
 	agentLoop := agent.NewAgentLoopWithStore(cfg, msgBus, s)
 

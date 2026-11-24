@@ -7,11 +7,27 @@ import (
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
+// pinFileUsageMode isolates tests that build usage stores directly (or via
+// NewAgentInstance/NewAgentRegistry without a store) from any usage repo
+// wired by another test in the package: the setters are package-level, so
+// without the pin a foreign store could share counters across tests.
+func pinFileUsageMode(t *testing.T) {
+	t.Helper()
+	skills.SetUsageRepo(nil)
+	mcp.SetUsageRepo(nil)
+	t.Cleanup(func() {
+		skills.SetUsageRepo(nil)
+		mcp.SetUsageRepo(nil)
+	})
+}
+
 func TestContextSkills_ShowsOnlyTopFiveByUsage(t *testing.T) {
+	pinFileUsageMode(t)
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"} {
@@ -81,6 +97,7 @@ func TestPinSkills_PinsFullInstructionsIntoSessionPrompt(t *testing.T) {
 }
 
 func TestNewAgentInstance_LoadSkillPromotesIntoTopFive(t *testing.T) {
+	pinFileUsageMode(t)
 	workspace := t.TempDir()
 	configDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", configDir)
@@ -129,6 +146,7 @@ func TestNewAgentInstance_LoadSkillPromotesIntoTopFive(t *testing.T) {
 }
 
 func TestSkillsInContext_TopFivePlusLoadedWithoutDuplicates(t *testing.T) {
+	pinFileUsageMode(t)
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspace := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"} {
@@ -159,6 +177,7 @@ func TestSkillsInContext_TopFivePlusLoadedWithoutDuplicates(t *testing.T) {
 }
 
 func TestNewAgentInstance_ListSkillsExcludesWhatIsAlreadyInContext(t *testing.T) {
+	pinFileUsageMode(t)
 	workspace := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"} {

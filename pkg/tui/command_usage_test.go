@@ -2,12 +2,14 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/xilistudios/lele/pkg/store"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -274,5 +276,125 @@ func TestAllCommands_IncludesAddModel(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected /add-model to be registered in allCommands")
+	}
+}
+func newTestUsageRepo(t *testing.T) *store.UsageRepo {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "usage.db"))
+	if err != nil {
+		if errors.Is(err, store.ErrUnsupportedPlatform) {
+			t.Skip("SQLite not supported on this platform")
+		}
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s.Usage()
+}
+
+func TestCommandUsageStore_SQLite_RecordPersists(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	path := filepath.Join(t.TempDir(), "command_usage.json")
+	s := newCommandUsageStore(path)
+	s.Record("/models")
+	s.Record("/models")
+	s.Record("/status")
+
+	reloaded := newCommandUsageStore(path)
+	if got := reloaded.Count("/models"); got != 2 {
+		t.Errorf(`Count("/models") = %d, want 2`, got)
+	}
+	if got := reloaded.Count("status"); got != 1 {
+		t.Errorf(`Count("status") = %d, want 1 (normalisation without slash)`, got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("JSON usage file was created despite SQLite mode (stat err = %v)", err)
+	}
+}
+
+func TestCommandUsageStore_SQLite_ImportsLegacyFile(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	path := filepath.Join(t.TempDir(), "command_usage.json")
+	legacy := commandUsageFile{Counts: map[string]int{"/models": 2, "status": 1}}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	s := newCommandUsageStore(path)
+	if got := s.Count("/models"); got != 2 {
+		t.Fatalf("imported count = %d, want 2", got)
+	}
+	if got := s.Count("/status"); got != 1 {
+		t.Fatalf("imported count = %d, want 1 (key normalised on import)", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("legacy file still present after import (stat err = %v)", err)
+	}
+	if _, err := os.Stat(path + ".migrated"); err != nil {
+		t.Fatalf("legacy file not renamed to .migrated: %v", err)
+	}
+
+	s.Record("/models")
+	if got := s.Count("/models"); got != 3 {
+		t.Fatalf("count after Record = %d, want 3 (accumulates onto imported counts)", got)
+	}
+}
+
+func TestCommandUsageStore_SQLite_PrunesToCap(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	path := filepath.Join(t.TempDir(), "command_usage.json")
+	s := newCommandUsageStore(path)
+	for i := 0; i < commandUsageMaxEntries+5; i++ {
+		s.Record(fmt.Sprintf("/cmd%03d", i))
+	}
+
+	stored, err := repo.LoadUsage("command")
+	if err != nil {
+		t.Fatalf("LoadUsage: %v", err)
+	}
+	if len(stored[""]) != commandUsageMaxEntries {
+		t.Fatalf("stored entries = %d, want cap %d", len(stored[""]), commandUsageMaxEntries)
+	}
+}
+
+func TestCommandUsageStore_SQLite_DoesNotImportWhenScopePopulated(t *testing.T) {
+	repo := newTestUsageRepo(t)
+	if _, err := repo.MergeUsage("command", map[string]map[string]uint64{"": {"/models": 7}}); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "command_usage.json")
+	legacy := commandUsageFile{Counts: map[string]int{"/models": 2}}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	SetUsageRepo(repo)
+	t.Cleanup(func() { SetUsageRepo(nil) })
+
+	s := newCommandUsageStore(path)
+	if got := s.Count("/models"); got != 7 {
+		t.Fatalf("count = %d, want 7 (repo is authoritative, stale file must not be merged)", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("stale legacy file still live (stat err = %v); it must be retired", err)
+	}
+	if _, err := os.Stat(path + ".migrated"); err != nil {
+		t.Fatalf("stale legacy file not renamed to .migrated: %v", err)
 	}
 }

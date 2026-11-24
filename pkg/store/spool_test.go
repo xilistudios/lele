@@ -1392,6 +1392,10 @@ func TestMigrations_V8ToV9_AddsSpoolBackoffAndDeadLetter(t *testing.T) {
 		db.Close()
 		t.Fatalf("DROP spool.next_attempt_at: %v", err)
 	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS usage_counters`); err != nil {
+		db.Close()
+		t.Fatalf("DROP usage_counters: %v", err)
+	}
 	if _, err := db.Exec(`UPDATE schema_meta SET value = '8' WHERE key = 'schema_version'`); err != nil {
 		db.Close()
 		t.Fatalf("downgrade schema_version: %v", err)

@@ -286,7 +286,7 @@ get_mcp_tool
 ```
 
 Server configuration — `mcp.json` layers, `${VAR}` expansion, transports,
-usage counters (`<LeleDir>/mcp_usage.json`), security notes and limitations — is
+usage counters (SQLite `usage_counters` table, legacy `<LeleDir>/mcp_usage.json` fallback), security notes and limitations — is
 documented in `docs/mcp.md`.
 
 ## Skill Discovery
@@ -294,7 +294,9 @@ documented in `docs/mcp.md`.
 Skills come from three catalogs — the agent workspace, the global
 `<LeleDir>/skills` directory and the builtin skills bundled with lele — and the
 prompt inlines only the **5 most used** for the agent's ID (usage lives in
-`<LeleDir>/skills_usage.json`). Until usage accumulates that window is
+the SQLite `usage_counters` table, scope `skills`; legacy
+`<LeleDir>/skills_usage.json` is imported once and kept only as the
+no-SQLite fallback). Until usage accumulates that window is
 alphabetical, so a fresh install shows the first five skills by name. Three
 tools cover the rest of the catalog:
 

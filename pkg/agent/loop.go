@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -377,6 +378,23 @@ type SummarizeStats struct {
 }
 
 func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.Store) *AgentLoop {
+	// Wire the shared store BEFORE building the registry: NewAgentRegistry
+	// eagerly creates agent instances, and their skills usage stores must
+	// see the SQLite repo (otherwise they silently start in file mode).
+	var dbStore *store.Store
+	if s != nil {
+		dbStore = s
+		logger.InfoC("store", fmt.Sprintf("SQLite store opened"))
+		auth.UseStore(dbStore.Auth())
+		skills.SetUsageRepo(dbStore.Usage())
+		mcp.SetUsageRepo(dbStore.Usage())
+	} else {
+		// Reset too: a loop without a store must not inherit a repo wired
+		// by an earlier loop (possibly already closed) in this process.
+		skills.SetUsageRepo(nil)
+		mcp.SetUsageRepo(nil)
+	}
+
 	registry := NewAgentRegistry(cfg)
 
 	approvalManager := channels.NewApprovalManager()
@@ -391,13 +409,6 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 		LeleDir:          config.GetLeleDir(),
 	})
 	redactor := keyring.NewRedactor(keyringSvc)
-
-	var dbStore *store.Store
-	if s != nil {
-		dbStore = s
-		logger.InfoC("store", fmt.Sprintf("SQLite store opened"))
-		auth.UseStore(dbStore.Auth())
-	}
 
 	cooldown := providers.NewCooldownTracker()
 	fallbackChain := providers.NewFallbackChain(cooldown)

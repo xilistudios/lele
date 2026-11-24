@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 var migrations = []struct {
 	Version int
@@ -265,6 +265,24 @@ CREATE INDEX IF NOT EXISTS idx_spool_dead_letter_dead_at ON spool_dead_letter(de
 			}
 			return nil
 		},
+	},
+	{
+		Version: 10,
+		DDL: `
+-- Usage counters that used to live in JSON files next to config.json:
+-- command_usage.json (scope "command"), skills_usage.json (scope "skills",
+-- grp = agent ID) and mcp_usage.json (scope "mcp", grp = server name).
+-- config.json stays the only JSON configuration file; the counters move
+-- into the shared store so concurrent processes merge inside SQLite
+-- instead of read-modify-write cycles over files.
+CREATE TABLE usage_counters (
+    scope TEXT NOT NULL,
+    grp TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, grp, key)
+);
+`,
 	},
 }
 
