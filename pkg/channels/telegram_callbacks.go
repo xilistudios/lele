@@ -179,33 +179,18 @@ func (c *TelegramChannel) handleThinkCallback(ctx context.Context, query telego.
 		return nil
 	}
 
-	var emoji string
 	displayLevel := level
-	switch level {
-	case "off":
-		emoji = "🧠"
+	if level == "off" {
 		displayLevel = "default"
-	case "low":
-		emoji = "💡"
-	case "medium":
-		emoji = "🤔"
-	case "high":
-		emoji = "🧩"
-	default:
-		emoji = "🧠"
 	}
+	emoji := thinkLevelEmoji(level)
 
 	chatID := query.Message.GetChat().ID
 	messageID := query.Message.GetMessageID()
 	updatedText := fmt.Sprintf(
 		"*Think Mode Settings*\n\n"+
 			"Current level: %s *%s*\n\n"+
-			"*Available options:*\n"+
-			"🧠 *off* - Use agent default reasoning\n"+
-			"💡 *low* - Minimal reasoning effort\n"+
-			"🤔 *medium* - Balanced reasoning effort\n"+
-			"🧩 *high* - Maximum reasoning effort\n\n"+
-			"Use /think to cycle through levels.",
+			thinkOptionsText,
 		emoji, displayLevel)
 
 	editMsg := tu.EditMessageText(tu.ID(chatID), messageID, updatedText)

@@ -1,4 +1,4 @@
-export const THINKING_LEVELS = ['off', 'low', 'medium', 'high'] as const
+export const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
 
@@ -13,6 +13,8 @@ export function thinkingLevelOptions(t: Translate): ThinkingLevelOption[] {
     { value: 'low', label: t('settings.options.thinkingLow') },
     { value: 'medium', label: t('settings.options.thinkingMedium') },
     { value: 'high', label: t('settings.options.thinkingHigh') },
+    { value: 'xhigh', label: t('settings.options.thinkingXhigh') },
+    { value: 'max', label: t('settings.options.thinkingMax') },
   ]
 }
 

@@ -217,7 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ 移动 · SPACE 切换 · ENTER 保存 · ESC 取消",
   "tui.settings.selectorCustom": "（自定义…）",
   "tui.settings.invalidNumber": "请输入有效的正数",
-  "tui.settings.invalidThinkingLevel": "请输入有效的思考级别（off, low, medium, high）",
+  "tui.settings.invalidThinkingLevel": "请输入有效的思考级别（off, low, medium, high, xhigh, max）",
   "tui.settings.session": "会话",
   "tui.settings.tools": "工具",
   "tui.settings.logs": "日志",

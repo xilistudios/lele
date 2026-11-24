@@ -564,7 +564,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.textInput.Placeholder = "Reasoning enabled? (yes/no)"
 				m.closeCatalogPicker()
 			case editModelReasoningEffortStep:
-				m.textInput.Placeholder = "low, medium, high or default"
+				m.textInput.Placeholder = "low, medium, high, xhigh, max or default"
 				m.closeCatalogPicker()
 			case editModelReasoningMaxTokensStep:
 				m.textInput.Placeholder = "Max reasoning tokens (blank or default = unset)"

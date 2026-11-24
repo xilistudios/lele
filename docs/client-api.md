@@ -358,7 +358,7 @@ Session properties are accessed via sub-resource paths:
 | `GET` | `/api/v1/chat/sessions/{key}/agent` | Get the current session agent |
 | `PATCH` | `/api/v1/chat/sessions/{key}/agent` | Set the current session agent |
 | `GET` | `/api/v1/chat/sessions/{key}/thinking` | Get thinking level |
-| `PATCH` | `/api/v1/chat/sessions/{key}/thinking` | Set thinking level (off, low, medium, high) |
+| `PATCH` | `/api/v1/chat/sessions/{key}/thinking` | Set thinking level (off, low, medium, high, xhigh, max) |
 | `GET` | `/api/v1/chat/sessions/{key}/name` | Read the session name |
 | `PATCH` | `/api/v1/chat/sessions/{key}/name` | Update the session name |
 | `GET` | `/api/v1/chat/sessions/{key}/context` | Get context token usage |

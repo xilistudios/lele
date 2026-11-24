@@ -33,10 +33,10 @@ func normalizeReasoningEffort(val string) (*string, error) {
 	switch v {
 	case "", reasoningFormDefault:
 		return nil, nil
-	case "low", "medium", "high":
+	case "low", "medium", "high", "xhigh", "max":
 		return &v, nil
 	default:
-		return nil, fmt.Errorf("invalid reasoning effort: %q (must be low, medium, high or default)", val)
+		return nil, fmt.Errorf("invalid reasoning effort: %q (must be low, medium, high, xhigh, max or default)", val)
 	}
 }
 

@@ -246,6 +246,8 @@ export function ChatComposer() {
     { value: 'low', label: t('chat.thinkingLow') },
     { value: 'medium', label: t('chat.thinkingMedium') },
     { value: 'high', label: t('chat.thinkingHigh') },
+    { value: 'xhigh', label: t('chat.thinkingXhigh') },
+    { value: 'max', label: t('chat.thinkingMax') },
   ]
   return (
     <form onSubmit={submit}>

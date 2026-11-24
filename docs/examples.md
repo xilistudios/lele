@@ -53,7 +53,7 @@ This page provides concrete configuration snippets for common setups.
 }
 ```
 
-`thinking_level` (optional: `off`/`low`/`medium`/`high`) sets this agent's default reasoning effort; a session's `/think` override always wins. See `docs/config-reference.md#thinking_level`.
+`thinking_level` (optional: `off`/`low`/`medium`/`high`/`xhigh`/`max`) sets this agent's default reasoning effort; a session's `/think` override always wins. See `docs/config-reference.md#thinking_level`.
 
 ## OpenAI-Compatible Provider With Aliases
 

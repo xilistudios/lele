@@ -226,7 +226,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ naviguer · ESPACE activer/désactiver · ENTRÉE enregistrer · ÉCHAP annuler",
   "tui.settings.selectorCustom": "(personnalisé...)",
   "tui.settings.invalidNumber": "Veuillez saisir un nombre positif valide",
-  "tui.settings.invalidThinkingLevel": "Veuillez saisir un niveau de réflexion valide (off, low, medium, high)",
+  "tui.settings.invalidThinkingLevel": "Veuillez saisir un niveau de réflexion valide (off, low, medium, high, xhigh, max)",
   "tui.settings.session": "Session",
   "tui.settings.tools": "Outils",
   "tui.settings.logs": "Journaux",

@@ -595,7 +595,7 @@
       "agentModelPrimary": "이 에이전트가 사용할 기본 모델",
       "agentModelFallbacks": "기본 모델을 사용할 수 없을 때의 대체 모델",
       "agentTemperature": "0(결정적)에서 2(매우 창의적) 사이의 값",
-      "agentThinkingLevel": "이 에이전트의 기본 추론 강도 (off, low, medium, high). 상속은 모델 구성을 사용합니다.",
+      "agentThinkingLevel": "이 에이전트의 기본 추론 강도 (off, low, medium, high, xhigh, max). 상속은 모델 구성을 사용합니다.",
       "agentMaxIterations": "에이전트가 한 작업에서 실행할 수 있는 최대 단계",
       "agentMaxTokens": "생성되는 응답의 최대 토큰 제한",
       "agentContextWindow": "모델이 지원하는 최대 컨텍스트 창 크기",

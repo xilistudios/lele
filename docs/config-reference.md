@@ -41,7 +41,7 @@ See `docs/agents-models-providers.md`.
 Default reasoning effort, accepted in `agents.defaults` and per agent in
 `agents.list`.
 
-- values: `"off"`, `"low"`, `"medium"`, `"high"`
+- values: `"off"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`
 - default: unset, which means *inherit* — the field is optional and is never
   written as an empty string
 - env override (defaults only): `LELE_AGENTS_DEFAULTS_THINKING_LEVEL`
@@ -56,7 +56,7 @@ Resolution order for the effort sent to the provider:
 `"off"` from any of the first three layers sends an explicit
 `reasoning: {"enabled": false}` so a proxy with a server-side reasoning default
 cannot re-enable it (`"off"` is not a valid per-model `reasoning.effort` value).
-`"low"` / `"medium"` / `"high"` always send `enabled: true` with the effort. A
+`"low"` / `"medium"` / `"high"` / `"xhigh"` / `"max"` always send `enabled: true` with the effort. A
 `/think` override is per session and is cleared by `/think default` (falling
 back to the agent level) and by `/clear` / `/new`; the agent-level value stays.
 

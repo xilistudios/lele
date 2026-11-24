@@ -361,39 +361,64 @@ func (c *cmd) Verbose(ctx context.Context, message telego.Message, currentLevel 
 	return err
 }
 
-func (c *cmd) Think(ctx context.Context, message telego.Message, currentLevel string) error {
-	var currentEmoji string
-	switch currentLevel {
+// thinkLevelEmoji returns the display emoji for a think level.
+func thinkLevelEmoji(level string) string {
+	switch level {
 	case "low":
-		currentEmoji = "💡"
+		return "💡"
 	case "medium":
-		currentEmoji = "🤔"
+		return "🤔"
 	case "high":
-		currentEmoji = "🧩"
+		return "🧩"
+	case "xhigh":
+		return "🔬"
+	case "max":
+		return "🔥"
 	default:
-		currentEmoji = "🧠"
+		return "🧠"
+	}
+}
+
+// thinkOptionsText lists the available think levels; shared by /think and its
+// callback handler so the two surfaces never drift.
+const thinkOptionsText = "*Available options:*\n" +
+	"🧠 *off* - Use agent default reasoning\n" +
+	"💡 *low* - Minimal reasoning effort\n" +
+	"🤔 *medium* - Balanced reasoning effort\n" +
+	"🧩 *high* - High reasoning effort\n" +
+	"🔬 *xhigh* - Extra-high reasoning effort\n" +
+	"🔥 *max* - Maximum reasoning effort\n\n" +
+	"Use /think to cycle through levels."
+
+// thinkKeyboard builds the level buttons from config.ThinkingLevels, three per
+// row, so new levels appear automatically.
+func thinkKeyboard() [][]telego.InlineKeyboardButton {
+	var rows [][]telego.InlineKeyboardButton
+	var row []telego.InlineKeyboardButton
+	for i, level := range config.ThinkingLevels {
+		row = append(row, tu.InlineKeyboardButton(thinkLevelEmoji(level)+" "+level).WithCallbackData("think:set:"+level))
+		if len(row) == 3 || i == len(config.ThinkingLevels)-1 {
+			rows = append(rows, tu.InlineKeyboardRow(row...))
+			row = nil
+		}
+	}
+	return rows
+}
+
+func (c *cmd) Think(ctx context.Context, message telego.Message, currentLevel string) error {
+	// Display "off"/unset as "default" (the agent-configured level).
+	if normalized, ok := config.NormalizeThinkingLevel(currentLevel); !ok || normalized == "" || normalized == "off" {
 		currentLevel = "default"
 	}
+	currentEmoji := thinkLevelEmoji(currentLevel)
 
 	response := fmt.Sprintf(
 		"*Think Mode Settings*\n\n"+
 			"Current level: %s *%s*\n\n"+
-			"*Available options:*\n"+
-			"🧠 *off* - Use agent default reasoning\n"+
-			"💡 *low* - Minimal reasoning effort\n"+
-			"🤔 *medium* - Balanced reasoning effort\n"+
-			"🧩 *high* - Maximum reasoning effort\n\n"+
-			"Use /think to cycle through levels.",
+			thinkOptionsText,
 		currentEmoji, currentLevel)
 
-	rows := [][]telego.InlineKeyboardButton{
-		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("🧠 off").WithCallbackData("think:set:off"),
-			tu.InlineKeyboardButton("💡 low").WithCallbackData("think:set:low"),
-			tu.InlineKeyboardButton("🤔 medium").WithCallbackData("think:set:medium"),
-			tu.InlineKeyboardButton("🧩 high").WithCallbackData("think:set:high"),
-		),
-	}
+	rows := thinkKeyboard()
 
 	msg := tu.Message(tu.ID(message.Chat.ID), response).WithReplyMarkup(tu.InlineKeyboard(rows...))
 	msg.ParseMode = telego.ModeMarkdown

@@ -124,6 +124,8 @@ describe('ProviderModelsEditor reasoning overrides', () => {
       tr('settings.options.thinkingLow'),
       tr('settings.options.thinkingMedium'),
       tr('settings.options.thinkingHigh'),
+      tr('settings.options.thinkingXhigh'),
+      tr('settings.options.thinkingMax'),
     ])
   })
 

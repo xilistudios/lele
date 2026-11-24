@@ -595,7 +595,7 @@
       "agentModelPrimary": "Mô hình chính agent này sẽ dùng",
       "agentModelFallbacks": "Các mô hình thay thế nếu mô hình chính không khả dụng",
       "agentTemperature": "Giá trị từ 0 (tất định) đến 2 (rất sáng tạo)",
-      "agentThinkingLevel": "Mức nỗ lực suy luận mặc định của agent này (off, low, medium, high). Kế thừa sẽ dùng cấu hình mô hình.",
+      "agentThinkingLevel": "Mức nỗ lực suy luận mặc định của agent này (off, low, medium, high, xhigh, max). Kế thừa sẽ dùng cấu hình mô hình.",
       "agentMaxIterations": "Số bước tối đa agent có thể thực thi trong một tác vụ",
       "agentMaxTokens": "Giới hạn token tối đa cho các phản hồi được tạo",
       "agentContextWindow": "Kích thước cửa sổ ngữ cảnh tối đa mà mô hình hỗ trợ",

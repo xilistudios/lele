@@ -51,8 +51,8 @@ const (
 )
 
 func thinkingLevelSelectorOptions() (labels, values []string) {
-	return []string{"(default)", "off", "low", "medium", "high"},
-		[]string{"", "off", "low", "medium", "high"}
+	return append([]string{"(default)"}, config.ThinkingLevels...),
+		append([]string{""}, config.ThinkingLevels...)
 }
 
 const settingsAgentAddKey = "__add__"

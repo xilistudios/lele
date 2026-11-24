@@ -217,7 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ di chuyển · SPACE bật/tắt · ENTER lưu · ESC hủy",
   "tui.settings.selectorCustom": "(tùy chỉnh…)",
   "tui.settings.invalidNumber": "Vui lòng nhập một số dương hợp lệ",
-  "tui.settings.invalidThinkingLevel": "Vui lòng nhập mức suy nghĩ hợp lệ (off, low, medium, high)",
+  "tui.settings.invalidThinkingLevel": "Vui lòng nhập mức suy nghĩ hợp lệ (off, low, medium, high, xhigh, max)",
   "tui.settings.session": "Phiên",
   "tui.settings.tools": "Công cụ",
   "tui.settings.logs": "Nhật ký",
