@@ -223,17 +223,22 @@ func (d *Inbound) StartPump(ctx context.Context) {
 				continue
 			}
 			nextPrune = now.Add(PruneInterval)
-			pruned, err := d.repo.PruneProcessed(ProcessedRetention, now)
-			if err != nil {
-				logger.WarnCF(logComponent, "Dedupe ledger prune failed",
-					map[string]interface{}{"error": err.Error()})
-				continue
-			}
-			if pruned > 0 {
-				logger.InfoCF(logComponent, "Pruned dedupe ledger",
-					map[string]interface{}{"pruned": pruned})
-			}
+			pruneProcessed(d.repo, now)
+			pruneDeadLetter(d.repo, now)
 		}
+	}
+}
+
+func pruneProcessed(repo *store.SpoolRepo, now time.Time) {
+	pruned, err := repo.PruneProcessed(ProcessedRetention, now)
+	if err != nil {
+		logger.WarnCF(logComponent, "Dedupe ledger prune failed",
+			map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if pruned > 0 {
+		logger.InfoCF(logComponent, "Pruned dedupe ledger",
+			map[string]interface{}{"pruned": pruned})
 	}
 }
 
@@ -466,6 +471,12 @@ func (d *Inbound) push(msg bus.InboundMessage) bool {
 func dedupeIDFor(msg bus.InboundMessage) string {
 	if id := msg.Metadata["message_id"]; id != "" {
 		return id
+	}
+	if ts := msg.Metadata["message_ts"]; ts != "" {
+		if ch := msg.Metadata["channel_id"]; ch != "" {
+			return ch + ":" + ts
+		}
+		return ts
 	}
 	return randomHex()
 }

@@ -1184,6 +1184,93 @@ func TestDedupeIDFor(t *testing.T) {
 	}
 }
 
+func slackInbound(content string) bus.InboundMessage {
+	return bus.InboundMessage{
+		Channel:    "slack",
+		SenderID:   "U-1",
+		ChatID:     "C-1",
+		Content:    content,
+		SessionKey: "slack:C-1",
+		Metadata: map[string]string{
+			"message_ts": "1700000000.000100",
+			"channel_id": "C-1",
+			"thread_ts":  "",
+			"platform":   "slack",
+			"peer_kind":  "channel",
+			"peer_id":    "C-1",
+			"team_id":    "T-1",
+		},
+	}
+}
+
+func TestDedupeIDFor_SlackStable(t *testing.T) {
+	first := dedupeIDFor(slackInbound("hello"))
+	if second := dedupeIDFor(slackInbound("hello")); first != second {
+		t.Fatalf("dedupeIDFor(same slack message) = %q then %q, want a stable id", first, second)
+	}
+	if first != "C-1:1700000000.000100" {
+		t.Errorf("dedupeIDFor(slack) = %q, want the channel-qualified message_ts", first)
+	}
+
+	otherChannel := slackInbound("hello")
+	otherChannel.Metadata["channel_id"] = "C-2"
+	if got := dedupeIDFor(otherChannel); got == first {
+		t.Error("dedupeIDFor() collides across channels; the ledger keys on (channel, dedupe_id)")
+	}
+
+	bare := slackInbound("hello")
+	delete(bare.Metadata, "channel_id")
+	if got := dedupeIDFor(bare); got != "1700000000.000100" {
+		t.Errorf("dedupeIDFor(no channel_id) = %q, want the bare message_ts", got)
+	}
+
+	withID := slackInbound("hello")
+	withID.Metadata["message_id"] = "m-1"
+	if got := dedupeIDFor(withID); got != "m-1" {
+		t.Errorf("dedupeIDFor(message_id present) = %q, want %q", got, "m-1")
+	}
+}
+
+func TestInboundSlackReplayAfterCrashIsDeduped(t *testing.T) {
+	fixture := openSpool(t)
+	published := newFakeBus(4)
+	d := NewInbound(fixture.repo, published.publish)
+
+	turn := slackInbound("run the report")
+	if !d.Enqueue(&turn) {
+		t.Fatal("Enqueue() = false, want the slack message spooled")
+	}
+	if turn.DedupeID != "C-1:1700000000.000100" {
+		t.Fatalf("Enqueue() stamped DedupeID = %q, want the stable slack id", turn.DedupeID)
+	}
+	d.Finish(turn)
+
+	replay := slackInbound("run the report")
+	if !d.Enqueue(&replay) {
+		t.Fatal("Enqueue(replay) = false, want the replay spooled")
+	}
+	if replay.DedupeID != turn.DedupeID {
+		t.Fatalf("replay DedupeID = %q, want the same stable id %q", replay.DedupeID, turn.DedupeID)
+	}
+	if !d.ShouldSkip(replay) {
+		t.Fatal("ShouldSkip(replay) = false, want the already-processed turn skipped")
+	}
+
+	if _, err := fixture.repo.ReleaseClaims(d.InstanceID()); err != nil {
+		t.Fatalf("ReleaseClaims() failed: %v", err)
+	}
+	if n, err := d.Drain(context.Background()); err != nil || n != 0 {
+		t.Fatalf("Drain(replay) = (%d, %v), want (0, nil): the turn already ran", n, err)
+	}
+
+	if got := published.published(); len(got) != 0 {
+		t.Errorf("publisher saw %d messages, want 0: the crash replay must not run the turn twice", len(got))
+	}
+	if st := statsOf(t, fixture.repo); st.PendingInbound+st.ClaimedInbound != 0 {
+		t.Errorf("spool = %+v, want the replayed row dropped", st)
+	}
+}
+
 func blockSpoolDeletes(t *testing.T, s *store.Store) {
 	t.Helper()
 

@@ -20,10 +20,18 @@ const (
 	kickBuffer           = 1
 )
 
+var outboundBackoff = []time.Duration{
+	time.Second,
+	5 * time.Second,
+	30 * time.Second,
+	2 * time.Minute,
+}
+
 type Delivery struct {
 	Delivered    bool
 	SentAnyChunk bool
 	Err          error
+	RetryAfter   time.Duration
 }
 
 type DeliverFunc func(ctx context.Context, msg bus.OutboundMessage) Delivery
@@ -33,6 +41,7 @@ type Outbound struct {
 	deliver    DeliverFunc
 	instanceID string
 	kick       chan struct{}
+	now        func() time.Time
 }
 
 func NewOutbound(repo *store.SpoolRepo, deliver DeliverFunc) *Outbound {
@@ -41,6 +50,7 @@ func NewOutbound(repo *store.SpoolRepo, deliver DeliverFunc) *Outbound {
 		deliver:    deliver,
 		instanceID: "lele-" + randomHex(),
 		kick:       make(chan struct{}, kickBuffer),
+		now:        time.Now,
 	}
 }
 
@@ -152,7 +162,7 @@ func (d *Outbound) Drain(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	reclaimed, err := d.repo.ReclaimStale(StaleClaimTimeout, time.Now())
+	reclaimed, err := d.repo.ReclaimStale(StaleClaimTimeout, d.now())
 	if err != nil {
 		logger.WarnCF(logComponent, "Stale outbound spool reclaim failed; replaying pending rows only",
 			map[string]interface{}{"error": err.Error()})
@@ -202,6 +212,7 @@ func (d *Outbound) StartPump(ctx context.Context) {
 
 	ticker := time.NewTicker(OutboundPumpInterval)
 	defer ticker.Stop()
+	nextPrune := d.now()
 
 	for {
 		select {
@@ -209,9 +220,26 @@ func (d *Outbound) StartPump(ctx context.Context) {
 			return
 		case <-ticker.C:
 			d.pumpOnce(ctx)
+			if now := d.now(); !now.Before(nextPrune) {
+				nextPrune = now.Add(PruneInterval)
+				pruneDeadLetter(d.repo, now)
+			}
 		case <-d.kick:
 			d.pumpOnce(ctx)
 		}
+	}
+}
+
+func pruneDeadLetter(repo *store.SpoolRepo, now time.Time) {
+	pruned, err := repo.PruneDeadLetter(ProcessedRetention, now)
+	if err != nil {
+		logger.WarnCF(logComponent, "Dead-letter prune failed",
+			map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if pruned > 0 {
+		logger.InfoCF(logComponent, "Pruned dead-letter rows",
+			map[string]interface{}{"pruned": pruned})
 	}
 }
 
@@ -278,7 +306,7 @@ func (d *Outbound) claimPass(ctx context.Context) (passResult, error) {
 			break
 		}
 
-		items, err := d.repo.ClaimBatch(store.SpoolOutbound, ClaimLimit, d.instanceID, time.Now())
+		items, err := d.repo.ClaimBatch(store.SpoolOutbound, ClaimLimit, d.instanceID, d.now())
 		if err != nil {
 			batchErr = fmt.Errorf("durable: claim outbound spool: %w", err)
 			break
@@ -327,7 +355,7 @@ func (d *Outbound) deliverOne(ctx context.Context, item store.SpoolItem) (outcom
 
 	msg.SpoolID = item.ID
 
-	if !item.CreatedAt.IsZero() && time.Since(item.CreatedAt) > MaxOutboundAge {
+	if !item.CreatedAt.IsZero() && d.now().Sub(item.CreatedAt) > MaxOutboundAge {
 		if err := d.deadLetter(&msg, "expired"); err != nil {
 			return outcomeSkipped, err
 		}
@@ -362,17 +390,32 @@ func (d *Outbound) deliverOne(ctx context.Context, item store.SpoolItem) (outcom
 		return outcomeSkipped, nil
 
 	default:
-		if err := d.repo.IncAttempt(item.ID); err != nil {
-			return outcomeDeferred, fmt.Errorf("durable: count outbound attempt %d: %w", item.ID, err)
-		}
 		if item.Attempts+1 >= MaxOutboundAttempts {
+			if err := d.repo.IncAttempt(item.ID); err != nil {
+				return outcomeDeferred, fmt.Errorf("durable: count outbound attempt %d: %w", item.ID, err)
+			}
 			if err := d.deadLetter(&msg, deliveryErr(delivery.Err)); err != nil {
 				return outcomeSkipped, err
 			}
 			return outcomeSkipped, nil
 		}
+		nextAt := d.now().Add(outboundBackoffFor(item.Attempts, delivery.RetryAfter))
+		if err := d.repo.IncAttemptWithBackoff(item.ID, nextAt); err != nil {
+			return outcomeDeferred, fmt.Errorf("durable: defer outbound attempt %d: %w", item.ID, err)
+		}
 		return outcomeDeferred, d.releaseRow(item.ID)
 	}
+}
+
+func outboundBackoffFor(attempts int, retryAfter time.Duration) time.Duration {
+	delay := outboundBackoff[len(outboundBackoff)-1]
+	if attempts >= 0 && attempts < len(outboundBackoff) {
+		delay = outboundBackoff[attempts]
+	}
+	if retryAfter > delay {
+		return retryAfter
+	}
+	return delay
 }
 
 func (d *Outbound) releaseRow(id int64) error {
@@ -391,7 +434,7 @@ func (d *Outbound) deadLetter(msg *bus.OutboundMessage, reason string) error {
 			"reason":          reason,
 			"content_preview": truncate(msg.Content, poisonPreview),
 		})
-	if err := d.repo.Complete([]int64{msg.SpoolID}); err != nil {
+	if err := d.repo.DeadLetter([]int64{msg.SpoolID}, reason, d.now()); err != nil {
 		return fmt.Errorf("durable: dead-letter outbound spool row %d: %w", msg.SpoolID, err)
 	}
 	return nil

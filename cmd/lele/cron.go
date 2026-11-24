@@ -72,11 +72,20 @@ func cronHelp() {
 	fmt.Println("  --channel        Channel for delivery")
 }
 
-func cronListCmd(storePath string, repo *store.CronRepo) {
+func newCronCLIService(storePath string, repo *store.CronRepo) *cron.CronService {
 	cs := cron.NewCronService(storePath, nil)
-	if repo != nil {
-		cs.SetStore(repo)
+	if repo == nil {
+		return cs
 	}
+	if err := cs.SetStore(repo); err != nil {
+		fmt.Printf("Error opening cron store: %v\n", err)
+		os.Exit(1)
+	}
+	return cs
+}
+
+func cronListCmd(storePath string, repo *store.CronRepo) {
+	cs := newCronCLIService(storePath, repo)
 	jobs := cs.ListJobs(true)
 
 	if len(jobs) == 0 {
@@ -192,10 +201,7 @@ func cronAddCmd(storePath string, repo *store.CronRepo) {
 		}
 	}
 
-	cs := cron.NewCronService(storePath, nil)
-	if repo != nil {
-		cs.SetStore(repo)
-	}
+	cs := newCronCLIService(storePath, repo)
 	job, err := cs.AddJob(name, schedule, message, deliver, channel, to)
 	if err != nil {
 		fmt.Printf("Error adding job: %v\n", err)
@@ -206,10 +212,7 @@ func cronAddCmd(storePath string, repo *store.CronRepo) {
 }
 
 func cronRemoveCmd(storePath, jobID string, repo *store.CronRepo) {
-	cs := cron.NewCronService(storePath, nil)
-	if repo != nil {
-		cs.SetStore(repo)
-	}
+	cs := newCronCLIService(storePath, repo)
 	if cs.RemoveJob(jobID) {
 		fmt.Printf("✓ Removed job %s\n", jobID)
 	} else {
@@ -224,10 +227,7 @@ func cronEnableCmd(storePath string, disable bool, repo *store.CronRepo) {
 	}
 
 	jobID := os.Args[3]
-	cs := cron.NewCronService(storePath, nil)
-	if repo != nil {
-		cs.SetStore(repo)
-	}
+	cs := newCronCLIService(storePath, repo)
 	enabled := !disable
 
 	job := cs.EnableJob(jobID, enabled)

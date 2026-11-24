@@ -7,11 +7,12 @@ import (
 	"strconv"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 var migrations = []struct {
 	Version int
 	DDL     string
+	Apply   func(*sql.Tx) error
 }{
 	{
 		Version: 1,
@@ -211,6 +212,60 @@ CREATE INDEX idx_pending_pins_created ON native_pending_pins(created_at);
 ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version: 9,
+		// Outbound spool backoff: a row that failed is deferred until
+		// next_attempt_at instead of being re-claimed on the next 250 ms pump
+		// tick. The pump used to burn all MaxOutboundAttempts in ~1.25 s, so any
+		// failure lasting longer than that (429 with retry_after, a 2 s DNS blip)
+		// silently lost the reply. The empty string means "claimable now"; every
+		// writer uses spoolTimeLayout, whose fractional-digit width is fixed, so
+		// the lexicographic comparison in the claim predicate is exact (the v7
+		// PIN lesson: variable-width RFC3339 text is not orderable).
+		//
+		// spool_dead_letter holds exhausted, expired and partially-sent outbound
+		// rows instead of deleting them: the payload stays inspectable and
+		// re-sendable by hand, and the live-work spool (with its partial pending
+		// index) stays small. Rows are pruned on the same 7-day retention as the
+		// dedupe ledger.
+		//
+		// Both statements are additive and re-runnable: SQLite has no
+		// ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so the column is added only
+		// when pragma_table_info says it is absent.
+		Apply: func(tx *sql.Tx) error {
+			var columns int
+			if err := tx.QueryRow(
+				`SELECT COUNT(*) FROM pragma_table_info('spool') WHERE name = 'next_attempt_at'`,
+			).Scan(&columns); err != nil {
+				return fmt.Errorf("inspect spool columns: %w", err)
+			}
+			if columns == 0 {
+				if _, err := tx.Exec(`ALTER TABLE spool ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("add spool.next_attempt_at: %w", err)
+				}
+			}
+
+			if _, err := tx.Exec(`
+CREATE TABLE IF NOT EXISTS spool_dead_letter (
+    id          INTEGER PRIMARY KEY,
+    direction   TEXT NOT NULL,
+    channel     TEXT NOT NULL DEFAULT '',
+    chat_id     TEXT NOT NULL DEFAULT '',
+    session_key TEXT NOT NULL DEFAULT '',
+    msg_id      TEXT NOT NULL DEFAULT '',
+    payload     TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    dead_at     TEXT NOT NULL,
+    reason      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_spool_dead_letter_dead_at ON spool_dead_letter(dead_at);
+`); err != nil {
+				return fmt.Errorf("create spool_dead_letter: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 func migrate(db *sql.DB) error {
@@ -235,6 +290,12 @@ func migrate(db *sql.DB) error {
 
 	for _, m := range migrations {
 		if m.Version <= current {
+			continue
+		}
+		if m.Apply != nil {
+			if err := m.Apply(tx); err != nil {
+				return fmt.Errorf("apply migration %d: %w", m.Version, err)
+			}
 			continue
 		}
 		if _, err := tx.Exec(m.DDL); err != nil {

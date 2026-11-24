@@ -165,7 +165,9 @@ func gatewayCmd() {
 	cronService := setupCronTool(agentLoop.GetProvidable(), agentLoop, msgBus, cfg.WorkspacePath(), cfg.Agents.Defaults.RestrictToWorkspace, execTimeout, cfg)
 
 	if s := agentLoop.Store(); s != nil {
-		cronService.SetStore(s.Cron())
+		if err := cronService.SetStore(s.Cron()); err != nil {
+			logger.WarnCF("gateway", "Cron store unavailable; keeping the in-memory jobs", map[string]interface{}{"error": err.Error()})
+		}
 	}
 
 	heartbeatService := heartbeat.NewHeartbeatService(
@@ -214,8 +216,7 @@ func gatewayCmd() {
 	di := setupDurableInbound(cfg.Session.DurableInboundEnabled(), spoolRepo, msgBus, agentLoop, channelManager)
 
 	deliver := func(ctx context.Context, msg bus.OutboundMessage) durable.Delivery {
-		o := channelManager.SendToPeer(ctx, msg.Channel, msg)
-		return durable.Delivery{Delivered: o.Delivered, SentAnyChunk: o.SentAnyChunk, Err: o.Err}
+		return deliveryFor(channelManager.SendToPeer(ctx, msg.Channel, msg))
 	}
 	do := setupDurableOutbound(cfg.Session.DurableOutboundEnabled(), spoolRepo, msgBus, channelManager, deliver)
 
@@ -589,6 +590,19 @@ type durableOutbound struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+func deliveryFor(outcome channels.SendOutcome) durable.Delivery {
+	delivery := durable.Delivery{
+		Delivered:    outcome.Delivered,
+		SentAnyChunk: outcome.SentAnyChunk,
+		Err:          outcome.Err,
+	}
+	var rateLimited *channels.RateLimitError
+	if errors.As(outcome.Err, &rateLimited) {
+		delivery.RetryAfter = rateLimited.RetryAfter
+	}
+	return delivery
 }
 
 func setupDurableOutbound(

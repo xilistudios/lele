@@ -1177,3 +1177,256 @@ func TestSpoolReclaimStaleNonUTCNow(t *testing.T) {
 		t.Fatalf("Stats() after draining = %+v, want %+v", got, want)
 	}
 }
+func spoolNextAttemptAt(t *testing.T, s *Store, id int64) string {
+	t.Helper()
+
+	var nextAt string
+	if err := s.DB().QueryRow(`SELECT next_attempt_at FROM spool WHERE id = ?`, id).Scan(&nextAt); err != nil {
+		t.Fatalf("read next_attempt_at for row %d failed: %v", id, err)
+	}
+	return nextAt
+}
+
+func countDeadLetters(t *testing.T, s *Store) int {
+	t.Helper()
+
+	var n int
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM spool_dead_letter`).Scan(&n); err != nil {
+		t.Fatalf("count spool_dead_letter failed: %v", err)
+	}
+	return n
+}
+
+func TestSpoolClaimBatchSkipsDeferredRows(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	id := mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m-1", `{"n":1}`)
+	now := testNow()
+	retryAt := now.Add(30 * time.Second)
+
+	if err := repo.IncAttemptWithBackoff(id, retryAt); err != nil {
+		t.Fatalf("IncAttemptWithBackoff() failed: %v", err)
+	}
+	if got, want := spoolNextAttemptAt(t, s, id), retryAt.Format(spoolTimeLayout); got != want {
+		t.Fatalf("next_attempt_at = %q, want %q", got, want)
+	}
+
+	early, err := repo.ClaimBatch(SpoolInbound, 10, "gw", now)
+	if err != nil {
+		t.Fatalf("ClaimBatch(before backoff) failed: %v", err)
+	}
+	if len(early) != 0 {
+		t.Fatalf("ClaimBatch(before backoff) = %v, want nothing: the row is deferred", spoolIDs(early))
+	}
+
+	due, err := repo.ClaimBatch(SpoolInbound, 10, "gw", retryAt)
+	if err != nil {
+		t.Fatalf("ClaimBatch(at backoff deadline) failed: %v", err)
+	}
+	if got, want := spoolIDs(due), []int64{id}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ClaimBatch(at backoff deadline) = %v, want %v", got, want)
+	}
+	if due[0].Attempts != 1 {
+		t.Errorf("claimed attempts = %d, want 1", due[0].Attempts)
+	}
+}
+
+func TestSpoolIncAttemptWithBackoff(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	id := mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m", `{"a":1}`)
+	if got := spoolNextAttemptAt(t, s, id); got != "" {
+		t.Fatalf("next_attempt_at on a fresh row = %q, want empty (claimable immediately)", got)
+	}
+
+	now := testNow()
+	for want := 1; want <= 3; want++ {
+		if err := repo.IncAttemptWithBackoff(id, now.Add(time.Duration(want)*time.Second)); err != nil {
+			t.Fatalf("IncAttemptWithBackoff() pass %d failed: %v", want, err)
+		}
+		var attempts int
+		if err := s.DB().QueryRow(`SELECT attempts FROM spool WHERE id = ?`, id).Scan(&attempts); err != nil {
+			t.Fatalf("read attempts failed: %v", err)
+		}
+		if attempts != want {
+			t.Fatalf("attempts after %d increments = %d, want %d", want, attempts, want)
+		}
+		if got, exp := spoolNextAttemptAt(t, s, id), now.Add(time.Duration(want)*time.Second).Format(spoolTimeLayout); got != exp {
+			t.Fatalf("next_attempt_at = %q, want %q", got, exp)
+		}
+	}
+
+	if err := repo.IncAttemptWithBackoff(9999, now); err != nil {
+		t.Errorf("IncAttemptWithBackoff(missing) failed: %v", err)
+	}
+}
+
+func TestSpoolDeadLetterRetainsRow(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	dead := mustEnqueue(t, repo, SpoolOutbound, "chat-7", "", `{"content":"undeliverable"}`)
+	live := mustEnqueue(t, repo, SpoolOutbound, "chat-7", "", `{"content":"fine"}`)
+	if err := repo.IncAttempt(dead); err != nil {
+		t.Fatalf("IncAttempt() failed: %v", err)
+	}
+
+	now := testNow()
+	if err := repo.DeadLetter([]int64{dead}, "telegram rate limited", now); err != nil {
+		t.Fatalf("DeadLetter() failed: %v", err)
+	}
+
+	if got := countSpoolRows(t, s); got != 1 {
+		t.Fatalf("spool rows after DeadLetter = %d, want 1 (only the live row)", got)
+	}
+	if got := spoolNextAttemptAt(t, s, live); got != "" {
+		t.Errorf("live row next_attempt_at = %q, want empty", got)
+	}
+
+	var (
+		id                 int64
+		direction, channel string
+		chatID, sessionKey string
+		msgID, payload     string
+		attempts           int
+		createdAt, deadAt  string
+		reason             string
+	)
+	if err := s.DB().QueryRow(
+		`SELECT id, direction, channel, chat_id, session_key, msg_id, payload, attempts, created_at, dead_at, reason
+		 FROM spool_dead_letter WHERE id = ?`, dead,
+	).Scan(&id, &direction, &channel, &chatID, &sessionKey, &msgID, &payload, &attempts, &createdAt, &deadAt, &reason); err != nil {
+		t.Fatalf("read dead letter %d failed: %v", dead, err)
+	}
+	if direction != SpoolOutbound || channel != "telegram" || chatID != "chat-1" || sessionKey != "chat-7" {
+		t.Errorf("dead letter routing = %s/%s/%s/%s, want outbound/telegram/chat-1/chat-7",
+			direction, channel, chatID, sessionKey)
+	}
+	if msgID != "" {
+		t.Errorf("dead letter msg_id = %q, want empty", msgID)
+	}
+	if payload != `{"content":"undeliverable"}` {
+		t.Errorf("dead letter payload = %q, want the row payload retained", payload)
+	}
+	if attempts != 1 {
+		t.Errorf("dead letter attempts = %d, want 1", attempts)
+	}
+	if reason != "telegram rate limited" {
+		t.Errorf("dead letter reason = %q, want the caller's reason", reason)
+	}
+	if deadAt != now.UTC().Format(spoolTimeLayout) {
+		t.Errorf("dead_at = %q, want %q", deadAt, now.UTC().Format(spoolTimeLayout))
+	}
+	if _, err := time.Parse(time.RFC3339Nano, createdAt); err != nil {
+		t.Errorf("created_at %q does not parse: %v", createdAt, err)
+	}
+
+	if err := repo.DeadLetter(nil, "nothing", now); err != nil {
+		t.Errorf("DeadLetter(no ids) failed: %v", err)
+	}
+	if err := repo.DeadLetter([]int64{9999}, "missing", now); err != nil {
+		t.Errorf("DeadLetter(missing id) failed: %v", err)
+	}
+	if got := countDeadLetters(t, s); got != 1 {
+		t.Errorf("dead letters after id-less calls = %d, want 1", got)
+	}
+}
+
+func TestSpoolPruneDeadLetterAgedOnly(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	now := testNow()
+	old := mustEnqueue(t, repo, SpoolOutbound, "chat-1", "", `{"i":1}`)
+	fresh := mustEnqueue(t, repo, SpoolOutbound, "chat-1", "", `{"i":2}`)
+
+	if err := repo.DeadLetter([]int64{old}, "failed", now.Add(-8*24*time.Hour)); err != nil {
+		t.Fatalf("DeadLetter(aged) failed: %v", err)
+	}
+	if err := repo.DeadLetter([]int64{fresh}, "failed", now); err != nil {
+		t.Fatalf("DeadLetter(fresh) failed: %v", err)
+	}
+
+	n, err := repo.PruneDeadLetter(7*24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("PruneDeadLetter() failed: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("PruneDeadLetter(7d) = %d rows, want 1", n)
+	}
+	if got := countDeadLetters(t, s); got != 1 {
+		t.Errorf("dead letters after prune = %d, want 1", got)
+	}
+
+	if n, err := repo.PruneDeadLetter(time.Second, now.Add(2*time.Second)); err != nil || n != 1 {
+		t.Fatalf("PruneDeadLetter(fresh cutoff) = (%d, %v), want (1, nil)", n, err)
+	}
+	if n, err := repo.PruneDeadLetter(time.Second, now.Add(2*time.Second)); err != nil || n != 0 {
+		t.Errorf("second PruneDeadLetter(fresh cutoff) = (%d, %v), want (0, nil)", n, err)
+	}
+}
+
+func TestMigrations_V8ToV9_AddsSpoolBackoffAndDeadLetter(t *testing.T) {
+	path := spoolPath(t)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q) failed: %v", path, err)
+	}
+	id := mustEnqueue(t, s.Spool(), SpoolOutbound, "chat-1", "", `{"legacy":true}`)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	db, err := openRawDB(path)
+	if err != nil {
+		t.Fatalf("openRawDB(%q) failed: %v", path, err)
+	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS spool_dead_letter`); err != nil {
+		db.Close()
+		t.Fatalf("DROP spool_dead_letter: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE spool DROP COLUMN next_attempt_at`); err != nil {
+		db.Close()
+		t.Fatalf("DROP spool.next_attempt_at: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE schema_meta SET value = '8' WHERE key = 'schema_version'`); err != nil {
+		db.Close()
+		t.Fatalf("downgrade schema_version: %v", err)
+	}
+	db.Close()
+
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q) after downgrade failed: %v", path, err)
+	}
+	t.Cleanup(func() {
+		if err := upgraded.Close(); err != nil {
+			t.Errorf("Close() failed: %v", err)
+		}
+	})
+
+	var version string
+	if err := upgraded.DB().QueryRow(`SELECT value FROM schema_meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	if want := strconv.Itoa(SchemaVersion); version != want {
+		t.Errorf("schema_version = %q, want %q", version, want)
+	}
+
+	if got := spoolNextAttemptAt(t, upgraded, id); got != "" {
+		t.Errorf("legacy row next_attempt_at = %q, want empty (claimable immediately)", got)
+	}
+	items, err := upgraded.Spool().ClaimBatch(SpoolOutbound, 10, "gw", testNow())
+	if err != nil {
+		t.Fatalf("ClaimBatch() after upgrade failed: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != id {
+		t.Fatalf("ClaimBatch() after upgrade = %v, want the legacy row %d", spoolIDs(items), id)
+	}
+	if got := countDeadLetters(t, upgraded); got != 0 {
+		t.Errorf("dead letter rows after upgrade = %d, want 0", got)
+	}
+}

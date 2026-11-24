@@ -962,3 +962,48 @@ func TestSessionRepo_CountExcludedMessages(t *testing.T) {
 		t.Errorf("CountExcludedMessages(missing) = %d, want 0", emptyCount)
 	}
 }
+
+func TestCronRepo_UpdateCronJobNeverInserts(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Cron()
+
+	row := &CronJobRow{
+		ID: "job-1", Name: "nightly", Enabled: true,
+		Schedule:    `{"kind":"every","everyMs":3600000}`,
+		Payload:     `{"message":"nightly"}`,
+		State:       `{"last_status":"ok"}`,
+		CreatedAtMS: 1754500000000, UpdatedAtMS: 1754500000000,
+	}
+
+	updated, err := repo.UpdateCronJob(row)
+	if err != nil {
+		t.Fatalf("UpdateCronJob(missing row) failed: %v", err)
+	}
+	if updated != 0 {
+		t.Fatalf("UpdateCronJob(missing row) = %d rows, want 0", updated)
+	}
+	if _, ok, err := repo.GetCronJob("job-1"); err != nil || ok {
+		t.Fatalf("GetCronJob(job-1) after a missing-row update = (_, %v, %v), want (_, false, nil): an update must never create the row", ok, err)
+	}
+
+	if err := repo.UpsertCronJob(row); err != nil {
+		t.Fatalf("UpsertCronJob(job-1) failed: %v", err)
+	}
+
+	row.State = `{"last_status":"error","last_error":"boom"}`
+	row.UpdatedAtMS = 1754600000000
+	updated, err = repo.UpdateCronJob(row)
+	if err != nil {
+		t.Fatalf("UpdateCronJob(job-1) failed: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("UpdateCronJob(existing row) = %d rows, want 1", updated)
+	}
+	got, ok, err := repo.GetCronJob("job-1")
+	if err != nil || !ok {
+		t.Fatalf("GetCronJob(job-1) = (_, %v, %v), want (_, true, nil)", ok, err)
+	}
+	if got.State != row.State || got.UpdatedAtMS != row.UpdatedAtMS {
+		t.Errorf("stored row = %+v, want the updated state %q at %d", got, row.State, row.UpdatedAtMS)
+	}
+}

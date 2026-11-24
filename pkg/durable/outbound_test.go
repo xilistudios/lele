@@ -490,12 +490,12 @@ func TestOutboundDrainReclaimsStaleFirst(t *testing.T) {
 
 func TestOutboundDeliverFailureReleases(t *testing.T) {
 	fixture := openSpool(t)
-	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("retry me")))
+	id := rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("retry me")))
 
 	box := &outbox{script: func(bus.OutboundMessage) Delivery {
 		return Delivery{Err: errors.New("channel offline")}
 	}}
-	d := NewOutbound(fixture.repo, box.deliverer())
+	d, clock := withFakeClock(fixture.repo, box.deliverer())
 
 	n, err := d.Drain(context.Background())
 	if err != nil {
@@ -524,9 +524,13 @@ func TestOutboundDeliverFailureReleases(t *testing.T) {
 	if attempts != 1 {
 		t.Errorf("attempts = %d, want 1", attempts)
 	}
+
+	if wait := nextAttemptAt(t, fixture, id).Sub(clock.Now()); wait != outboundBackoff[0] {
+		t.Errorf("retry delay = %v, want %v: a released row must not be re-claimed immediately", wait, outboundBackoff[0])
+	}
 }
 
-func TestOutboundPartialChunkForgets(t *testing.T) {
+func TestOutboundPartialChunkDeadLettersRetained(t *testing.T) {
 	fixture := openSpool(t)
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("long answer")))
 
@@ -541,10 +545,17 @@ func TestOutboundPartialChunkForgets(t *testing.T) {
 
 	st := statsOf(t, fixture.repo)
 	if st.PendingOutbound+st.ClaimedOutbound != 0 {
-		t.Errorf("spool = %+v, want the partial row deleted, NOT requeued", st)
+		t.Errorf("spool = %+v, want the partial row out of the queue, NOT requeued", st)
 	}
 	if box.callCount() != 1 {
 		t.Errorf("deliverer called %d times, want 1: a partial send must not be retried", box.callCount())
+	}
+	rows := deadLetters(t, fixture)
+	if len(rows) != 1 {
+		t.Fatalf("dead letters after a partial send = %d, want 1 (retained for inspection)", len(rows))
+	}
+	if rows[0].Reason != "chunk 2 of 3 failed" {
+		t.Errorf("dead letter reason = %q, want the delivery error", rows[0].Reason)
 	}
 }
 
@@ -555,15 +566,19 @@ func TestOutboundAttemptsCapDeadLetters(t *testing.T) {
 	box := &outbox{script: func(bus.OutboundMessage) Delivery {
 		return Delivery{Err: errors.New("chat botteado")}
 	}}
-	d := NewOutbound(fixture.repo, box.deliverer())
+	d, clock := withFakeClock(fixture.repo, box.deliverer())
+	id := mustFirstID(t, fixture)
 
 	for pass := 1; pass <= MaxOutboundAttempts; pass++ {
 		if _, err := d.Drain(context.Background()); err != nil {
 			t.Fatalf("Drain() pass %d failed: %v", pass, err)
 		}
 		st := statsOf(t, fixture.repo)
-		if pass < MaxOutboundAttempts && st.PendingOutbound != 1 {
-			t.Fatalf("pass %d: spool = %+v, want the row requeued for the next attempt", pass, st)
+		if pass < MaxOutboundAttempts {
+			if st.PendingOutbound != 1 {
+				t.Fatalf("pass %d: spool = %+v, want the row requeued for the next attempt", pass, st)
+			}
+			advancedToNextAttempt(t, fixture, clock, id)
 		}
 	}
 
@@ -572,6 +587,9 @@ func TestOutboundAttemptsCapDeadLetters(t *testing.T) {
 	}
 	if box.callCount() != MaxOutboundAttempts {
 		t.Errorf("deliverer called %d times, want exactly %d", box.callCount(), MaxOutboundAttempts)
+	}
+	if got := deadLetters(t, fixture); len(got) != 1 || got[0].ID != id {
+		t.Errorf("dead letters = %+v, want the exhausted row %d retained", got, id)
 	}
 }
 
@@ -603,10 +621,17 @@ func TestOutboundAgeCapDropsStaleRows(t *testing.T) {
 		}
 	}
 	if st := statsOf(t, fixture.repo); st.PendingOutbound+st.ClaimedOutbound != 0 {
-		t.Errorf("spool = %+v, want the expired row deleted too", st)
+		t.Errorf("spool = %+v, want the expired row dropped from the queue", st)
 	}
 	if got := rowPayload(t, fixture, agedID); got != "" {
-		t.Errorf("expired row %d survived with payload %q, want it deleted", agedID, got)
+		t.Errorf("expired row %d survived in the queue with payload %q, want it dead-lettered", agedID, got)
+	}
+	rows := deadLetters(t, fixture)
+	if len(rows) != 1 || rows[0].ID != agedID {
+		t.Fatalf("dead letters = %+v, want the expired row %d retained", rows, agedID)
+	}
+	if rows[0].Reason != "expired" {
+		t.Errorf("dead letter reason = %q, want %q", rows[0].Reason, "expired")
 	}
 }
 
@@ -1030,6 +1055,8 @@ func TestOutboundDoesNotWriteProcessedLedger(t *testing.T) {
 		}
 	}}
 	replay := NewOutbound(fixture.repo, box.deliverer())
+	clock := newFakeClock()
+	replay.now = clock.Now
 
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("replayed")))
 	rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("partial")))
@@ -1039,6 +1066,7 @@ func TestOutboundDoesNotWriteProcessedLedger(t *testing.T) {
 		if _, err := replay.Drain(context.Background()); err != nil {
 			t.Fatalf("Drain() pass %d failed: %v", pass, err)
 		}
+		clock.Advance(3 * time.Minute)
 	}
 	rawOutEnqueue(t, fixture.repo, "{not json")
 	for pass := 0; pass < poisonLimit; pass++ {
