@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -75,6 +76,10 @@ type cronPayloadWithMeta struct {
 }
 
 type JobHandler func(job *CronJob) (string, error)
+
+const legacyMigratedSuffix = ".migrated"
+
+var errJobVanished = errors.New("cron: job no longer exists in the store")
 
 type cronRevision struct {
 	count      int
@@ -261,7 +266,7 @@ func (cs *CronService) collectDueJobs() []string {
 			continue
 		}
 		job.State.NextRunAtMS = nil
-		if err := cs.persistJobUnsafe(job); err != nil {
+		if err := cs.persistJobStateUnsafe(job); err != nil && !logVanishedJob(err, job.ID, "the due state was persisted") {
 			log.Printf("[cron] failed to persist due job %s: %v", job.ID, err)
 		}
 	}
@@ -281,7 +286,7 @@ func (cs *CronService) executeJobByID(jobID string) {
 				if cs.store.Jobs[i].ID == jobID {
 					cs.store.Jobs[i].State.LastStatus = "error"
 					cs.store.Jobs[i].State.LastError = fmt.Sprintf("panic: %v", r)
-					if err := cs.persistJobUnsafe(&cs.store.Jobs[i]); err != nil {
+					if err := cs.persistJobStateUnsafe(&cs.store.Jobs[i]); err != nil && !logVanishedJob(err, jobID, "the panic state was persisted") {
 						log.Printf("[cron] failed to persist panicked job %s: %v", jobID, err)
 					}
 					break
@@ -367,7 +372,7 @@ func (cs *CronService) executeJobByID(jobID string) {
 		job.State.NextRunAtMS = nextRun
 	}
 
-	if err := cs.persistJobUnsafe(job); err != nil {
+	if err := cs.persistJobStateUnsafe(job); err != nil && !logVanishedJob(err, job.ID, "the state update") {
 		log.Printf("[cron] failed to persist job %s state: %v", job.ID, err)
 	}
 }
@@ -422,7 +427,7 @@ func (cs *CronService) recomputeNextRuns() {
 		if cs.repo == nil {
 			continue
 		}
-		if err := cs.persistJobUnsafe(job); err != nil {
+		if err := cs.persistJobStateUnsafe(job); err != nil && !logVanishedJob(err, job.ID, "the next run was persisted") {
 			log.Printf("[cron] failed to persist next run of job %s: %v", job.ID, err)
 		}
 	}
@@ -551,6 +556,12 @@ func (cs *CronService) migrateFileIntoRepo(tmp *CronStore) error {
 			return fmt.Errorf("cron: migrate job %s: %w", job.ID, upsertErr)
 		}
 	}
+
+	retired := cs.storePath + legacyMigratedSuffix
+	if renameErr := os.Rename(cs.storePath, retired); renameErr != nil {
+		return fmt.Errorf("cron: retire migrated legacy store: %w", renameErr)
+	}
+	log.Printf("[cron] imported %d jobs from %s into the store; retired it as %s", len(tmp.Jobs), cs.storePath, retired)
 	return nil
 }
 
@@ -568,7 +579,7 @@ func (cs *CronService) saveFileUnsafe() error {
 	return os.WriteFile(cs.storePath, data, 0600)
 }
 
-func (cs *CronService) persistJobUnsafe(job *CronJob) error {
+func (cs *CronService) insertJobUnsafe(job *CronJob) error {
 	if cs.repo == nil {
 		return cs.saveFileUnsafe()
 	}
@@ -582,6 +593,34 @@ func (cs *CronService) persistJobUnsafe(job *CronJob) error {
 	}
 	cs.refreshRevisionUnsafe()
 	return nil
+}
+
+func (cs *CronService) persistJobStateUnsafe(job *CronJob) error {
+	if cs.repo == nil {
+		return cs.saveFileUnsafe()
+	}
+
+	row, err := cronJobToRow(job)
+	if err != nil {
+		return err
+	}
+	updated, err := cs.repo.UpdateCronJob(row)
+	if err != nil {
+		return fmt.Errorf("cron: update job %s: %w", job.ID, err)
+	}
+	if updated == 0 {
+		return errJobVanished
+	}
+	cs.refreshRevisionUnsafe()
+	return nil
+}
+
+func logVanishedJob(err error, jobID, stage string) bool {
+	if !errors.Is(err, errJobVanished) {
+		return false
+	}
+	log.Printf("[cron] job %s disappeared before %s", jobID, stage)
+	return true
 }
 
 func (cs *CronService) deleteJobUnsafe(jobID string) error {
@@ -648,7 +687,7 @@ func (cs *CronService) AddJobWithOptions(name string, schedule CronSchedule, mes
 	}
 
 	cs.store.Jobs = append(cs.store.Jobs, job)
-	if err := cs.persistJobUnsafe(&job); err != nil {
+	if err := cs.insertJobUnsafe(&job); err != nil {
 		return nil, err
 	}
 
@@ -663,7 +702,7 @@ func (cs *CronService) UpdateJob(job *CronJob) error {
 		if cs.store.Jobs[i].ID == job.ID {
 			cs.store.Jobs[i] = *job
 			cs.store.Jobs[i].UpdatedAtMS = time.Now().UnixMilli()
-			return cs.persistJobUnsafe(&cs.store.Jobs[i])
+			return cs.persistJobStateUnsafe(&cs.store.Jobs[i])
 		}
 	}
 	return fmt.Errorf("job not found")
@@ -712,7 +751,7 @@ func (cs *CronService) EnableJob(jobID string, enabled bool) *CronJob {
 				job.State.NextRunAtMS = nil
 			}
 
-			if err := cs.persistJobUnsafe(job); err != nil {
+			if err := cs.persistJobStateUnsafe(job); err != nil && !logVanishedJob(err, job.ID, "the enable state was persisted") {
 				log.Printf("[cron] failed to persist job %s after enable: %v", job.ID, err)
 			}
 			return job
@@ -802,7 +841,13 @@ func (cs *CronService) RunJobNow(jobID string) error {
 		job.State.LastError = ""
 	}
 
-	return cs.persistJobUnsafe(job)
+	if err := cs.persistJobStateUnsafe(job); err != nil {
+		if logVanishedJob(err, jobID, "the state update") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (cs *CronService) jobByIDUnsafe(jobID string) *CronJob {

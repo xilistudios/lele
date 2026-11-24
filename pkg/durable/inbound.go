@@ -223,25 +223,22 @@ func (d *Inbound) StartPump(ctx context.Context) {
 				continue
 			}
 			nextPrune = now.Add(PruneInterval)
-			pruned, err := d.repo.PruneProcessed(ProcessedRetention, now)
-			if err != nil {
-				logger.WarnCF(logComponent, "Dedupe ledger prune failed",
-					map[string]interface{}{"error": err.Error()})
-			} else if pruned > 0 {
-				logger.InfoCF(logComponent, "Pruned dedupe ledger",
-					map[string]interface{}{"pruned": pruned})
-			}
-			deadLettered, err := d.repo.PruneDeadLetter(ProcessedRetention, now)
-			if err != nil {
-				logger.WarnCF(logComponent, "Dead-letter prune failed",
-					map[string]interface{}{"error": err.Error()})
-				continue
-			}
-			if deadLettered > 0 {
-				logger.InfoCF(logComponent, "Pruned dead-letter rows",
-					map[string]interface{}{"pruned": deadLettered})
-			}
+			pruneProcessed(d.repo, now)
+			pruneDeadLetter(d.repo, now)
 		}
+	}
+}
+
+func pruneProcessed(repo *store.SpoolRepo, now time.Time) {
+	pruned, err := repo.PruneProcessed(ProcessedRetention, now)
+	if err != nil {
+		logger.WarnCF(logComponent, "Dedupe ledger prune failed",
+			map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if pruned > 0 {
+		logger.InfoCF(logComponent, "Pruned dedupe ledger",
+			map[string]interface{}{"pruned": pruned})
 	}
 }
 

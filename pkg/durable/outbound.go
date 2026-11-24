@@ -25,7 +25,6 @@ var outboundBackoff = []time.Duration{
 	5 * time.Second,
 	30 * time.Second,
 	2 * time.Minute,
-	10 * time.Minute,
 }
 
 type Delivery struct {
@@ -213,6 +212,7 @@ func (d *Outbound) StartPump(ctx context.Context) {
 
 	ticker := time.NewTicker(OutboundPumpInterval)
 	defer ticker.Stop()
+	nextPrune := d.now()
 
 	for {
 		select {
@@ -220,9 +220,26 @@ func (d *Outbound) StartPump(ctx context.Context) {
 			return
 		case <-ticker.C:
 			d.pumpOnce(ctx)
+			if now := d.now(); !now.Before(nextPrune) {
+				nextPrune = now.Add(PruneInterval)
+				pruneDeadLetter(d.repo, now)
+			}
 		case <-d.kick:
 			d.pumpOnce(ctx)
 		}
+	}
+}
+
+func pruneDeadLetter(repo *store.SpoolRepo, now time.Time) {
+	pruned, err := repo.PruneDeadLetter(ProcessedRetention, now)
+	if err != nil {
+		logger.WarnCF(logComponent, "Dead-letter prune failed",
+			map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if pruned > 0 {
+		logger.InfoCF(logComponent, "Pruned dead-letter rows",
+			map[string]interface{}{"pruned": pruned})
 	}
 }
 

@@ -216,13 +216,7 @@ func gatewayCmd() {
 	di := setupDurableInbound(cfg.Session.DurableInboundEnabled(), spoolRepo, msgBus, agentLoop, channelManager)
 
 	deliver := func(ctx context.Context, msg bus.OutboundMessage) durable.Delivery {
-		o := channelManager.SendToPeer(ctx, msg.Channel, msg)
-		delivery := durable.Delivery{Delivered: o.Delivered, SentAnyChunk: o.SentAnyChunk, Err: o.Err}
-		var rateLimited *channels.RateLimitError
-		if errors.As(o.Err, &rateLimited) {
-			delivery.RetryAfter = rateLimited.RetryAfter
-		}
-		return delivery
+		return deliveryFor(channelManager.SendToPeer(ctx, msg.Channel, msg))
 	}
 	do := setupDurableOutbound(cfg.Session.DurableOutboundEnabled(), spoolRepo, msgBus, channelManager, deliver)
 
@@ -596,6 +590,19 @@ type durableOutbound struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+func deliveryFor(outcome channels.SendOutcome) durable.Delivery {
+	delivery := durable.Delivery{
+		Delivered:    outcome.Delivered,
+		SentAnyChunk: outcome.SentAnyChunk,
+		Err:          outcome.Err,
+	}
+	var rateLimited *channels.RateLimitError
+	if errors.As(outcome.Err, &rateLimited) {
+		delivery.RetryAfter = rateLimited.RetryAfter
+	}
+	return delivery
 }
 
 func setupDurableOutbound(

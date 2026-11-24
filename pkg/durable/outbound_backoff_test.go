@@ -273,3 +273,74 @@ func TestOutboundDeadLetterRetained(t *testing.T) {
 		t.Errorf("dead letters after the aged prune = %d, want 0", len(got))
 	}
 }
+
+func TestOutboundDeadLetterPruneKeepsRecentRows(t *testing.T) {
+	fixture := openSpool(t)
+	clock := newFakeClock()
+	id := rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("never delivered")))
+	if err := fixture.repo.DeadLetter([]int64{id}, "chat deleted", clock.Now()); err != nil {
+		t.Fatalf("DeadLetter() failed: %v", err)
+	}
+
+	pruneDeadLetter(fixture.repo, clock.Now())
+	if got := len(deadLetters(t, fixture)); got != 1 {
+		t.Fatalf("dead letters after pruning inside the %v retention = %d, want 1", ProcessedRetention, got)
+	}
+
+	pruneDeadLetter(fixture.repo, clock.Now().Add(ProcessedRetention+time.Minute))
+	if got := len(deadLetters(t, fixture)); got != 0 {
+		t.Fatalf("dead letters after pruning past the %v retention = %d, want 0", ProcessedRetention, got)
+	}
+
+	pruneDeadLetter(fixture.repo, clock.Now().Add(ProcessedRetention+time.Minute))
+	if got := len(deadLetters(t, fixture)); got != 0 {
+		t.Fatalf("dead letters after a repeated prune = %d, want 0: the prune is idempotent", got)
+	}
+}
+
+func TestOutboundPumpPrunesDeadLetterWithoutInbound(t *testing.T) {
+	fixture := openSpool(t)
+	clock := newFakeClock()
+	d := NewOutbound(fixture.repo, alwaysDelivered())
+	d.now = clock.Now
+
+	id := rawOutEnqueue(t, fixture.repo, outPayload(t, outMsg("never delivered")))
+	if err := fixture.repo.DeadLetter([]int64{id}, "chat deleted", clock.Now().Add(-ProcessedRetention-time.Hour)); err != nil {
+		t.Fatalf("DeadLetter() failed: %v", err)
+	}
+	if got := len(deadLetters(t, fixture)); got != 1 {
+		t.Fatalf("dead letters before the pump started = %d, want 1", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.StartPump(ctx)
+
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if len(deadLetters(t, fixture)) == 0 {
+			return
+		}
+	}
+	t.Fatalf("dead letters after the outbound pump ran = %d, want 0: the outbound-only configuration must prune too", len(deadLetters(t, fixture)))
+}
+
+func TestOutboundBackoffCoversEveryAttemptGap(t *testing.T) {
+	if got := len(outboundBackoff); got != MaxOutboundAttempts-1 {
+		t.Fatalf("outboundBackoff has %d entries, want %d: the last attempt dead-letters instead of deferring, so an extra entry is unreachable",
+			got, MaxOutboundAttempts-1)
+	}
+
+	for attempts := 0; attempts < len(outboundBackoff); attempts++ {
+		if got, want := outboundBackoffFor(attempts, 0), outboundBackoff[attempts]; got != want {
+			t.Errorf("outboundBackoffFor(%d, 0) = %v, want %v", attempts, got, want)
+		}
+	}
+
+	last := outboundBackoff[len(outboundBackoff)-1]
+	if got := outboundBackoffFor(len(outboundBackoff), 0); got != last {
+		t.Errorf("outboundBackoffFor(past the schedule, 0) = %v, want the last step %v", got, last)
+	}
+	if got := outboundBackoffFor(0, time.Hour); got != time.Hour {
+		t.Errorf("outboundBackoffFor(0, 1h) = %v, want the channel's retry_after 1h", got)
+	}
+}

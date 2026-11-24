@@ -80,10 +80,6 @@ func (r *CronRepo) GetCronJob(id string) (*CronJobRow, bool, error) {
 }
 
 func (r *CronRepo) UpsertCronJob(row *CronJobRow) error {
-	enabledInt := 0
-	if row.Enabled {
-		enabledInt = 1
-	}
 	_, err := r.db.Exec(
 		`INSERT INTO cron_jobs(id, name, enabled, schedule, payload, state, scope, session_key, created_at, updated_at)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -93,7 +89,7 @@ func (r *CronRepo) UpsertCronJob(row *CronJobRow) error {
 		   state = excluded.state, scope = excluded.scope,
 		   session_key = excluded.session_key,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at`,
-		row.ID, row.Name, enabledInt, row.Schedule,
+		row.ID, row.Name, enabledFlag(row.Enabled), row.Schedule,
 		row.Payload, row.State, row.Scope, row.SessionKey,
 		strconv.FormatInt(row.CreatedAtMS, 10),
 		strconv.FormatInt(row.UpdatedAtMS, 10),
@@ -102,6 +98,34 @@ func (r *CronRepo) UpsertCronJob(row *CronJobRow) error {
 		return fmt.Errorf("store: upsert cron job %q: %w", row.ID, err)
 	}
 	return nil
+}
+
+func (r *CronRepo) UpdateCronJob(row *CronJobRow) (int, error) {
+	res, err := r.db.Exec(
+		`UPDATE cron_jobs SET name = ?, enabled = ?, schedule = ?, payload = ?, state = ?,
+		   scope = ?, session_key = ?, created_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		row.Name, enabledFlag(row.Enabled), row.Schedule,
+		row.Payload, row.State, row.Scope, row.SessionKey,
+		strconv.FormatInt(row.CreatedAtMS, 10),
+		strconv.FormatInt(row.UpdatedAtMS, 10),
+		row.ID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: update cron job %q: %w", row.ID, err)
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: update cron job %q: rows affected: %w", row.ID, err)
+	}
+	return int(updated), nil
+}
+
+func enabledFlag(enabled bool) int {
+	if enabled {
+		return 1
+	}
+	return 0
 }
 
 func (r *CronRepo) DeleteCronJob(id string) error {

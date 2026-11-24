@@ -91,35 +91,7 @@ func TestSetStore_LazyMigration(t *testing.T) {
 	dir := t.TempDir()
 	jsonPath := filepath.Join(dir, "jobs.json")
 
-	legacyStore := &CronStore{
-		Version: 1,
-		Jobs: []CronJob{
-			{
-				ID:      "legacy-1",
-				Name:    "legacy-job",
-				Enabled: true,
-				Schedule: CronSchedule{
-					Kind:    "every",
-					EveryMS: int64Ptr(30000),
-				},
-				Payload: CronPayload{
-					Kind:    "agent_turn",
-					Message: "legacy",
-					Deliver: false,
-				},
-				DeleteAfterRun: false,
-				CreatedAtMS:    1700000000000,
-				UpdatedAtMS:    1700000000000,
-			},
-		},
-	}
-	data, err := json.MarshalIndent(legacyStore, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal legacy store: %v", err)
-	}
-	if err := os.WriteFile(jsonPath, data, 0600); err != nil {
-		t.Fatalf("write legacy JSON: %v", err)
-	}
+	writeLegacyJobsFile(t, jsonPath, legacyJob("legacy-1"))
 
 	cs := NewCronService(jsonPath, nil)
 	if len(cs.ListJobs(true)) != 1 {
@@ -144,8 +116,11 @@ func TestSetStore_LazyMigration(t *testing.T) {
 		t.Errorf("expected 1 job in memory, got %d", len(cs.ListJobs(true)))
 	}
 
-	if _, statErr := os.Stat(jsonPath); statErr != nil {
-		t.Errorf("legacy JSON should still exist: %v", statErr)
+	if _, statErr := os.Stat(jsonPath + legacyMigratedSuffix); statErr != nil {
+		t.Errorf("legacy JSON should be retired as %s%s: %v", jsonPath, legacyMigratedSuffix, statErr)
+	}
+	if _, statErr := os.Stat(jsonPath); !os.IsNotExist(statErr) {
+		t.Errorf("legacy JSON still in place after the migration (err=%v), want it renamed so it cannot re-import", statErr)
 	}
 
 	cs2 := NewCronService(jsonPath, nil)
@@ -541,5 +516,201 @@ func TestSetStoreReturnsError(t *testing.T) {
 	jobs := cs.ListJobs(true)
 	if len(jobs) != 1 || jobs[0].ID != jsonJob.ID {
 		t.Fatalf("in-memory jobs after a failed SetStore = %+v, want the previous snapshot kept", jobs)
+	}
+}
+
+func writeLegacyJobsFile(t *testing.T, path string, jobs ...CronJob) {
+	t.Helper()
+
+	data, err := json.MarshalIndent(&CronStore{Version: 1, Jobs: jobs}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal legacy store: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("write legacy JSON: %v", err)
+	}
+}
+
+func legacyJob(id string) CronJob {
+	return CronJob{
+		ID:          id,
+		Name:        id,
+		Enabled:     true,
+		Schedule:    everyHour(),
+		Payload:     CronPayload{Kind: "agent_turn", Message: "legacy"},
+		CreatedAtMS: 1700000000000,
+		UpdatedAtMS: 1700000000000,
+	}
+}
+
+func TestCronRemoveDuringExecutionNotResurrected(t *testing.T) {
+	s := openCronTestStore(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cs := NewCronService(filepath.Join(t.TempDir(), "gateway.json"), func(job *CronJob) (string, error) {
+		close(started)
+		<-release
+		return "ok", nil
+	})
+	if err := cs.SetStore(s.Cron()); err != nil {
+		t.Fatalf("SetStore() failed: %v", err)
+	}
+	startGatewayService(cs)
+	defer cs.Stop()
+
+	job, err := cs.AddJob("victim", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	go cs.executeJobByID(job.ID)
+	<-started
+
+	cli := repoService(t, s, "cli.json")
+	if !cli.RemoveJob(job.ID) {
+		t.Fatalf("cli.RemoveJob(%s) = false, want the job removed", job.ID)
+	}
+
+	close(release)
+	cs.jobWg.Wait()
+
+	if ids := repoJobIDs(t, s); len(ids) != 0 {
+		t.Fatalf("repo jobs after removing an executing job = %v, want none: the in-flight state write must not recreate the row", ids)
+	}
+
+	runTicks(cs, 3)
+	if ids := repoJobIDs(t, s); len(ids) != 0 {
+		t.Fatalf("repo jobs after gateway ticks = %v, want none", ids)
+	}
+	if cs.GetJob(job.ID) != nil {
+		t.Errorf("gateway memory resurrected the removed job %s", job.ID)
+	}
+}
+
+func TestCronRunJobNowDoesNotResurrectRemovedJob(t *testing.T) {
+	s := openCronTestStore(t)
+	cs := repoService(t, s, "gateway.json")
+	startGatewayService(cs)
+	defer cs.Stop()
+
+	job, err := cs.AddJob("victim", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	cli := repoService(t, s, "cli.json")
+	if !cli.RemoveJob(job.ID) {
+		t.Fatalf("cli.RemoveJob(%s) = false, want the job removed", job.ID)
+	}
+
+	if err := cs.RunJobNow(job.ID); err != nil {
+		t.Fatalf("RunJobNow(%s) on a job removed from the store = %v, want the disappeared path", job.ID, err)
+	}
+	if ids := repoJobIDs(t, s); len(ids) != 0 {
+		t.Fatalf("repo jobs after RunJobNow on a removed job = %v, want none", ids)
+	}
+}
+
+func TestCronDueStatePersistenceDoesNotResurrectRemovedJob(t *testing.T) {
+	s := openCronTestStore(t)
+	cs := repoService(t, s, "gateway.json")
+	startGatewayService(cs)
+	defer cs.Stop()
+
+	job, err := cs.AddJob("victim", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	cli := repoService(t, s, "cli.json")
+	if !cli.RemoveJob(job.ID) {
+		t.Fatalf("cli.RemoveJob(%s) = false, want the job removed", job.ID)
+	}
+
+	cs.mu.Lock()
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == job.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+
+	if due := cs.collectDueJobs(); len(due) != 1 || due[0] != job.ID {
+		t.Fatalf("collectDueJobs() = %v, want the stale in-memory job %s", due, job.ID)
+	}
+	if ids := repoJobIDs(t, s); len(ids) != 0 {
+		t.Fatalf("repo jobs after persisting due state = %v, want none: the due state write must not recreate the row", ids)
+	}
+}
+
+func TestCronLegacyFileImportsOnlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "jobs.json")
+	writeLegacyJobsFile(t, jsonPath, legacyJob("legacy-1"))
+
+	s := openCronTestStore(t)
+	gateway := NewCronService(jsonPath, nil)
+	if err := gateway.SetStore(s.Cron()); err != nil {
+		t.Fatalf("SetStore() failed: %v", err)
+	}
+	startGatewayService(gateway)
+	defer gateway.Stop()
+
+	if ids := repoJobIDs(t, s); len(ids) != 1 || ids[0] != "legacy-1" {
+		t.Fatalf("repo jobs after the legacy import = %v, want [legacy-1]", ids)
+	}
+
+	cli := repoService(t, s, "cli.json")
+	if !cli.RemoveJob("legacy-1") {
+		t.Fatal("cli.RemoveJob(legacy-1) = false, want the last job removed")
+	}
+
+	runTicks(gateway, 3)
+
+	if ids := repoJobIDs(t, s); len(ids) != 0 {
+		t.Fatalf("repo jobs after removing the last migrated job = %v, want none: the legacy file must not be re-imported", ids)
+	}
+	if gateway.GetJob("legacy-1") != nil {
+		t.Error("gateway memory resurrected the removed legacy job")
+	}
+	if _, err := os.Stat(jsonPath + legacyMigratedSuffix); err != nil {
+		t.Errorf("retired legacy file %s%s is missing: %v", jsonPath, legacyMigratedSuffix, err)
+	}
+}
+
+func TestCronRemoveDuringPanickingExecutionNotResurrected(t *testing.T) {
+	s := openCronTestStore(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cs := NewCronService(filepath.Join(t.TempDir(), "gateway.json"), func(job *CronJob) (string, error) {
+		close(started)
+		<-release
+		panic("job blew up")
+	})
+	if err := cs.SetStore(s.Cron()); err != nil {
+		t.Fatalf("SetStore() failed: %v", err)
+	}
+	startGatewayService(cs)
+	defer cs.Stop()
+
+	job, err := cs.AddJob("victim", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	go cs.executeJobByID(job.ID)
+	<-started
+
+	cli := repoService(t, s, "cli.json")
+	if !cli.RemoveJob(job.ID) {
+		t.Fatalf("cli.RemoveJob(%s) = false, want the job removed", job.ID)
+	}
+
+	close(release)
+	cs.jobWg.Wait()
+
+	if ids := repoJobIDs(t, s); len(ids) != 0 {
+		t.Fatalf("repo jobs after a panicking execution of a removed job = %v, want none: the panic state write must not recreate the row", ids)
 	}
 }

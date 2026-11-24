@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -530,4 +532,48 @@ func indexOfRegistrationOrder() map[string]int {
 		}
 	}
 	return want
+}
+
+func TestOutboundDeliveryCarriesRateLimitRetryAfter(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome channels.SendOutcome
+		want    time.Duration
+	}{
+		{
+			name:    "rate limited",
+			outcome: channels.SendOutcome{Err: &channels.RateLimitError{Channel: "telegram", RetryAfter: 42 * time.Second}},
+			want:    42 * time.Second,
+		},
+		{
+			name:    "wrapped rate limit",
+			outcome: channels.SendOutcome{Err: fmt.Errorf("send reply: %w", &channels.RateLimitError{Channel: "slack", RetryAfter: 7 * time.Second})},
+			want:    7 * time.Second,
+		},
+		{
+			name:    "plain failure",
+			outcome: channels.SendOutcome{Err: errors.New("channel offline")},
+			want:    0,
+		},
+		{
+			name:    "delivered",
+			outcome: channels.SendOutcome{Delivered: true},
+			want:    0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deliveryFor(tc.outcome)
+			if got.RetryAfter != tc.want {
+				t.Fatalf("Delivery.RetryAfter = %v, want %v: the gateway must surface the channel's retry_after to the spool", got.RetryAfter, tc.want)
+			}
+			if got.Delivered != tc.outcome.Delivered || got.SentAnyChunk != tc.outcome.SentAnyChunk {
+				t.Errorf("Delivery = %+v, want the outcome flags carried over", got)
+			}
+			if !errors.Is(got.Err, tc.outcome.Err) {
+				t.Errorf("Delivery.Err = %v, want the original error %v", got.Err, tc.outcome.Err)
+			}
+		})
+	}
 }
