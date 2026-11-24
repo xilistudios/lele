@@ -65,6 +65,7 @@ func TestChatHistoryCarriesSessionGroups(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	sessionKey := "agent:main:web:chat-h"
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 	ts.loop.setGroupSnapshotsForSession(sessionKey,
 		sessionSnap("group:persisted", sessionKey, group.StatusDone))
 

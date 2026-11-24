@@ -336,10 +336,11 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		return
 	}
 
-	if payload.SessionKey != "" && !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
+	if !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
 		n.sendError(client, "forbidden", "access denied to this session")
 		return
 	}
+
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
 	if payload.AgentID != "" {
@@ -449,8 +450,6 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		return
 	}
 
-	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
-
 	if !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
 		n.sendError(client, "forbidden", "access denied to this session")
 		logger.WarnCF("native", "Subscribe ownership validation failed", map[string]interface{}{
@@ -548,6 +547,11 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 	sessionKey := payload.SessionKey
 	if sessionKey == "" {
 		sessionKey = client.SessionKey
+	}
+
+	if !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
+		n.sendError(client, "forbidden", "access denied to this session")
+		return
 	}
 
 	n.emitNativeEvent(sessionKey, "typing.indicator", map[string]interface{}{

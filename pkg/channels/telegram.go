@@ -15,6 +15,7 @@ import (
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
+	tu "github.com/mymmrac/telego/telegoutil"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
@@ -106,6 +107,28 @@ func (c *TelegramChannel) telegramCallbackRegistry() []telegramCallbackSpec {
 		{prefix: "agent:", handler: c.handleAgentCallback},
 		{prefix: "verbose:", handler: c.handleVerboseCallback},
 		{prefix: "think:", handler: c.handleThinkCallback},
+	}
+}
+
+func (c *TelegramChannel) guardedCallbacks() []telegramCallbackSpec {
+	specs := c.telegramCallbackRegistry()
+	for i := range specs {
+		specs[i].handler = c.guardedCallback(specs[i].handler)
+	}
+	return specs
+}
+
+func (c *TelegramChannel) guardedCallback(handler func(context.Context, telego.CallbackQuery) error) func(context.Context, telego.CallbackQuery) error {
+	return func(ctx context.Context, query telego.CallbackQuery) error {
+		if !c.IsAllowed(telegramSenderID(query.From.ID, query.From.Username)) {
+			logger.DebugCF("telegram", "Callback rejected by allowlist", map[string]interface{}{
+				"user_id": query.From.ID,
+				"data":    query.Data,
+			})
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Not authorized"))
+			return nil
+		}
+		return handler(ctx, query)
 	}
 }
 
@@ -281,7 +304,7 @@ func (c *TelegramChannel) setupBotHandler(ctx context.Context) (*th.BotHandler, 
 		}, th.CommandEqual(commandName))
 	}
 
-	for _, callback := range c.telegramCallbackRegistry() {
+	for _, callback := range c.guardedCallbacks() {
 		callbackPrefix := callback.prefix
 		callbackHandler := callback.handler
 		bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {

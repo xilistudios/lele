@@ -31,10 +31,11 @@ func TestSSEChatStreamSurvivesWriteTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePIN: %v", err)
 	}
-	_, token, _, err := native.auth.PairWithPIN(pin.PIN, "WriteTimeoutTest")
+	client, token, _, err := native.auth.PairWithPIN(pin.PIN, "WriteTimeoutTest")
 	if err != nil {
 		t.Fatalf("PairWithPIN: %v", err)
 	}
+	native.auth.TrackSessionKey(client.ClientID, "wt-test-session")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/chat/send/stream", native.authMiddleware(http.HandlerFunc(native.handleChatSendStream)).ServeHTTP)

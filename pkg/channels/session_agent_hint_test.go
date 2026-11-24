@@ -13,6 +13,7 @@ func TestWSMessageRoutesAgentIDThroughHint(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	base := "native:" + ts.clientID + "-hint"
+	ts.channel.auth.TrackSessionKey(ts.clientID, base)
 	client := &WSClient{
 		ID:         "fake-client",
 		SessionKey: base,
@@ -64,6 +65,7 @@ func TestRESTChatRoutesAgentIDThroughHint(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	base := "native:" + ts.clientID + "-rest-hint"
+	ts.channel.auth.TrackSessionKey(ts.clientID, base)
 	body := `{"content":"hola","session_key":"` + base + `","agent_id":"agent1"}`
 	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/send", strings.NewReader(body))
 	if err != nil {
@@ -108,6 +110,7 @@ func TestRESTAgentEndpointStillBindsExplicitly(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	sessionKey := "native:" + ts.clientID + "-explicit"
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 	body := `{"agent_id":"agent1"}`
 	req, err := http.NewRequest(http.MethodPatch, ts.server.URL+"/api/v1/chat/sessions/"+sessionKey+"/agent", strings.NewReader(body))
 	if err != nil {

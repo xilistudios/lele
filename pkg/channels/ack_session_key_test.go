@@ -27,6 +27,7 @@ func TestWSMessageAckCarriesResolvedSessionKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	base := "native:" + ts.clientID + "-ack"
+	ts.channel.auth.TrackSessionKey(ts.clientID, base)
 	alias := base + ":chat:3"
 	setLoopAlias(ts.loop, base, alias)
 
@@ -95,6 +96,7 @@ func TestWSMessageAckWithoutAliasKeepsSessionKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	base := "native:" + ts.clientID + "-noalias"
+	ts.channel.auth.TrackSessionKey(ts.clientID, base)
 
 	client := &WSClient{
 		ID:         "fake-client",
