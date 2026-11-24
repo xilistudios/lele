@@ -447,6 +447,21 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			wantReasoning: map[string]interface{}{"effort": "low", "enabled": true},
 		},
 		{
+			name:          "session xhigh passes through",
+			sessionLevel:  "xhigh",
+			agentLevel:    "high",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "xhigh", "enabled": true},
+		},
+		{
+			name:          "agent max passes through",
+			agentLevel:    "max",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "max", "enabled": true},
+		},
+		{
 			name:          "agent level unset keeps legacy config path",
 			agentLevel:    "",
 			reasoning:     &config.ReasoningConfig{Enable: true, Effort: strPtr("high")},

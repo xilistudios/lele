@@ -705,8 +705,8 @@ func TestHandleAgentEditEnterThinkingOpensSelector(t *testing.T) {
 	if m.settingsSelectorField != "agentThinkingLevel" {
 		t.Fatalf("selector field = %q, want agentThinkingLevel", m.settingsSelectorField)
 	}
-	if len(m.settingsSelectorValues) != 5 || len(m.settingsSelectorItems) != 5 {
-		t.Fatalf("expected 5 options, got %d/%d: %v / %v",
+	if len(m.settingsSelectorValues) != 7 || len(m.settingsSelectorItems) != 7 {
+		t.Fatalf("expected 7 options, got %d/%d: %v / %v",
 			len(m.settingsSelectorItems), len(m.settingsSelectorValues),
 			m.settingsSelectorItems, m.settingsSelectorValues)
 	}
@@ -752,6 +752,18 @@ func TestSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	ag = m.findAgent("writer")
 	if ag.ThinkingLevel != nil {
 		t.Fatalf("(default) must clear the field to nil, got %q", *ag.ThinkingLevel)
+	}
+
+	// The new top tiers are selectable end-to-end.
+	for idx, want := range map[int]string{5: "xhigh", 6: "max"} {
+		m.modalSelectedIdx = agentFieldThinkingLevel
+		m.handleAgentEditEnter()
+		m.settingsSelectorIdx = idx
+		m.handleSelectorConfirm()
+		ag = m.findAgent("writer")
+		if ag.ThinkingLevel == nil || *ag.ThinkingLevel != want {
+			t.Fatalf("selector index %d: expected thinking level %s, got %v", idx, want, ag.ThinkingLevel)
+		}
 	}
 }
 
@@ -814,8 +826,8 @@ func TestHandleDefaultsThinkingLevel(t *testing.T) {
 	if m.settingsSelectorField != "defaultThinkingLevel" {
 		t.Fatalf("selector field = %q, want defaultThinkingLevel", m.settingsSelectorField)
 	}
-	if len(m.settingsSelectorValues) != 5 {
-		t.Fatalf("expected 5 options, got %d", len(m.settingsSelectorValues))
+	if len(m.settingsSelectorValues) != 7 {
+		t.Fatalf("expected 7 options, got %d", len(m.settingsSelectorValues))
 	}
 	m.closeSettingsSelector()
 

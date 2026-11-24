@@ -52,6 +52,8 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
     { value: 'low', label: t('settings.options.thinkingLow') },
     { value: 'medium', label: t('settings.options.thinkingMedium') },
     { value: 'high', label: t('settings.options.thinkingHigh') },
+    { value: 'xhigh', label: t('settings.options.thinkingXhigh') },
+    { value: 'max', label: t('settings.options.thinkingMax') },
   ]
 
   const REASONING_SUMMARIES: Array<{ value: string; label: string }> = [

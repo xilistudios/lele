@@ -358,6 +358,16 @@ func TestReasoningFromFormValues(t *testing.T) {
 			},
 		},
 		{
+			name: "effort_xhigh",
+			vals: reasoningVals("yes", "xhigh", "", "default", "default"),
+			want: &config.ReasoningConfig{Enable: true, Effort: ptrString("xhigh")},
+		},
+		{
+			name: "effort_max",
+			vals: reasoningVals("yes", "MAX", "", "default", "default"),
+			want: &config.ReasoningConfig{Enable: true, Effort: ptrString("max")},
+		},
+		{
 			name: "case_insensitive_and_trimmed",
 			vals: reasoningVals(" YES ", " MEDIUM ", " 512 ", " No ", " CONCISE "),
 			want: &config.ReasoningConfig{
@@ -382,7 +392,7 @@ func TestReasoningFromFormValues(t *testing.T) {
 		{
 			name:    "invalid_effort",
 			vals:    reasoningVals("yes", "bogus", "", "default", "default"),
-			wantErr: "must be low, medium, high or default",
+			wantErr: "must be low, medium, high, xhigh, max or default",
 		},
 		{
 			name:    "invalid_max_tokens_zero",

@@ -217,7 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ 이동 · SPACE 전환 · ENTER 저장 · ESC 취소",
   "tui.settings.selectorCustom": "(사용자 지정…)",
   "tui.settings.invalidNumber": "올바른 양수를 입력하세요",
-  "tui.settings.invalidThinkingLevel": "올바른 사고 수준을 입력하세요 (off, low, medium, high)",
+  "tui.settings.invalidThinkingLevel": "올바른 사고 수준을 입력하세요 (off, low, medium, high, xhigh, max)",
   "tui.settings.session": "세션",
   "tui.settings.tools": "도구",
   "tui.settings.logs": "로그",

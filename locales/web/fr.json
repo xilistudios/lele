@@ -595,7 +595,7 @@
       "agentModelPrimary": "Modèle principal utilisé par cet agent",
       "agentModelFallbacks": "Modèles alternatifs si le principal est indisponible",
       "agentTemperature": "Valeur entre 0 (déterministe) et 2 (très créatif)",
-      "agentThinkingLevel": "Effort de raisonnement par défaut pour cet agent (off, low, medium, high). Hériter utilise la configuration du modèle.",
+      "agentThinkingLevel": "Effort de raisonnement par défaut pour cet agent (off, low, medium, high, xhigh, max). Hériter utilise la configuration du modèle.",
       "agentMaxIterations": "Nombre maximal d'étapes que l'agent peut exécuter dans une tâche",
       "agentMaxTokens": "Limite maximale de tokens pour les réponses générées",
       "agentContextWindow": "Taille maximale de la fenêtre de contexte supportée par le modèle",

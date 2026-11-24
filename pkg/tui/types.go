@@ -157,7 +157,7 @@ var allCommands = []commandInfo{
 	{name: "/clear", description: "Clear session history"},
 	{name: "/clearq", description: "Drop queued messages for this session"},
 	{name: "/flushq", description: "Send the next queued message now (cancels a busy turn after confirm)"},
-	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
+	{name: "/think", description: "Toggle thinking level (off/low/medium/high/xhigh/max)"},
 	{name: "/lang", description: "Change language or download packs"},
 	{name: "/subagents", description: "Switch to subagent"},
 	{name: "/bg", description: "View background processes"},

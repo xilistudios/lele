@@ -217,7 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ 移動 · SPACE 切替 · ENTER 保存 · ESC キャンセル",
   "tui.settings.selectorCustom": "（カスタム…）",
   "tui.settings.invalidNumber": "有効な正の数値を入力してください",
-  "tui.settings.invalidThinkingLevel": "有効な思考レベルを入力してください（off, low, medium, high）",
+  "tui.settings.invalidThinkingLevel": "有効な思考レベルを入力してください（off, low, medium, high, xhigh, max）",
   "tui.settings.session": "セッション",
   "tui.settings.tools": "ツール",
   "tui.settings.logs": "ログ",

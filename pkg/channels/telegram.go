@@ -81,7 +81,7 @@ var telegramCommandRegistry = []telegramCommandSpec{
 	{name: "subagents", description: "List and manage running subagents"},
 	{name: "toggle", description: "Toggle runtime features like ephemeral sessions"},
 	{name: "verbose", description: "Toggle verbose mode for tool execution"},
-	{name: "think", description: "Toggle reasoning effort level (off/low/medium/high)"},
+	{name: "think", description: "Toggle reasoning effort level (off/low/medium/high/xhigh/max)"},
 	{name: "agent", description: "Select or change current agent"},
 }
 

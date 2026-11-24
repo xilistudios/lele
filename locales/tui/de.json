@@ -226,7 +226,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ navigieren · LEERTASTE umschalten · ENTER speichern · ESC abbrechen",
   "tui.settings.selectorCustom": "(benutzerdefiniert...)",
   "tui.settings.invalidNumber": "Bitte geben Sie eine gültige positive Zahl ein",
-  "tui.settings.invalidThinkingLevel": "Bitte geben Sie eine gültige Denkstufe ein (off, low, medium, high)",
+  "tui.settings.invalidThinkingLevel": "Bitte geben Sie eine gültige Denkstufe ein (off, low, medium, high, xhigh, max)",
   "tui.settings.session": "Sitzung",
   "tui.settings.tools": "Werkzeuge",
   "tui.settings.logs": "Protokolle",

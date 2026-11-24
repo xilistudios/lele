@@ -57,6 +57,9 @@ func TestGetEffectiveThinkLevel(t *testing.T) {
 		{"agent level only", "medium", "", "medium"},
 		{"agent off only", "off", "", "off"},
 		{"session wins over agent", "high", "low", "low"},
+		{"session xhigh wins over agent", "high", "xhigh", "xhigh"},
+		{"agent max only", "max", "", "max"},
+		{"session max wins over agent", "medium", "max", "max"},
 		{"session off wins over agent", "high", "off", "off"},
 		{"session default falls through to agent", "high", "default", "high"},
 	}
@@ -250,7 +253,7 @@ func TestThinkCommand_AcceptsNoneAlias(t *testing.T) {
 		t.Errorf("after /think none, persisted thinking = %q, want \"\"", got)
 	}
 
-	if resp := ch.handleThinkCommand(sessionKey, []string{"bogus"}); !strings.Contains(resp, "Valid levels: default, off, low, medium, high") {
+	if resp := ch.handleThinkCommand(sessionKey, []string{"bogus"}); !strings.Contains(resp, "Valid levels: default, off, low, medium, high, xhigh, max") {
 		t.Errorf("/think bogus error message does not list default: %q", resp)
 	}
 }

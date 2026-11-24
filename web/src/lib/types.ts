@@ -415,7 +415,7 @@ export type EditableChannelsConfig = {
 }
 
 export type ReasoningConfig = {
-  effort?: 'low' | 'medium' | 'high'
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   max_tokens?: number
   exclude?: boolean
   summary?: 'auto' | 'detailed' | 'concise'

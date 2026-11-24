@@ -55,10 +55,10 @@ describe('AgentModelSection', () => {
     withModels([])
   })
 
-  test('thinking level: 5 segments, "inherit" first (§4.4)', () => {
+  test('thinking level: 7 segments, "inherit" first (§4.4)', () => {
     const utils = setup({ id: 'coder' })
     const radios = utils.getAllByRole('radio')
-    expect(radios).toHaveLength(5)
+    expect(radios).toHaveLength(7)
     expect(radios[0].textContent).toBe(tr('settings.options.thinkingInherit'))
   })
 

@@ -74,7 +74,7 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		if _, ok := NormalizeThinkingLevel(*v); !ok {
 			errors = append(errors, ValidationError{
 				Path:    "agents.defaults.thinking_level",
-				Message: fmt.Sprintf("invalid thinking_level %q (valid: off, low, medium, high)", *v),
+				Message: fmt.Sprintf("invalid thinking_level %q (valid: %s)", *v, strings.Join(ThinkingLevels, ", ")),
 				Code:    "invalid_enum",
 			})
 		}
@@ -85,7 +85,7 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 			if _, ok := NormalizeThinkingLevel(*v); !ok {
 				errors = append(errors, ValidationError{
 					Path:    fmt.Sprintf("agents.list.%d.thinking_level", i),
-					Message: fmt.Sprintf("invalid thinking_level %q (valid: off, low, medium, high)", *v),
+					Message: fmt.Sprintf("invalid thinking_level %q (valid: %s)", *v, strings.Join(ThinkingLevels, ", ")),
 					Code:    "invalid_enum",
 				})
 			}

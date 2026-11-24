@@ -597,7 +597,7 @@
       "agentModelPrimary": "このエージェントが使用するプライマリモデル",
       "agentModelFallbacks": "プライマリが利用できない場合の代替モデル",
       "agentTemperature": "0（決定的）から 2（非常に創造的）の値",
-      "agentThinkingLevel": "このエージェントのデフォルト推論レベル（off, low, medium, high）。継承はモデル設定を使用します。",
+      "agentThinkingLevel": "このエージェントのデフォルト推論レベル（off, low, medium, high, xhigh, max）。継承はモデル設定を使用します。",
       "agentMaxIterations": "エージェントが 1 タスクで実行できる最大ステップ数",
       "agentMaxTokens": "生成される応答の最大トークン数",
       "agentContextWindow": "モデルがサポートする最大コンテキストウィンドウサイズ",

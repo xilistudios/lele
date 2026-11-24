@@ -217,7 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ навигация · ПРОБЕЛ переключить · ENTER сохранить · ESC отмена",
   "tui.settings.selectorCustom": "(свой…)",
   "tui.settings.invalidNumber": "Введите допустимое положительное число",
-  "tui.settings.invalidThinkingLevel": "Введите допустимый уровень мышления (off, low, medium, high)",
+  "tui.settings.invalidThinkingLevel": "Введите допустимый уровень мышления (off, low, medium, high, xhigh, max)",
   "tui.settings.session": "Сессия",
   "tui.settings.tools": "Инструменты",
   "tui.settings.logs": "Логи",

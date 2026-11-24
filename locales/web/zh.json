@@ -597,7 +597,7 @@
       "agentModelPrimary": "此智能体使用的主要模型",
       "agentModelFallbacks": "主模型不可用时的替代模型",
       "agentTemperature": "介于 0（确定性）和 2（非常有创造性）之间的值",
-      "agentThinkingLevel": "此智能体的默认推理级别（off, low, medium, high）。继承则使用模型配置。",
+      "agentThinkingLevel": "此智能体的默认推理级别（off, low, medium, high, xhigh, max）。继承则使用模型配置。",
       "agentMaxIterations": "智能体在一次任务中可执行的最大步骤数",
       "agentMaxTokens": "生成响应的最大 token 限制",
       "agentContextWindow": "模型支持的最大上下文窗口大小",

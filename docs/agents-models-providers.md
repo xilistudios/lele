@@ -69,7 +69,8 @@ both in `agents.defaults` and per agent in `agents.list`, and can also be set
 from the Web UI (agent settings, general defaults, add-agent wizard) or the TUI
 (Settings → Agents → `Thinking`).
 
-Allowed values are `"off"`, `"low"`, `"medium"` and `"high"`. The field is
+Allowed values are `"off"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` and
+`"max"`. The field is
 tri-state: omitting it (or clearing it back to "(default)" in the UI) means
 *inherit*, so the level is resolved from the layers below instead. It is never
 materialized as an empty string on disk.
@@ -111,7 +112,7 @@ What reaches the wire depends on the resolved level:
   disable (`reasoning: {"enabled": false}`) rather than omitting the key, so
   transparent proxies with a server-side reasoning default cannot re-enable it.
   It also suppresses the DeepSeek `thinking` flag.
-- `"low"` / `"medium"` / `"high"` always send `enabled: true` together with the
+- `"low"` / `"medium"` / `"high"` / `"xhigh"` / `"max"` always send `enabled: true` together with the
   effort, so providers that gate emission on `enabled` do not drop a level the
   model's own `reasoning` config never enabled.
 - No level at any layer keeps the previous behavior: the model `reasoning`
@@ -901,7 +902,7 @@ is editable from both UIs as well, so none of it needs `config.json`:
 
 - **TUI** — `/providers` → provider detail → ENTER on a model row appends five
   reasoning steps to the edit form: **Reasoning** (`yes`/`no`), **effort**
-  (`low`/`medium`/`high`), **max tokens** (a positive integer), **exclude**
+  (`low`/`medium`/`high`/`xhigh`/`max`), **max tokens** (a positive integer), **exclude**
   (`yes`/`no`) and **summary** (`auto`/`detailed`/`concise`). `default` on any
   of the four optional ones clears that override back to unset; disabling
   reasoning with every override cleared drops the whole object, so the saved

@@ -2,8 +2,11 @@ package channels
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 func (n *NativeChannel) handleSessionModel(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +109,7 @@ func (n *NativeChannel) handleSessionThinking(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !n.agentLoop.SetThinkLevel(sessionKey, req.Level) {
-		writeError(w, http.StatusBadRequest, "invalid level (valid: off, low, medium, high)", "level_invalid")
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid level (valid: %s)", strings.Join(config.ThinkingLevels, ", ")), "level_invalid")
 		return
 	}
 

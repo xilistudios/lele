@@ -548,30 +548,45 @@ type ReasoningConfig struct {
 	Enable    bool    `json:"enable,omitempty"`
 }
 
+// ThinkingLevels is the ordered set of thinking levels accepted by
+// NormalizeThinkingLevel and cycled by /think:
+// off → low → medium → high → xhigh → max → off.
+// "xhigh" is the extra-high effort tier (e.g. GPT-5.1-Codex-Max) and "max" the
+// maximum tier (e.g. Claude Opus 4.6 adaptive thinking); both are passed
+// through to providers that support them.
+var ThinkingLevels = []string{"off", "low", "medium", "high", "xhigh", "max"}
+
 func NormalizeThinkingLevel(v string) (string, bool) {
 	v = strings.ToLower(strings.TrimSpace(v))
 	switch v {
 	case "", "default", "none":
 		return "", true
 	}
-	switch v {
-	case "off", "low", "medium", "high":
-		return v, true
-	default:
-		return "", false
+	for _, level := range ThinkingLevels {
+		if v == level {
+			return v, true
+		}
 	}
+	return "", false
 }
 
 func (r *ReasoningConfig) Validate() error {
 	if r == nil {
 		return nil
 	}
-	validEfforts := map[string]bool{"low": true, "medium": true, "high": true}
+	// Per-model efforts are the thinking levels minus "off", which is specific
+	// to thinking_level / the /think override (it sends an explicit disable).
+	validEfforts := make(map[string]bool, len(ThinkingLevels))
+	for _, level := range ThinkingLevels {
+		if level != "off" {
+			validEfforts[level] = true
+		}
+	}
 	validSummaries := map[string]bool{"auto": true, "detailed": true, "concise": true}
 
 	if r.Effort != nil {
 		if !validEfforts[strings.ToLower(*r.Effort)] {
-			return fmt.Errorf("invalid reasoning effort: %q (must be low, medium, or high)", *r.Effort)
+			return fmt.Errorf("invalid reasoning effort: %q (must be low, medium, high, xhigh, or max)", *r.Effort)
 		}
 		low := strings.ToLower(*r.Effort)
 		r.Effort = &low

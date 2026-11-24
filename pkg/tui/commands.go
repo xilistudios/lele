@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -128,7 +129,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 
 	case "/think":
 		m.resetModal(ModalThink)
-		m.modalItems = []string{"off", "low", "medium", "high"}
+		m.modalItems = append([]string(nil), config.ThinkingLevels...)
 		return nil
 
 	case "/lang":

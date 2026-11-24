@@ -595,7 +595,7 @@
       "agentModelPrimary": "Modello primario che questo agente userà",
       "agentModelFallbacks": "Modelli alternativi se il primario non è disponibile",
       "agentTemperature": "Valore tra 0 (deterministico) e 2 (molto creativo)",
-      "agentThinkingLevel": "Livello di ragionamento predefinito per questo agente (off, low, medium, high). Eredita usa la configurazione del modello.",
+      "agentThinkingLevel": "Livello di ragionamento predefinito per questo agente (off, low, medium, high, xhigh, max). Eredita usa la configurazione del modello.",
       "agentMaxIterations": "Passi massimi che l'agente può eseguire in un compito",
       "agentMaxTokens": "Limite massimo di token per le risposte generate",
       "agentContextWindow": "Dimensione massima della finestra di contesto supportata dal modello",

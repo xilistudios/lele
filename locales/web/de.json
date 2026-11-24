@@ -595,7 +595,7 @@
       "agentModelPrimary": "Primäres Modell, das dieser Agent verwendet",
       "agentModelFallbacks": "Alternative Modelle, wenn das primäre nicht verfügbar ist",
       "agentTemperature": "Wert zwischen 0 (deterministisch) und 2 (sehr kreativ)",
-      "agentThinkingLevel": "Standard-Denkaufwand für diesen Agent (off, low, medium, high). Erben verwendet die Modellkonfiguration.",
+      "agentThinkingLevel": "Standard-Denkaufwand für diesen Agent (off, low, medium, high, xhigh, max). Erben verwendet die Modellkonfiguration.",
       "agentMaxIterations": "Maximale Schritte, die der Agent in einer Aufgabe ausführen kann",
       "agentMaxTokens": "Maximale Token-Grenze für generierte Antworten",
       "agentContextWindow": "Vom Modell unterstützte maximale Kontextfenstergröße",

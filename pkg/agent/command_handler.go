@@ -256,7 +256,8 @@ func (ch *commandHandlerImpl) handleVerboseCommand(sessionKey string) string {
 	return "Unknown verbose level"
 }
 
-var thinkLevels = []string{"off", "low", "medium", "high"}
+// thinkLevels is the ordered /think cycle, shared with config validation.
+var thinkLevels = config.ThinkingLevels
 
 func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []string) string {
 	if sessionKey == "" {
@@ -268,7 +269,7 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 	if len(args) > 0 {
 		level := strings.ToLower(args[0])
 		if !providable.SetThinkLevel(sessionKey, level) {
-			return fmt.Sprintf("❌ Unknown think level: %s\nValid levels: default, off, low, medium, high", args[0])
+			return fmt.Sprintf("❌ Unknown think level: %s\nValid levels: default, %s", args[0], strings.Join(config.ThinkingLevels, ", "))
 		}
 		return thinkLevelResponse(level)
 	}
@@ -296,7 +297,11 @@ func thinkLevelResponse(level string) string {
 	case "medium":
 		return "🤔 Think mode **MEDIUM**\nBalanced reasoning effort."
 	case "high":
-		return "🧩 Think mode **HIGH**\nMaximum reasoning effort for complex tasks."
+		return "🧩 Think mode **HIGH**\nHigh reasoning effort for complex tasks."
+	case "xhigh":
+		return "🔬 Think mode **XHIGH**\nExtra-high reasoning effort for very complex tasks."
+	case "max":
+		return "🔥 Think mode **MAX**\nMaximum reasoning effort for the hardest tasks."
 	}
 	return "Unknown think level"
 }

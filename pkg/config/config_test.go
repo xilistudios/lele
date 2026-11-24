@@ -745,6 +745,16 @@ func TestReasoningConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid effort xhigh",
+			cfg:     &ReasoningConfig{Effort: strPtr("xhigh")},
+			wantErr: false,
+		},
+		{
+			name:    "valid effort max",
+			cfg:     &ReasoningConfig{Effort: strPtr("max")},
+			wantErr: false,
+		},
+		{
 			name:    "invalid effort",
 			cfg:     &ReasoningConfig{Effort: strPtr("extreme")},
 			wantErr: true,
