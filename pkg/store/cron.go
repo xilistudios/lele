@@ -118,6 +118,17 @@ func (r *CronRepo) DeleteAllCronJobs() error {
 	return nil
 }
 
+func (r *CronRepo) CronRevision() (int, int64, error) {
+	var count int
+	var maxUpdated int64
+	if err := r.db.QueryRow(
+		`SELECT COUNT(*), COALESCE(MAX(CAST(updated_at AS INTEGER)), 0) FROM cron_jobs`,
+	).Scan(&count, &maxUpdated); err != nil {
+		return 0, 0, fmt.Errorf("store: cron revision: %w", err)
+	}
+	return count, maxUpdated, nil
+}
+
 func parseEpochMillis(s string) int64 {
 	ms, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {

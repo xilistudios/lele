@@ -104,8 +104,11 @@ func (r *SpoolRepo) ClaimBatch(direction string, limit int, instanceID string, n
 	var ids []int64
 	err = func() error {
 		rows, err := tx.Query(
-			`SELECT id FROM spool WHERE direction = ? AND claimed_by = '' ORDER BY id LIMIT ?`,
-			direction, limit,
+			`SELECT id FROM spool
+			 WHERE direction = ? AND claimed_by = ''
+			   AND (next_attempt_at = '' OR next_attempt_at <= ?)
+			 ORDER BY id LIMIT ?`,
+			direction, now.UTC().Format(spoolTimeLayout), limit,
 		)
 		if err != nil {
 			return fmt.Errorf("store: claim spool %s: select ids: %w", direction, err)
@@ -247,6 +250,73 @@ func (r *SpoolRepo) IncAttempt(id int64) error {
 		return fmt.Errorf("store: increment spool attempts %d: %w", id, err)
 	}
 	return nil
+}
+
+func (r *SpoolRepo) IncAttemptWithBackoff(id int64, nextAt time.Time) error {
+	if _, err := r.db.Exec(
+		`UPDATE spool SET attempts = attempts + 1, next_attempt_at = ? WHERE id = ?`,
+		nextAt.UTC().Format(spoolTimeLayout), id,
+	); err != nil {
+		return fmt.Errorf("store: increment spool attempts %d with backoff: %w", id, err)
+	}
+	return nil
+}
+
+func (r *SpoolRepo) DeadLetter(ids []int64, reason string, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: dead-letter spool rows: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	placeholders, args := spoolIDArgs(ids)
+	deadAt := now.UTC().Format(spoolTimeLayout)
+	insertArgs := make([]any, 0, len(args)+2)
+	insertArgs = append(insertArgs, deadAt, reason)
+	insertArgs = append(insertArgs, args...)
+
+	if _, err := tx.Exec(
+		fmt.Sprintf(
+			`INSERT INTO spool_dead_letter(id, direction, channel, chat_id, session_key, msg_id,
+			 payload, attempts, created_at, dead_at, reason)
+			 SELECT id, direction, channel, chat_id, session_key, msg_id,
+			        payload, attempts, created_at, ?, ?
+			 FROM spool WHERE id IN (%s)`,
+			placeholders,
+		),
+		insertArgs...,
+	); err != nil {
+		return fmt.Errorf("store: dead-letter spool rows: insert: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		fmt.Sprintf(`DELETE FROM spool WHERE id IN (%s)`, placeholders),
+		args...,
+	); err != nil {
+		return fmt.Errorf("store: dead-letter spool rows: delete: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: dead-letter spool rows: commit: %w", err)
+	}
+	return nil
+}
+
+func (r *SpoolRepo) PruneDeadLetter(olderThan time.Duration, now time.Time) (int, error) {
+	cutoff := now.UTC().Add(-olderThan).Format(spoolTimeLayout)
+	res, err := r.db.Exec(`DELETE FROM spool_dead_letter WHERE dead_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("store: prune dead-letter rows: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: prune dead-letter rows: rows affected: %w", err)
+	}
+	return int(affected), nil
 }
 
 func (r *SpoolRepo) WasProcessed(channel, msgID string) (bool, error) {

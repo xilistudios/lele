@@ -227,11 +227,19 @@ func (d *Inbound) StartPump(ctx context.Context) {
 			if err != nil {
 				logger.WarnCF(logComponent, "Dedupe ledger prune failed",
 					map[string]interface{}{"error": err.Error()})
-				continue
-			}
-			if pruned > 0 {
+			} else if pruned > 0 {
 				logger.InfoCF(logComponent, "Pruned dedupe ledger",
 					map[string]interface{}{"pruned": pruned})
+			}
+			deadLettered, err := d.repo.PruneDeadLetter(ProcessedRetention, now)
+			if err != nil {
+				logger.WarnCF(logComponent, "Dead-letter prune failed",
+					map[string]interface{}{"error": err.Error()})
+				continue
+			}
+			if deadLettered > 0 {
+				logger.InfoCF(logComponent, "Pruned dead-letter rows",
+					map[string]interface{}{"pruned": deadLettered})
 			}
 		}
 	}
@@ -466,6 +474,12 @@ func (d *Inbound) push(msg bus.InboundMessage) bool {
 func dedupeIDFor(msg bus.InboundMessage) string {
 	if id := msg.Metadata["message_id"]; id != "" {
 		return id
+	}
+	if ts := msg.Metadata["message_ts"]; ts != "" {
+		if ch := msg.Metadata["channel_id"]; ch != "" {
+			return ch + ":" + ts
+		}
+		return ts
 	}
 	return randomHex()
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/store"
 )
@@ -203,5 +204,342 @@ func TestSetStore_NilFallback(t *testing.T) {
 	}
 	if !found {
 		t.Error("ListJobs should contain 'json-job' after SetStore(nil)")
+	}
+}
+
+func repoService(t *testing.T, s *store.Store, jsonName string) *CronService {
+	t.Helper()
+
+	cs := NewCronService(filepath.Join(t.TempDir(), jsonName), nil)
+	if err := cs.SetStore(s.Cron()); err != nil {
+		t.Fatalf("SetStore() failed: %v", err)
+	}
+	return cs
+}
+
+func runTicks(cs *CronService, ticks int) {
+	for i := 0; i < ticks; i++ {
+		cs.checkJobs()
+	}
+}
+
+func startGatewayService(cs *CronService) {
+	cs.mu.Lock()
+	cs.running = true
+	cs.stopChan = make(chan struct{})
+	cs.mu.Unlock()
+}
+
+func repoJobIDs(t *testing.T, s *store.Store) []string {
+	t.Helper()
+
+	rows, err := s.Cron().ListCronJobs()
+	if err != nil {
+		t.Fatalf("ListCronJobs() failed: %v", err)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+func everyHour() CronSchedule {
+	return CronSchedule{Kind: "every", EveryMS: int64Ptr(3600_000)}
+}
+
+func installCronWriteProbe(t *testing.T, s *store.Store) func() int {
+	t.Helper()
+
+	if _, err := s.DB().Exec(`CREATE TABLE cron_write_probe (id INTEGER PRIMARY KEY AUTOINCREMENT)`); err != nil {
+		t.Fatalf("create cron_write_probe failed: %v", err)
+	}
+	if _, err := s.DB().Exec(`CREATE TRIGGER cron_write_probe_ins AFTER INSERT ON cron_jobs
+		BEGIN INSERT INTO cron_write_probe(id) VALUES (NULL); END`); err != nil {
+		t.Fatalf("create insert trigger failed: %v", err)
+	}
+	if _, err := s.DB().Exec(`CREATE TRIGGER cron_write_probe_upd AFTER UPDATE ON cron_jobs
+		BEGIN INSERT INTO cron_write_probe(id) VALUES (NULL); END`); err != nil {
+		t.Fatalf("create update trigger failed: %v", err)
+	}
+	if _, err := s.DB().Exec(`CREATE TRIGGER cron_write_probe_del AFTER DELETE ON cron_jobs
+		BEGIN INSERT INTO cron_write_probe(id) VALUES (NULL); END`); err != nil {
+		t.Fatalf("create delete trigger failed: %v", err)
+	}
+
+	return func() int {
+		t.Helper()
+
+		var n int
+		if err := s.DB().QueryRow(`SELECT COUNT(*) FROM cron_write_probe`).Scan(&n); err != nil {
+			t.Fatalf("count cron_write_probe failed: %v", err)
+		}
+		return n
+	}
+}
+
+func TestCronCLIAddSurvivesGatewayTick(t *testing.T) {
+	s := openCronTestStore(t)
+	gateway := repoService(t, s, "gateway.json")
+	startGatewayService(gateway)
+	defer gateway.Stop()
+
+	if _, err := gateway.AddJob("gateway-job", everyHour(), "gw", false, "cli", "direct"); err != nil {
+		t.Fatalf("gateway AddJob: %v", err)
+	}
+
+	cli := repoService(t, s, "cli.json")
+	added, err := cli.AddJob("cli-job", everyHour(), "cli", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("cli AddJob: %v", err)
+	}
+
+	runTicks(gateway, 3)
+
+	ids := repoJobIDs(t, s)
+	if len(ids) != 2 {
+		t.Fatalf("repo jobs after gateway ticks = %v, want the gateway job and the CLI job", ids)
+	}
+	if gateway.GetJob(added.ID) == nil {
+		t.Fatalf("gateway memory lost the CLI job %s: the ticker never reloaded", added.ID)
+	}
+	if cli.GetJob(added.ID) == nil {
+		t.Errorf("cli instance lost its own job %s", added.ID)
+	}
+}
+
+func TestCronCLIRemoveNotResurrected(t *testing.T) {
+	s := openCronTestStore(t)
+	gateway := repoService(t, s, "gateway.json")
+	startGatewayService(gateway)
+	defer gateway.Stop()
+
+	doomed, err := gateway.AddJob("gateway-job", everyHour(), "gw", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("gateway AddJob: %v", err)
+	}
+	survivor, err := gateway.AddJob("survivor", everyHour(), "gw", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("gateway AddJob: %v", err)
+	}
+
+	cli := repoService(t, s, "cli.json")
+	if !cli.RemoveJob(doomed.ID) {
+		t.Fatalf("cli RemoveJob(%s) = false, want the job removed", doomed.ID)
+	}
+
+	runTicks(gateway, 2)
+	gateway.executeJobByID(survivor.ID)
+	runTicks(gateway, 2)
+
+	ids := repoJobIDs(t, s)
+	if len(ids) != 1 || ids[0] != survivor.ID {
+		t.Fatalf("repo jobs after a CLI remove and gateway ticks = %v, want only %s", ids, survivor.ID)
+	}
+	if gateway.GetJob(doomed.ID) != nil {
+		t.Errorf("gateway memory resurrected the removed job %s", doomed.ID)
+	}
+}
+
+func TestCronNoWriteWhenIdle(t *testing.T) {
+	s := openCronTestStore(t)
+	gateway := repoService(t, s, "gateway.json")
+	startGatewayService(gateway)
+	defer gateway.Stop()
+
+	for i, name := range []string{"first", "second", "third"} {
+		if _, err := gateway.AddJob(name, everyHour(), "msg", false, "cli", "direct"); err != nil {
+			t.Fatalf("AddJob %d: %v", i, err)
+		}
+	}
+
+	writes := installCronWriteProbe(t, s)
+	before := writes()
+
+	runTicks(gateway, 5)
+
+	if got := writes() - before; got != 0 {
+		t.Fatalf("idle ticks issued %d cron_jobs writes, want 0", got)
+	}
+	if ids := repoJobIDs(t, s); len(ids) != 3 {
+		t.Errorf("repo jobs after idle ticks = %v, want the three untouched jobs", ids)
+	}
+}
+
+func TestCronDueJobPersistsOnlyItsRow(t *testing.T) {
+	s := openCronTestStore(t)
+	var ran []string
+	cs := NewCronService(filepath.Join(t.TempDir(), "jobs.json"), func(job *CronJob) (string, error) {
+		ran = append(ran, job.ID)
+		return "ok", nil
+	})
+	if err := cs.SetStore(s.Cron()); err != nil {
+		t.Fatalf("SetStore() failed: %v", err)
+	}
+	startGatewayService(cs)
+	defer cs.Stop()
+
+	due, err := cs.AddJob("due", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob due: %v", err)
+	}
+	idle, err := cs.AddJob("idle", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob idle: %v", err)
+	}
+
+	writes := installCronWriteProbe(t, s)
+	cs.mu.Lock()
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == due.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+
+	before := writes()
+	cs.checkJobs()
+
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		cs.mu.RLock()
+		busy := len(ran) == 0
+		cs.mu.RUnlock()
+		if !busy {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for {
+		if _, still := cs.executing.Load(due.ID); !still {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := writes() - before; got == 0 {
+		t.Fatalf("a due job produced 0 cron_jobs writes, want its row persisted")
+	}
+
+	rows, err := s.Cron().ListCronJobs()
+	if err != nil {
+		t.Fatalf("ListCronJobs() failed: %v", err)
+	}
+	for _, row := range rows {
+		if row.ID == idle.ID && row.UpdatedAtMS != idle.UpdatedAtMS {
+			t.Errorf("idle job updated_at = %d, want %d untouched by another job's tick", row.UpdatedAtMS, idle.UpdatedAtMS)
+		}
+	}
+}
+
+func TestCronOwnWritesRefreshRevision(t *testing.T) {
+	s := openCronTestStore(t)
+	cs := repoService(t, s, "gateway.json")
+
+	assertRevisionCurrent := func(stage string) {
+		t.Helper()
+
+		count, maxUpdated, err := s.Cron().CronRevision()
+		if err != nil {
+			t.Fatalf("%s: CronRevision() failed: %v", stage, err)
+		}
+		cs.mu.RLock()
+		got := cs.lastRevision
+		cs.mu.RUnlock()
+		if got.count != count || got.maxUpdated != maxUpdated {
+			t.Fatalf("%s: tracked revision = %+v, want the repo's (%d, %d): own writes must not trigger a self-reload",
+				stage, got, count, maxUpdated)
+		}
+	}
+
+	job, err := cs.AddJob("job", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+	assertRevisionCurrent("after AddJob")
+
+	if got := cs.EnableJob(job.ID, false); got == nil {
+		t.Fatalf("EnableJob(%s) = nil, want the job", job.ID)
+	}
+	assertRevisionCurrent("after EnableJob")
+
+	if !cs.RemoveJob(job.ID) {
+		t.Fatalf("RemoveJob(%s) = false, want it removed", job.ID)
+	}
+	assertRevisionCurrent("after RemoveJob")
+}
+
+func TestCronLoadFailureKeepsSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "failed-load.db")
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open(%q) failed: %v", path, err)
+	}
+
+	cs := NewCronService(filepath.Join(t.TempDir(), "jobs.json"), nil)
+	if err := cs.SetStore(s.Cron()); err != nil {
+		s.Close()
+		t.Fatalf("SetStore() failed: %v", err)
+	}
+	job, err := cs.AddJob("survivor", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		s.Close()
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	if err := cs.Load(); err == nil {
+		t.Fatal("Load() = nil after the store was closed, want the read error")
+	}
+	jobs := cs.ListJobs(true)
+	if len(jobs) != 1 || jobs[0].ID != job.ID {
+		t.Fatalf("in-memory jobs after a failed load = %+v, want the previous snapshot kept", jobs)
+	}
+
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("reopen %q failed: %v", path, err)
+	}
+	defer func() {
+		if err := reopened.Close(); err != nil {
+			t.Errorf("Close() failed: %v", err)
+		}
+	}()
+
+	rows, err := reopened.Cron().ListCronJobs()
+	if err != nil {
+		t.Fatalf("ListCronJobs() after reopen failed: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != job.ID {
+		t.Fatalf("persisted rows after a failed load = %+v, want the job intact", rows)
+	}
+}
+
+func TestSetStoreReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.db")
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open(%q) failed: %v", path, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	cs := NewCronService(filepath.Join(t.TempDir(), "jobs.json"), nil)
+	jsonJob, err := cs.AddJob("json-job", everyHour(), "msg", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	if err := cs.SetStore(s.Cron()); err == nil {
+		t.Fatal("SetStore(broken repo) = nil, want the load error surfaced")
+	}
+
+	jobs := cs.ListJobs(true)
+	if len(jobs) != 1 || jobs[0].ID != jsonJob.ID {
+		t.Fatalf("in-memory jobs after a failed SetStore = %+v, want the previous snapshot kept", jobs)
 	}
 }

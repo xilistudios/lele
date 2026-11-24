@@ -165,7 +165,9 @@ func gatewayCmd() {
 	cronService := setupCronTool(agentLoop.GetProvidable(), agentLoop, msgBus, cfg.WorkspacePath(), cfg.Agents.Defaults.RestrictToWorkspace, execTimeout, cfg)
 
 	if s := agentLoop.Store(); s != nil {
-		cronService.SetStore(s.Cron())
+		if err := cronService.SetStore(s.Cron()); err != nil {
+			logger.WarnCF("gateway", "Cron store unavailable; keeping the in-memory jobs", map[string]interface{}{"error": err.Error()})
+		}
 	}
 
 	heartbeatService := heartbeat.NewHeartbeatService(
@@ -215,7 +217,12 @@ func gatewayCmd() {
 
 	deliver := func(ctx context.Context, msg bus.OutboundMessage) durable.Delivery {
 		o := channelManager.SendToPeer(ctx, msg.Channel, msg)
-		return durable.Delivery{Delivered: o.Delivered, SentAnyChunk: o.SentAnyChunk, Err: o.Err}
+		delivery := durable.Delivery{Delivered: o.Delivered, SentAnyChunk: o.SentAnyChunk, Err: o.Err}
+		var rateLimited *channels.RateLimitError
+		if errors.As(o.Err, &rateLimited) {
+			delivery.RetryAfter = rateLimited.RetryAfter
+		}
+		return delivery
 	}
 	do := setupDurableOutbound(cfg.Session.DurableOutboundEnabled(), spoolRepo, msgBus, channelManager, deliver)
 

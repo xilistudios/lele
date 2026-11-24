@@ -76,17 +76,23 @@ type cronPayloadWithMeta struct {
 
 type JobHandler func(job *CronJob) (string, error)
 
+type cronRevision struct {
+	count      int
+	maxUpdated int64
+}
+
 type CronService struct {
-	storePath string
-	store     *CronStore
-	repo      *store.CronRepo
-	onJob     JobHandler
-	mu        sync.RWMutex
-	running   bool
-	stopChan  chan struct{}
-	gronx     *gronx.Gronx
-	executing sync.Map
-	jobWg     sync.WaitGroup
+	storePath    string
+	store        *CronStore
+	repo         *store.CronRepo
+	onJob        JobHandler
+	mu           sync.RWMutex
+	running      bool
+	stopChan     chan struct{}
+	gronx        *gronx.Gronx
+	executing    sync.Map
+	jobWg        sync.WaitGroup
+	lastRevision cronRevision
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
@@ -112,8 +118,10 @@ func (cs *CronService) Start() error {
 	}
 
 	cs.recomputeNextRuns()
-	if err := cs.saveStoreUnsafe(); err != nil {
-		return fmt.Errorf("failed to save store: %w", err)
+	if cs.repo == nil {
+		if err := cs.saveFileUnsafe(); err != nil {
+			return fmt.Errorf("failed to save store: %w", err)
+		}
 	}
 
 	cs.stopChan = make(chan struct{})
@@ -174,11 +182,47 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 }
 
 func (cs *CronService) checkJobs() {
+	cs.reloadIfChanged()
+
 	dueJobIDs := cs.collectDueJobs()
 
 	for _, jobID := range dueJobIDs {
 		go cs.executeJobByID(jobID)
 	}
+}
+
+func (cs *CronService) reloadIfChanged() {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	if cs.repo == nil {
+		return
+	}
+
+	revision, err := cs.repoRevision()
+	if err != nil {
+		log.Printf("[cron] failed to read the store revision: %v", err)
+		return
+	}
+	if revision == cs.lastRevision {
+		return
+	}
+
+	if err := cs.loadFromRepo(); err != nil {
+		log.Printf("[cron] failed to reload jobs from the store; keeping the current snapshot: %v", err)
+		return
+	}
+	cs.lastRevision = revision
+
+	log.Printf("[cron] reloaded %d jobs from the store (revision %d)", revision.count, revision.maxUpdated)
+}
+
+func (cs *CronService) repoRevision() (cronRevision, error) {
+	count, maxUpdated, err := cs.repo.CronRevision()
+	if err != nil {
+		return cronRevision{}, err
+	}
+	return cronRevision{count: count, maxUpdated: maxUpdated}, nil
 }
 
 func (cs *CronService) collectDueJobs() []string {
@@ -203,18 +247,23 @@ func (cs *CronService) collectDueJobs() []string {
 		}
 	}
 
+	if len(dueJobIDs) == 0 {
+		return nil
+	}
+
 	dueMap := make(map[string]bool, len(dueJobIDs))
 	for _, jobID := range dueJobIDs {
 		dueMap[jobID] = true
 	}
 	for i := range cs.store.Jobs {
-		if dueMap[cs.store.Jobs[i].ID] {
-			cs.store.Jobs[i].State.NextRunAtMS = nil
+		job := &cs.store.Jobs[i]
+		if !dueMap[job.ID] {
+			continue
 		}
-	}
-
-	if err := cs.saveStoreUnsafe(); err != nil {
-		log.Printf("[cron] failed to save store: %v", err)
+		job.State.NextRunAtMS = nil
+		if err := cs.persistJobUnsafe(job); err != nil {
+			log.Printf("[cron] failed to persist due job %s: %v", job.ID, err)
+		}
 	}
 
 	return dueJobIDs
@@ -232,6 +281,9 @@ func (cs *CronService) executeJobByID(jobID string) {
 				if cs.store.Jobs[i].ID == jobID {
 					cs.store.Jobs[i].State.LastStatus = "error"
 					cs.store.Jobs[i].State.LastError = fmt.Sprintf("panic: %v", r)
+					if err := cs.persistJobUnsafe(&cs.store.Jobs[i]); err != nil {
+						log.Printf("[cron] failed to persist panicked job %s: %v", jobID, err)
+					}
 					break
 				}
 			}
@@ -306,17 +358,17 @@ func (cs *CronService) executeJobByID(jobID string) {
 	if job.Schedule.Kind == "at" {
 		if job.DeleteAfterRun {
 			cs.removeJobUnsafe(job.ID)
-		} else {
-			job.Enabled = false
-			job.State.NextRunAtMS = nil
+			return
 		}
+		job.Enabled = false
+		job.State.NextRunAtMS = nil
 	} else {
 		nextRun := cs.computeNextRun(&job.Schedule, time.Now().UnixMilli())
 		job.State.NextRunAtMS = nextRun
 	}
 
-	if err := cs.saveStoreUnsafe(); err != nil {
-		log.Printf("[cron] failed to save store: %v", err)
+	if err := cs.persistJobUnsafe(job); err != nil {
+		log.Printf("[cron] failed to persist job %s state: %v", job.ID, err)
 	}
 }
 
@@ -359,10 +411,28 @@ func (cs *CronService) recomputeNextRuns() {
 	now := time.Now().UnixMilli()
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
-		if job.Enabled {
-			job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, now)
+		if !job.Enabled {
+			continue
+		}
+		next := cs.computeNextRun(&job.Schedule, now)
+		if sameEpochMillis(job.State.NextRunAtMS, next) {
+			continue
+		}
+		job.State.NextRunAtMS = next
+		if cs.repo == nil {
+			continue
+		}
+		if err := cs.persistJobUnsafe(job); err != nil {
+			log.Printf("[cron] failed to persist next run of job %s: %v", job.ID, err)
 		}
 	}
+}
+
+func sameEpochMillis(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func (cs *CronService) getNextWakeMS() *int64 {
@@ -389,21 +459,26 @@ func (cs *CronService) SetOnJob(handler JobHandler) {
 	cs.onJob = handler
 }
 
-func (cs *CronService) SetStore(repo *store.CronRepo) {
+func (cs *CronService) SetStore(repo *store.CronRepo) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cs.repo = repo
 	if err := cs.loadStore(); err != nil {
-		log.Printf("[cron] failed to load store after SetStore: %v", err)
+		return fmt.Errorf("cron: load jobs after SetStore: %w", err)
 	}
+	return nil
 }
 
 func (cs *CronService) loadStore() error {
 	if cs.repo != nil {
-		return cs.loadFromRepo()
+		if err := cs.loadFromRepo(); err != nil {
+			return err
+		}
+		cs.refreshRevisionUnsafe()
+		return nil
 	}
 
-	cs.store = &CronStore{
+	tmp := &CronStore{
 		Version: 1,
 		Jobs:    []CronJob{},
 	}
@@ -411,16 +486,23 @@ func (cs *CronService) loadStore() error {
 	data, err := os.ReadFile(cs.storePath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cs.store = tmp
+			cs.refreshRevisionUnsafe()
 			return nil
 		}
 		return err
 	}
 
-	return json.Unmarshal(data, cs.store)
+	if err := json.Unmarshal(data, tmp); err != nil {
+		return err
+	}
+	cs.store = tmp
+	cs.refreshRevisionUnsafe()
+	return nil
 }
 
 func (cs *CronService) loadFromRepo() error {
-	cs.store = &CronStore{
+	tmp := &CronStore{
 		Version: 1,
 		Jobs:    []CronJob{},
 	}
@@ -431,45 +513,48 @@ func (cs *CronService) loadFromRepo() error {
 	}
 
 	if len(rows) == 0 {
-		data, readErr := os.ReadFile(cs.storePath)
-		if os.IsNotExist(readErr) {
-			return nil
+		if err := cs.migrateFileIntoRepo(tmp); err != nil {
+			return err
 		}
-		if readErr != nil {
-			return readErr
-		}
-		if unmarshalErr := json.Unmarshal(data, cs.store); unmarshalErr != nil {
-			return unmarshalErr
-		}
-		for _, job := range cs.store.Jobs {
-			row, convErr := cronJobToRow(&job)
+	} else {
+		for _, row := range rows {
+			job, convErr := rowToCronJob(&row)
 			if convErr != nil {
-				log.Printf("[cron] failed to convert job %s during migration: %v", job.ID, convErr)
-				continue
+				return convErr
 			}
-			if upsertErr := cs.repo.UpsertCronJob(row); upsertErr != nil {
-				log.Printf("[cron] failed to upsert job %s during migration: %v", job.ID, upsertErr)
-				return nil
-			}
+			tmp.Jobs = append(tmp.Jobs, *job)
 		}
-		return nil
 	}
 
-	for _, row := range rows {
-		job, convErr := rowToCronJob(&row)
+	cs.store = tmp
+	return nil
+}
+
+func (cs *CronService) migrateFileIntoRepo(tmp *CronStore) error {
+	data, err := os.ReadFile(cs.storePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, tmp); err != nil {
+		return err
+	}
+	for _, job := range tmp.Jobs {
+		row, convErr := cronJobToRow(&job)
 		if convErr != nil {
-			return convErr
+			log.Printf("[cron] failed to convert job %s during migration: %v", job.ID, convErr)
+			continue
 		}
-		cs.store.Jobs = append(cs.store.Jobs, *job)
+		if upsertErr := cs.repo.UpsertCronJob(row); upsertErr != nil {
+			return fmt.Errorf("cron: migrate job %s: %w", job.ID, upsertErr)
+		}
 	}
 	return nil
 }
 
-func (cs *CronService) saveStoreUnsafe() error {
-	if cs.repo != nil {
-		return cs.saveToRepo()
-	}
-
+func (cs *CronService) saveFileUnsafe() error {
 	dir := filepath.Dir(cs.storePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -483,36 +568,45 @@ func (cs *CronService) saveStoreUnsafe() error {
 	return os.WriteFile(cs.storePath, data, 0600)
 }
 
-func (cs *CronService) saveToRepo() error {
-	existing, err := cs.repo.ListCronJobs()
+func (cs *CronService) persistJobUnsafe(job *CronJob) error {
+	if cs.repo == nil {
+		return cs.saveFileUnsafe()
+	}
+
+	row, err := cronJobToRow(job)
 	if err != nil {
-		return fmt.Errorf("cron: list jobs before save: %w", err)
+		return err
 	}
-
-	for i := range cs.store.Jobs {
-		row, convErr := cronJobToRow(&cs.store.Jobs[i])
-		if convErr != nil {
-			return convErr
-		}
-		if upsertErr := cs.repo.UpsertCronJob(row); upsertErr != nil {
-			return fmt.Errorf("cron: upsert job %s: %w", row.ID, upsertErr)
-		}
+	if err := cs.repo.UpsertCronJob(row); err != nil {
+		return fmt.Errorf("cron: upsert job %s: %w", job.ID, err)
 	}
-
-	currentIDs := make(map[string]bool, len(cs.store.Jobs))
-	for i := range cs.store.Jobs {
-		currentIDs[cs.store.Jobs[i].ID] = true
-	}
-
-	for _, row := range existing {
-		if !currentIDs[row.ID] {
-			if delErr := cs.repo.DeleteCronJob(row.ID); delErr != nil {
-				return fmt.Errorf("cron: delete stale job %s: %w", row.ID, delErr)
-			}
-		}
-	}
-
+	cs.refreshRevisionUnsafe()
 	return nil
+}
+
+func (cs *CronService) deleteJobUnsafe(jobID string) error {
+	if cs.repo == nil {
+		return cs.saveFileUnsafe()
+	}
+
+	if err := cs.repo.DeleteCronJob(jobID); err != nil {
+		return fmt.Errorf("cron: delete job %s: %w", jobID, err)
+	}
+	cs.refreshRevisionUnsafe()
+	return nil
+}
+
+func (cs *CronService) refreshRevisionUnsafe() {
+	if cs.repo == nil {
+		cs.lastRevision = cronRevision{}
+		return
+	}
+	revision, err := cs.repoRevision()
+	if err != nil {
+		log.Printf("[cron] failed to read the store revision after a write: %v", err)
+		return
+	}
+	cs.lastRevision = revision
 }
 
 func (cs *CronService) AddJob(name string, schedule CronSchedule, message string, deliver bool, channel, to string) (*CronJob, error) {
@@ -554,7 +648,7 @@ func (cs *CronService) AddJobWithOptions(name string, schedule CronSchedule, mes
 	}
 
 	cs.store.Jobs = append(cs.store.Jobs, job)
-	if err := cs.saveStoreUnsafe(); err != nil {
+	if err := cs.persistJobUnsafe(&job); err != nil {
 		return nil, err
 	}
 
@@ -569,7 +663,7 @@ func (cs *CronService) UpdateJob(job *CronJob) error {
 		if cs.store.Jobs[i].ID == job.ID {
 			cs.store.Jobs[i] = *job
 			cs.store.Jobs[i].UpdatedAtMS = time.Now().UnixMilli()
-			return cs.saveStoreUnsafe()
+			return cs.persistJobUnsafe(&cs.store.Jobs[i])
 		}
 	}
 	return fmt.Errorf("job not found")
@@ -594,8 +688,8 @@ func (cs *CronService) removeJobUnsafe(jobID string) bool {
 	removed := len(cs.store.Jobs) < before
 
 	if removed {
-		if err := cs.saveStoreUnsafe(); err != nil {
-			log.Printf("[cron] failed to save store after remove: %v", err)
+		if err := cs.deleteJobUnsafe(jobID); err != nil {
+			log.Printf("[cron] failed to delete job %s: %v", jobID, err)
 		}
 	}
 
@@ -618,8 +712,8 @@ func (cs *CronService) EnableJob(jobID string, enabled bool) *CronJob {
 				job.State.NextRunAtMS = nil
 			}
 
-			if err := cs.saveStoreUnsafe(); err != nil {
-				log.Printf("[cron] failed to save store after enable: %v", err)
+			if err := cs.persistJobUnsafe(job); err != nil {
+				log.Printf("[cron] failed to persist job %s after enable: %v", job.ID, err)
 			}
 			return job
 		}
@@ -692,23 +786,32 @@ func (cs *CronService) RunJobNow(jobID string) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	for i := range cs.store.Jobs {
-		if cs.store.Jobs[i].ID == jobID {
-			job := &cs.store.Jobs[i]
-			job.State.LastRunAtMS = &startTime
-			job.UpdatedAtMS = time.Now().UnixMilli()
-			if err != nil {
-				job.State.LastStatus = "error"
-				job.State.LastError = err.Error()
-			} else {
-				job.State.LastStatus = "ok"
-				job.State.LastError = ""
-			}
-			break
-		}
+	job := cs.jobByIDUnsafe(jobID)
+	if job == nil {
+		log.Printf("[cron] job %s disappeared before state update", jobID)
+		return nil
 	}
 
-	return cs.saveStoreUnsafe()
+	job.State.LastRunAtMS = &startTime
+	job.UpdatedAtMS = time.Now().UnixMilli()
+	if err != nil {
+		job.State.LastStatus = "error"
+		job.State.LastError = err.Error()
+	} else {
+		job.State.LastStatus = "ok"
+		job.State.LastError = ""
+	}
+
+	return cs.persistJobUnsafe(job)
+}
+
+func (cs *CronService) jobByIDUnsafe(jobID string) *CronJob {
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == jobID {
+			return &cs.store.Jobs[i]
+		}
+	}
+	return nil
 }
 
 func (cs *CronService) Status() map[string]interface{} {
