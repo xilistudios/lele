@@ -684,6 +684,41 @@ func classifySessionKeyKind(sessionKey string) string {
 	return "chat"
 }
 
+var channelSessionKeyChannels = map[string]bool{
+	"telegram": true,
+	"discord":  true,
+	"slack":    true,
+	"whatsapp": true,
+	"feishu":   true,
+	"dingtalk": true,
+	"onebot":   true,
+	"qq":       true,
+	"line":     true,
+	"maixcam":  true,
+}
+
+func isInstallationScopedKey(sessionKey string) bool {
+	switch classifySessionKeyKind(sessionKey) {
+	case "heartbeat", "cron", "cron-spawn":
+		return true
+	}
+	return isChannelScopedSessionKey(sessionKey)
+}
+
+func isChannelScopedSessionKey(sessionKey string) bool {
+	parts := strings.Split(sessionKey, ":")
+	if len(parts) < 2 {
+		return false
+	}
+	if parts[0] == "agent" {
+		if len(parts) < 4 {
+			return false
+		}
+		return channelSessionKeyChannels[parts[2]]
+	}
+	return channelSessionKeyChannels[parts[0]]
+}
+
 func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -718,9 +753,23 @@ func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// A client may only create sessions in its own namespace: a fresh bare UUID or
+// native:<callerClientID>:<suffix>. Channel, system, subagent and alias-target keys are
+// derived by the server, so rejecting them wholesale removes the possibility of
+// pre-claiming a session that belongs to an external peer.
+func isCreatableSessionKey(clientID, sessionKey string) bool {
+	if rest, ok := strings.CutPrefix(sessionKey, "native:"); ok {
+		ownerID, suffix, found := strings.Cut(rest, ":")
+		return found && suffix != "" && ownerID == clientID
+	}
+
+	parsed, err := uuid.Parse(sessionKey)
+	return err == nil && parsed.String() == sessionKey
+}
+
 func (n *NativeChannel) sessionCreateConflict(clientID, sessionKey string) string {
-	if classifySessionKeyKind(sessionKey) != "chat" {
-		return "session_key_reserved"
+	if !isCreatableSessionKey(clientID, sessionKey) {
+		return "session_key_unavailable"
 	}
 
 	for _, other := range n.auth.ListClients() {
@@ -728,23 +777,14 @@ func (n *NativeChannel) sessionCreateConflict(clientID, sessionKey string) strin
 			continue
 		}
 		for _, owned := range other.SessionKeys {
-			if sessionKeyMatches(owned, sessionKey) {
-				return "session_forbidden"
-			}
-		}
-	}
-
-	if rest, ok := strings.CutPrefix(sessionKey, "native:"); ok {
-		ownerID, _, _ := strings.Cut(rest, ":")
-		if ownerID != "" && ownerID != clientID {
-			if _, known := n.auth.GetClient(ownerID); known {
-				return "session_forbidden"
+			if n.keysShareSession(owned, sessionKey) {
+				return "session_key_unavailable"
 			}
 		}
 	}
 
 	if n.agentLoop != nil && n.agentLoop.HasMessages(n.resolveSessionAlias(sessionKey)) {
-		return "session_exists"
+		return "session_key_unavailable"
 	}
 
 	return ""

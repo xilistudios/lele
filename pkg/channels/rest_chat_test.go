@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -269,7 +271,7 @@ func TestHandleChatSessions_Empty(t *testing.T) {
 func TestHandleCreateSession(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	sessionKey := "new-session-" + ts.clientID
+	sessionKey := uuid.New().String()
 	body := mustMarshal(CreateSessionRequest{SessionKey: sessionKey})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", strings.NewReader(string(body)))
 	req.Header.Set("Authorization", "Bearer "+ts.token)

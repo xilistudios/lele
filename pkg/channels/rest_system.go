@@ -19,8 +19,23 @@ import (
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
-func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
+func (n *NativeChannel) querySessionKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 	sessionKey := getQueryParam(r, "session_key")
+	if sessionKey == "" {
+		return "", true
+	}
+	if !n.validateSessionOwnership(getClientID(r), sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return "", false
+	}
+	return sessionKey, true
+}
+
+func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
+	sessionKey, ok := n.querySessionKey(w, r)
+	if !ok {
+		return
+	}
 	if sessionKey == "" {
 		sessionKey = getClientID(r)
 	}
@@ -55,10 +70,15 @@ func (n *NativeChannel) handleModels(w http.ResponseWriter, r *http.Request) {
 		agentID = n.agentLoop.GetSessionAgent(getClientID(r))
 	}
 
+	sessionKey, ok := n.querySessionKey(w, r)
+	if !ok {
+		return
+	}
+
 	models := n.listAllModels()
 	modelGroups := n.buildModelGroups(agentID, models)
 	model := ""
-	if sessionKey := getQueryParam(r, "session_key"); sessionKey != "" {
+	if sessionKey != "" {
 		model = n.agentLoop.GetSessionModel(sessionKey)
 	}
 

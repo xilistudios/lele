@@ -118,6 +118,16 @@ func (c *TelegramChannel) guardedCallbacks() []telegramCallbackSpec {
 	return specs
 }
 
+func (c *TelegramChannel) registerCallbackHandlers(bh *th.BotHandler) {
+	for _, callback := range c.guardedCallbacks() {
+		callbackPrefix := callback.prefix
+		callbackHandler := callback.handler
+		bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+			return callbackHandler(ctx, query)
+		}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix(callbackPrefix))
+	}
+}
+
 func (c *TelegramChannel) guardedCallback(handler func(context.Context, telego.CallbackQuery) error) func(context.Context, telego.CallbackQuery) error {
 	return func(ctx context.Context, query telego.CallbackQuery) error {
 		if !c.IsAllowed(telegramSenderID(query.From.ID, query.From.Username)) {
@@ -304,13 +314,7 @@ func (c *TelegramChannel) setupBotHandler(ctx context.Context) (*th.BotHandler, 
 		}, th.CommandEqual(commandName))
 	}
 
-	for _, callback := range c.guardedCallbacks() {
-		callbackPrefix := callback.prefix
-		callbackHandler := callback.handler
-		bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
-			return callbackHandler(ctx, query)
-		}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix(callbackPrefix))
-	}
+	c.registerCallbackHandlers(bh)
 
 	err = c.bot.SetMyCommands(cancelCtx, &telego.SetMyCommandsParams{
 		Commands: telegramMenuCommands(telegramCommandRegistry),

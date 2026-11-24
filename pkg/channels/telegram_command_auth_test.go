@@ -17,13 +17,19 @@ import (
 func newTelegramAuthTestChannel(t *testing.T, allowList []string) (*TelegramChannel, *recordingRoundTripper) {
 	t.Helper()
 
+	rt := &recordingRoundTripper{}
+	return newTelegramTestChannel(t, allowList, rt), rt
+}
+
+func newTelegramTestChannel(t *testing.T, allowList []string, transport http.RoundTripper) *TelegramChannel {
+	t.Helper()
+
 	cfg := &config.Config{}
 	cfg.Channels.Telegram.Token = "123456:" + string(bytes.Repeat([]byte("a"), 35))
 
-	rt := &recordingRoundTripper{}
 	bot, err := telego.NewBot(
 		cfg.Channels.Telegram.Token,
-		telego.WithHTTPClient(&http.Client{Transport: rt}),
+		telego.WithHTTPClient(&http.Client{Transport: transport}),
 		telego.WithDefaultLogger(false, false),
 	)
 	if err != nil {
@@ -34,10 +40,10 @@ func newTelegramAuthTestChannel(t *testing.T, allowList []string) (*TelegramChan
 		BaseChannel:  NewBaseChannel("telegram", cfg.Channels.Telegram, bus.NewMessageBus(), allowList),
 		config:       cfg,
 		bot:          bot,
-		deleteHTTP:   &http.Client{Transport: rt},
+		deleteHTTP:   &http.Client{Transport: transport},
 		chatIDs:      make(map[string]int64),
 		processedIDs: make(map[string]int64),
-	}, rt
+	}
 }
 
 func callAllowlistedHandler(t *testing.T, fn func() error) (err error) {

@@ -1313,11 +1313,13 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		return true
 	}
 
-	// Heartbeat and cron sessions are installation-scoped automation with no user
-	// attribution, so every paired client may read them; the WebUI system-sessions
-	// view depends on it. Everything user-attributed stays per-client.
-	switch classifySessionKeyKind(sessionKey) {
-	case "heartbeat", "cron", "cron-spawn":
+	// Trust model: per-client isolation protects user-attributed native chat sessions
+	// (bare UUIDs and native:<clientID>:... keys). Installation-scoped sessions carry no
+	// user attribution — heartbeat/cron automation and channel conversations such as
+	// agent:main:telegram:direct:<id> — so every paired client reads and drives them;
+	// the console lists them, replies into them, approves their tool calls and rebinds
+	// their agent/model.
+	if isInstallationScopedKey(sessionKey) {
 		return true
 	}
 
@@ -1343,17 +1345,21 @@ func (n *NativeChannel) clientOwnsKey(client *ClientInfo, key string) bool {
 		return false
 	}
 
-	resolvedKey := n.resolveSessionAlias(key)
 	for _, owned := range client.SessionKeys {
-		if sessionKeyMatches(owned, key) {
-			return true
-		}
-		if resolvedKey != "" && n.resolveSessionAlias(owned) == resolvedKey {
+		if n.keysShareSession(owned, key) {
 			return true
 		}
 	}
 
 	return false
+}
+
+func (n *NativeChannel) keysShareSession(owned, requested string) bool {
+	if sessionKeyMatches(owned, requested) {
+		return true
+	}
+	resolvedRequested := n.resolveSessionAlias(requested)
+	return resolvedRequested != "" && n.resolveSessionAlias(owned) == resolvedRequested
 }
 
 func (n *NativeChannel) resolveSessionAlias(sessionKey string) string {
