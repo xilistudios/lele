@@ -1304,8 +1304,10 @@
     "auditEmpty": "No access records",
     "action": "Action",
     "agent": "Agent",
+    "access": "Access",
     "granted": "Granted",
     "denied": "Denied",
+    "time": "Time",
     "errorName": "Name is required",
     "errorValue": "Value is required"
   }
