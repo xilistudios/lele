@@ -270,7 +270,7 @@ type SessionConfig struct {
 	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
-	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
+	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory"`
 	DurableInbound             *bool               `json:"durable_inbound,omitempty"`
 	DurableOutbound            *bool               `json:"durable_outbound,omitempty"`
 	Resume                     *bool               `json:"resume_enabled,omitempty"`
@@ -1348,6 +1348,41 @@ func expandEnvTree(node interface{}) interface{} {
 	return node
 }
 
+func misplacedEnvPlaceholder(data []byte) (string, int, bool) {
+	inString := false
+	escaped := false
+	for i := 0; i < len(data); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString && data[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if data[i] == '"' {
+			inString = !inString
+			continue
+		}
+		if inString || data[i] != '{' {
+			continue
+		}
+		loc := envVarRegex.FindIndex(data[i:])
+		if loc != nil && loc[0] == 0 {
+			return string(data[i : i+loc[1]]), i, true
+		}
+	}
+	return "", 0, false
+}
+
+func configParseError(path string, data []byte, err error) error {
+	placeholder, offset, ok := misplacedEnvPlaceholder(data)
+	if !ok {
+		return fmt.Errorf("failed to parse config %s: %w", path, err)
+	}
+	return fmt.Errorf("failed to parse config %s: env placeholder %s at byte offset %d is not inside a JSON string (env placeholders are only expanded in string values): %w", path, placeholder, offset, err)
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
@@ -1361,12 +1396,12 @@ func LoadConfig(path string) (*Config, error) {
 
 	var tree interface{}
 	if err := decodeJSONValue(data, &tree); err != nil {
-		return nil, err
+		return nil, configParseError(path, data, err)
 	}
 
 	var rawDoc map[string]json.RawMessage
 	if err := json.Unmarshal(data, &rawDoc); err != nil {
-		return nil, err
+		return nil, configParseError(path, data, err)
 	}
 
 	expanded, err := json.Marshal(expandEnvTree(tree))
@@ -1462,24 +1497,43 @@ func DefaultConfigPath() string {
 var errConfigIsNil = fmt.Errorf("config is nil")
 
 func SaveConfig(path string, cfg *Config) error {
+	return saveConfig(path, cfg, nil)
+}
+
+func saveConfig(path string, cfg *Config, beforeWrite func()) error {
 	if cfg == nil {
 		return errConfigIsNil
 	}
 
 	cfg.mu.RLock()
 	next, err := jsonTreeOf(cfg)
+	snapshot := cfg.clone()
 	var base map[string]interface{}
 	if err == nil {
-		snapshot := cfg.base
-		if snapshot == nil {
-			snapshot = DefaultConfig()
+		baseConfig := cfg.base
+		if baseConfig == nil {
+			baseConfig = DefaultConfig()
 		}
-		base, err = jsonTreeOf(snapshot)
+		base, err = jsonTreeOf(baseConfig)
 	}
-	raw := rawDocumentOr(path, cfg.rawDoc)
+	fallbackRaw := cfg.rawDoc
 	cfg.mu.RUnlock()
 	if err != nil {
 		return err
+	}
+	if snapshot == nil {
+		return fmt.Errorf("failed to snapshot config for saving %s", path)
+	}
+
+	raw, state, readErr := rawDocumentFromFile(path)
+	if state == documentCorrupt {
+		return fmt.Errorf("refusing to save over an unparsable config %s: %w", path, readErr)
+	}
+	if state == documentMissing {
+		raw = fallbackRaw
+		if raw == nil {
+			raw = map[string]json.RawMessage{}
+		}
 	}
 
 	merged, err := mergeConfigDocument(raw, base, next)
@@ -1490,24 +1544,23 @@ func SaveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	if beforeWrite != nil {
+		beforeWrite()
+	}
 	if err := writeConfigFile(path, data); err != nil {
 		return err
 	}
-	cfg.markSaved(merged)
+	cfg.markSaved(merged, snapshot)
 	return nil
 }
 
-func (c *Config) markSaved(raw map[string]json.RawMessage) {
+func (c *Config) markSaved(raw map[string]json.RawMessage, base *Config) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	snapshot := c.clone()
-	if snapshot == nil {
-		return
-	}
-	snapshot.base = nil
-	snapshot.rawDoc = nil
+	base.base = nil
+	base.rawDoc = nil
 	c.rawDoc = raw
-	c.base = snapshot
+	c.base = base
 }
 
 func (c *Config) TelegramVerbose() VerboseLevel {

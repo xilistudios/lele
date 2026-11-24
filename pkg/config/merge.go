@@ -92,7 +92,15 @@ func applyChanges(raw map[string]json.RawMessage, changes []change) (map[string]
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", root, err)
 		}
+		_, present := merged[root]
+		before := len(object)
 		applyChangeAt(object, ch.path[1:], ch)
+		if ch.remove && len(object) == 0 {
+			if !present || before > 0 {
+				delete(merged, root)
+			}
+			continue
+		}
 		encoded, err := json.Marshal(object)
 		if err != nil {
 			return nil, err
@@ -215,29 +223,27 @@ func jsonTreeOf(value interface{}) (map[string]interface{}, error) {
 	return decodeJSONObject(encoded)
 }
 
-func rawDocumentFromFile(path string) (map[string]json.RawMessage, bool) {
+type documentState int
+
+const (
+	documentMissing documentState = iota
+	documentOK
+	documentCorrupt
+)
+
+func rawDocumentFromFile(path string) (map[string]json.RawMessage, documentState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, false
+		return nil, documentMissing, nil
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, true
+		return nil, documentCorrupt, err
 	}
 	if raw == nil {
 		raw = map[string]json.RawMessage{}
 	}
-	return raw, true
-}
-
-func rawDocumentOr(path string, fallback map[string]json.RawMessage) map[string]json.RawMessage {
-	if raw, ok := rawDocumentFromFile(path); ok {
-		return raw
-	}
-	if fallback == nil {
-		return map[string]json.RawMessage{}
-	}
-	return fallback
+	return raw, documentOK, nil
 }
 
 func writeConfigFile(path string, data []byte) error {

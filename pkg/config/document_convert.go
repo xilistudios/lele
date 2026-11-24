@@ -219,21 +219,26 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	return validated, nil
 }
 
+// SaveEditableDocument applies the document as a delta against the current file:
+// fields the document models take the document's value (last writer wins, the
+// HTTP PUT semantics the settings UI relies on), and everything it does not
+// model — unknown keys, env placeholders in unchanged fields — is preserved.
 func SaveEditableDocument(path string, doc *EditableDocument) error {
 	next, err := jsonTreeOf(doc.toSerializable())
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	raw, exists := rawDocumentFromFile(path)
+	raw, state, err := rawDocumentFromFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
 	var base map[string]interface{}
-	if exists {
+	if state == documentOK {
 		base, err = baseDocumentForFile(path)
 		if err != nil {
 			return err
 		}
-	} else {
-		raw = map[string]json.RawMessage{}
 	}
 
 	merged, err := mergeConfigDocument(raw, base, next)
