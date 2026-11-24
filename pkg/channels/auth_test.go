@@ -1158,8 +1158,8 @@ func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *te
 	if err == nil {
 		t.Fatal("expected error when pairing without device_name and PIN issued without one")
 	}
-	if err.Error() != "device_name is required" {
-		t.Fatalf("error = %q, want 'device_name is required'", err.Error())
+	if err.Error() != "invalid PIN" {
+		t.Fatalf("error = %q, want the uniform 'invalid PIN' message", err.Error())
 	}
 
 	client, token, _, err := auth.PairWithPIN(pending.PIN, "My Device")
@@ -1223,8 +1223,8 @@ func TestAuthManager_PairWithPIN_DeviceNameMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for device name mismatch")
 	}
-	if err.Error() != "device name mismatch" {
-		t.Fatalf("error = %q, want 'device name mismatch'", err.Error())
+	if err.Error() != "invalid PIN" {
+		t.Fatalf("error = %q, want the uniform 'invalid PIN' message", err.Error())
 	}
 }
 

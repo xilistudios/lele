@@ -134,6 +134,15 @@ func (r *NativeClientRepo) DeletePendingPIN(pin string) error {
 	return nil
 }
 
+func (r *NativeClientRepo) UpdatePendingPIN(pin, pendingJSON string) error {
+	if _, err := r.db.Exec(
+		`UPDATE native_pending_pins SET pending = ? WHERE pin = ?`, pendingJSON, pin,
+	); err != nil {
+		return fmt.Errorf("store: update pending PIN %q: %w", pin, err)
+	}
+	return nil
+}
+
 func (r *NativeClientRepo) ListPendingPINs(nowNanos int64) (map[string]string, error) {
 	rows, err := r.db.Query(
 		`SELECT pin, pending FROM native_pending_pins
