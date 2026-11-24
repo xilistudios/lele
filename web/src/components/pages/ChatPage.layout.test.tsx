@@ -143,6 +143,11 @@ describe('ChatPage layout contract', () => {
     contains(listWrapperOf(container), 'max-h-[60%]', 'mt-auto')
   })
 
+  test('the message list wrapper drops the height cap on mobile', () => {
+    const container = renderChatPage()
+    contains(listWrapperOf(container), 'max-md:max-h-none')
+  })
+
   test('the composer wrapper is pinned', () => {
     const container = renderChatPage()
     const wrapper = composerWrapperOf(container)
@@ -181,14 +186,9 @@ describe('ChatPage layout contract', () => {
     contains(wrapper, 'shrink-0')
   })
 
-  test('the shared shell carries no mobile-only layout', () => {
+  test('the shell carries no mobile-only layout', () => {
     const container = renderChatPage()
-    const suspects = [
-      shellOf(container),
-      mainOf(container),
-      listWrapperOf(container),
-      composerWrapperOf(container),
-    ]
+    const suspects = [shellOf(container), mainOf(container), composerWrapperOf(container)]
     for (const el of suspects) {
       for (const token of classesOf(el)) expect(token.startsWith('max-md:')).toBe(false)
     }

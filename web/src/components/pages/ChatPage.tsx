@@ -42,7 +42,7 @@ export function ChatPage() {
             </div>
           )}
 
-          <div className="flex-1 min-h-0 max-h-[60%] overflow-hidden px-4 py-3 md:px-6 md:py-4 mt-auto">
+          <div className="flex-1 min-h-0 max-h-[60%] max-md:max-h-none overflow-hidden px-4 py-3 md:px-6 md:py-4 mt-auto">
             <MessageList />
           </div>
 

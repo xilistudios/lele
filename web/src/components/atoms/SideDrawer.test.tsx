@@ -80,6 +80,16 @@ describe('SideDrawer', () => {
     }
   })
 
+  test('anchors the panel to the right edge, overriding the UA dialog start inset', () => {
+    const view = render(<DrawerHarness />)
+    fireEvent.click(view.getByRole('button', { name: 'open' }))
+
+    const classes = (panel(view)?.getAttribute('class') ?? '').split(/\s+/)
+    for (const token of ['fixed', 'right-0', 'left-auto']) {
+      expect(classes).toContain(token)
+    }
+  })
+
   test('keeps a custom desktop width next to the mobile full-screen rules', () => {
     const view = render(
       <SideDrawer isOpen onClose={() => undefined} ariaLabel="drawer" widthClassName="w-96">

@@ -109,7 +109,7 @@ export function SideDrawer({
         tabIndex={-1}
         data-testid={testId}
         aria-label={ariaLabel}
-        className={`m-0 bg-background-secondary fixed right-0 top-0 z-50 h-full max-h-none max-md:h-dvh ${widthClassName} max-md:w-full max-w-[90vw] max-md:max-w-full safe-area-y border-l border-border p-0 shadow-lg flex flex-col outline-none transition-transform duration-300 ease-out ${panelState}`}
+        className={`m-0 bg-background-secondary fixed left-auto right-0 top-0 z-50 h-full max-h-none max-md:h-dvh ${widthClassName} max-md:w-full max-w-[90vw] max-md:max-w-full safe-area-y border-l border-border p-0 shadow-lg flex flex-col outline-none transition-transform duration-300 ease-out ${panelState}`}
       >
         {children}
       </dialog>
