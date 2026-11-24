@@ -575,30 +575,18 @@ func (am *AuthManager) dropPendingPINLocked(pin string) {
 	}
 }
 
-func (am *AuthManager) persistPendingPINLocked(pin string, pending *PendingPIN) {
+func (am *AuthManager) persistPendingPINLocked(pin string, pending *PendingPIN) error {
 	if am.repo == nil {
-		if err := am.saveStoreUnlocked(); err != nil {
-			logger.ErrorCF("native", "Failed to save store after a rejected pairing attempt", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-		return
+		return am.saveStoreUnlocked()
 	}
 	blob, err := json.Marshal(pending)
 	if err != nil {
-		logger.ErrorCF("native", "Failed to marshal pending PIN", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return
+		return err
 	}
-	if err := am.repo.UpdatePendingPIN(pin, string(blob)); err != nil {
-		logger.ErrorCF("native", "Failed to persist rejected pairing attempt", map[string]interface{}{
-			"error": err.Error(),
-		})
-	}
+	return am.repo.UpdatePendingPIN(pin, string(blob))
 }
 
-func (am *AuthManager) rejectPairAttemptLocked(pin string, pending *PendingPIN, requestedDevice, reason string) {
+func (am *AuthManager) rejectPairAttemptLocked(pin string, pending *PendingPIN, requestedDevice, reason string) error {
 	pending.Attempts++
 	burned := pending.Attempts >= maxPairAttempts
 
@@ -611,9 +599,17 @@ func (am *AuthManager) rejectPairAttemptLocked(pin string, pending *PendingPIN, 
 
 	if burned {
 		am.dropPendingPINLocked(pin)
-		return
+		return errInvalidPIN
 	}
-	am.persistPendingPINLocked(pin, pending)
+
+	if err := am.persistPendingPINLocked(pin, pending); err != nil {
+		logger.ErrorCF("native", "Pairing attempt could not be counted; burning the PIN", map[string]interface{}{
+			"reason": reason,
+			"error":  err.Error(),
+		})
+		am.dropPendingPINLocked(pin)
+	}
+	return errInvalidPIN
 }
 
 func logPairingRejection(deviceName, reason string) {
@@ -665,8 +661,7 @@ func (am *AuthManager) pairWithPINSQLiteLocked(pin, deviceName string) (*ClientI
 	}
 
 	if reason := deviceNameRejection(pending.DeviceName, deviceName); reason != "" {
-		am.rejectPairAttemptLocked(pin, &pending, deviceName, reason)
-		return nil, "", "", errInvalidPIN
+		return nil, "", "", am.rejectPairAttemptLocked(pin, &pending, deviceName, reason)
 	}
 
 	if deleted, err := am.repo.DeleteExpiredPendingPINs(time.Now().UnixNano()); err != nil {
@@ -685,8 +680,7 @@ func (am *AuthManager) pairWithPINSQLiteLocked(pin, deviceName string) (*ClientI
 		return nil, "", "", errInvalidPIN
 	}
 	if clientCount >= am.maxClients() {
-		am.rejectPairAttemptLocked(pin, &pending, deviceName, "maximum clients reached")
-		return nil, "", "", errInvalidPIN
+		return nil, "", "", am.rejectPairAttemptLocked(pin, &pending, deviceName, "maximum clients reached")
 	}
 
 	clientID, token, refreshToken, err := am.newCredentials()
@@ -716,7 +710,7 @@ func (am *AuthManager) pairWithPINSQLiteLocked(pin, deviceName string) (*ClientI
 		logger.ErrorCF("native", "Failed to save store after pairing; removing in-memory client", map[string]interface{}{
 			"error": err.Error(),
 		})
-		return nil, "", "", fmt.Errorf("pairing failed: could not persist client")
+		return nil, "", "", errInvalidPIN
 	}
 
 	return client, token, refreshToken, nil
@@ -741,15 +735,13 @@ func (am *AuthManager) pairWithPINJSONLocked(pin, deviceName string) (*ClientInf
 	}
 
 	if reason := deviceNameRejection(pending.DeviceName, deviceName); reason != "" {
-		am.rejectPairAttemptLocked(pin, pending, deviceName, reason)
-		return nil, "", "", errInvalidPIN
+		return nil, "", "", am.rejectPairAttemptLocked(pin, pending, deviceName, reason)
 	}
 
 	am.cleanupExpired()
 
 	if len(am.store.Clients) >= am.maxClients() {
-		am.rejectPairAttemptLocked(pin, pending, deviceName, "maximum clients reached")
-		return nil, "", "", errInvalidPIN
+		return nil, "", "", am.rejectPairAttemptLocked(pin, pending, deviceName, "maximum clients reached")
 	}
 
 	clientID, token, refreshToken, err := am.newCredentials()

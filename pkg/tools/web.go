@@ -465,9 +465,72 @@ const (
 	maxFetchRedirects = 5
 )
 
+func mustParsePrefix(cidr string) *net.IPNet {
+	_, block, err := net.ParseCIDR(cidr)
+	if err != nil {
+		panic(fmt.Sprintf("invalid non-public CIDR %q: %v", cidr, err))
+	}
+	return block
+}
+
+func mustParsePrefixes(cidrs ...string) []*net.IPNet {
+	blocks := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		blocks = append(blocks, mustParsePrefix(cidr))
+	}
+	return blocks
+}
+
+var nat64WellKnownPrefix = mustParsePrefix("64:ff9b::/96")
+
+var nonPublicRanges = mustParsePrefixes(
+	"0.0.0.0/8",
+	"10.0.0.0/8",
+	"100.64.0.0/10",
+	"127.0.0.0/8",
+	"169.254.0.0/16",
+	"172.16.0.0/12",
+	"192.0.0.0/24",
+	"192.0.2.0/24",
+	"192.168.0.0/16",
+	"198.18.0.0/15",
+	"198.51.100.0/24",
+	"203.0.113.0/24",
+	"224.0.0.0/4",
+	"240.0.0.0/4",
+	"::/96",
+	"100::/64",
+	"2001:db8::/32",
+	"fc00::/7",
+	"fe80::/10",
+	"fec0::/10",
+	"ff00::/8",
+)
+
+func inNonPublicRange(ip net.IP) bool {
+	for _, block := range nonPublicRanges {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func isPublicIP(ip net.IP) bool {
-	return !(ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || ip.IsPrivate())
+	if ip == nil {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return !inNonPublicRange(v4)
+	}
+	v6 := ip.To16()
+	if v6 == nil {
+		return false
+	}
+	if nat64WellKnownPrefix.Contains(v6) {
+		return isPublicIP(net.IP(v6[12:16]))
+	}
+	return !inNonPublicRange(v6)
 }
 
 func isLocalHostName(host string) bool {

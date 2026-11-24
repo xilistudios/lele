@@ -178,10 +178,12 @@ recovery is signing out.
 When rate limiting is enabled, every 429 carries a `Retry-After` header with
 the seconds remaining in the window.
 
-**Security note:** with rate limiting disabled, the public
-`POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute expiry) has no
-brute-force control.  Enable rate limiting on any machine reachable from an
-untrusted network.
+**Security note:** a PIN is burned after five rejected attempts (wrong device
+name or a full client list), and every pairing failure answers the same
+`invalid PIN` body, so the endpoint does not confirm whether a PIN exists.
+That budget is per PIN: with rate limiting disabled, a blind search over the
+million possible PINs is still unthrottled.  Enable rate limiting on any
+machine reachable from an untrusted network.
 
 ### 4. Check Auth Status
 

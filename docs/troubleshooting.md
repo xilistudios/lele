@@ -34,11 +34,18 @@ Typical causes:
 
 ## Pairing PIN Does Not Work
 
+The pair endpoint answers `invalid PIN` for every PIN that cannot be redeemed,
+so the reason is only visible in the server log (`Pairing attempt rejected`).
 Typical causes:
 
 - PIN expired
+- five rejected attempts burned the PIN
 - native channel config changed after generating the PIN
 - too many paired clients already exist
+
+A `pairing unavailable` answer (HTTP 500) means the server could not read from
+`crypto/rand`; it is not a PIN problem, so retry instead of regenerating the
+PIN.
 
 Generate a fresh PIN:
 

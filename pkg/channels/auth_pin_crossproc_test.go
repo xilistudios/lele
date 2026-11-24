@@ -389,9 +389,7 @@ func TestPairWithPIN_ClientWriteFails_NoTokenNoPhantomClient(t *testing.T) {
 	}
 
 	client, token, refresh, err := auth.PairWithPIN(pending.PIN, "ghost-phone")
-	if err == nil {
-		t.Fatal("PairWithPIN must fail when the client cannot be persisted")
-	}
+	requireInvalidPIN(t, err, "PairWithPIN with an unwritable client")
 	if token != "" || refresh != "" {
 		t.Errorf("must not hand back credentials on persistence failure; got token=%q refresh=%q", token, refresh)
 	}

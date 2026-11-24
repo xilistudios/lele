@@ -1,6 +1,9 @@
 package channels
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -178,4 +181,93 @@ func TestPairWithPINExpiredReturnsInvalidPIN_SQLite(t *testing.T) {
 
 	_, _, _, err = serverAuth.PairWithPIN(pending.PIN, "phone")
 	requireInvalidPIN(t, err, "expired PIN")
+}
+
+func TestPairWithPINEntropyFailureKeepsPendingPIN_SQLite(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lele.db")
+
+	cliAuth, cliStore := openCLIAuthManager(t, tmpDir, dbPath)
+	pending, err := cliAuth.GeneratePIN("phone")
+	if err != nil {
+		t.Fatalf("GeneratePIN: %v", err)
+	}
+	cliStore.Close()
+
+	serverAuth, serverStore := openServerAuthManager(t, tmpDir, dbPath)
+	repo := serverStore.NativeClients()
+
+	failRandRead(t)
+
+	if _, _, _, err := serverAuth.PairWithPIN(pending.PIN, "phone"); !errors.Is(err, errEntropyUnavailable) {
+		t.Fatalf("PairWithPIN error = %v, want errEntropyUnavailable", err)
+	}
+
+	pendingJSON, _, found, err := repo.GetPendingPIN(pending.PIN)
+	if err != nil {
+		t.Fatalf("GetPendingPIN: %v", err)
+	}
+	if !found {
+		t.Fatal("an entropy failure must not consume the PIN in the shared store")
+	}
+	var stored PendingPIN
+	if err := json.Unmarshal([]byte(pendingJSON), &stored); err != nil {
+		t.Fatalf("unmarshal stored pending PIN: %v", err)
+	}
+	if stored.Attempts != 0 {
+		t.Errorf("stored attempts = %d, want 0: an entropy failure is not a failed guess", stored.Attempts)
+	}
+}
+
+func TestPairWithPINAttemptCounterFailureBurnsPIN_SQLite(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lele.db")
+
+	cliAuth, cliStore := openCLIAuthManager(t, tmpDir, dbPath)
+	pending, err := cliAuth.GeneratePIN("phone")
+	if err != nil {
+		t.Fatalf("GeneratePIN: %v", err)
+	}
+	cliStore.Close()
+
+	serverAuth, serverStore := openServerAuthManager(t, tmpDir, dbPath)
+	repo := serverStore.NativeClients()
+
+	if _, err := serverStore.DB().Exec(`CREATE TRIGGER fail_pending_pin_update
+		BEFORE UPDATE ON native_pending_pins
+		BEGIN SELECT RAISE(ABORT, 'injected: attempt counter write refused'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	_, _, _, err = serverAuth.PairWithPIN(pending.PIN, "attacker")
+	requireInvalidPIN(t, err, "wrong device name with an uncountable attempt")
+
+	if _, _, found, err := repo.GetPendingPIN(pending.PIN); err != nil {
+		t.Fatalf("GetPendingPIN: %v", err)
+	} else if found {
+		t.Error("a PIN whose attempt counter cannot be persisted must be burned, not left usable")
+	}
+}
+
+func TestPairWithPINAttemptCounterFailureBurnsPIN_JSON(t *testing.T) {
+	dir := t.TempDir()
+	am := newJSONAuthManager(t, defaultTestCfg(), dir)
+
+	pending, err := am.GeneratePIN("phone")
+	if err != nil {
+		t.Fatalf("GeneratePIN: %v", err)
+	}
+
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+	am.storePath = filepath.Join(blocker, "native_clients.json")
+
+	_, _, _, err = am.PairWithPIN(pending.PIN, "attacker")
+	requireInvalidPIN(t, err, "wrong device name with an unwritable store")
+
+	if pins := am.GetPendingPINs(); len(pins) != 0 {
+		t.Errorf("a PIN whose attempt counter cannot be persisted must be burned, got %d pending PINs", len(pins))
+	}
 }
