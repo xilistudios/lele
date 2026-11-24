@@ -141,7 +141,9 @@ type Config struct {
 	Commands map[string]CommandDefinition `json:"commands,omitempty"`
 	Harness  HarnessConfig                `json:"harness,omitempty"`
 
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	rawDoc map[string]json.RawMessage
+	base   *Config
 }
 
 type CommandDefinition struct {
@@ -178,6 +180,8 @@ func (c *Config) clone() *Config {
 	if err := json.Unmarshal(data, &cloned); err != nil {
 		return nil
 	}
+	cloned.rawDoc = c.rawDoc
+	cloned.base = c.base
 	return &cloned
 }
 
@@ -266,7 +270,7 @@ type SessionConfig struct {
 	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
-	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
+	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory"`
 	DurableInbound             *bool               `json:"durable_inbound,omitempty"`
 	DurableOutbound            *bool               `json:"durable_outbound,omitempty"`
 	Resume                     *bool               `json:"resume_enabled,omitempty"`
@@ -1303,26 +1307,80 @@ func DefaultConfig() *Config {
 
 var envVarRegex = regexp.MustCompile(`\{\{ENV_([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}\}`)
 
-func expandEnvVars(data []byte) []byte {
-	return envVarRegex.ReplaceAllFunc(data, func(match []byte) []byte {
-		submatches := envVarRegex.FindSubmatch(match)
+func expandEnvString(value string) string {
+	if !strings.Contains(value, "{{ENV_") {
+		return value
+	}
+	return envVarRegex.ReplaceAllStringFunc(value, func(match string) string {
+		submatches := envVarRegex.FindStringSubmatch(match)
 		if len(submatches) < 2 {
 			return match
 		}
 
-		envName := string(submatches[1])
-		envValue := os.Getenv(envName)
-
+		envValue := os.Getenv(submatches[1])
 		if envValue != "" {
-			return []byte(envValue)
+			return envValue
 		}
 
-		if len(submatches) > 2 && string(submatches[2]) != "" {
+		if len(submatches) > 2 && submatches[2] != "" {
 			return submatches[2]
 		}
 
-		return []byte{}
+		return ""
 	})
+}
+
+func expandEnvTree(node interface{}) interface{} {
+	switch value := node.(type) {
+	case string:
+		return expandEnvString(value)
+	case map[string]interface{}:
+		for key, item := range value {
+			value[key] = expandEnvTree(item)
+		}
+		return value
+	case []interface{}:
+		for i, item := range value {
+			value[i] = expandEnvTree(item)
+		}
+		return value
+	}
+	return node
+}
+
+func misplacedEnvPlaceholder(data []byte) (string, int, bool) {
+	inString := false
+	escaped := false
+	for i := 0; i < len(data); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString && data[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if data[i] == '"' {
+			inString = !inString
+			continue
+		}
+		if inString || data[i] != '{' {
+			continue
+		}
+		loc := envVarRegex.FindIndex(data[i:])
+		if loc != nil && loc[0] == 0 {
+			return string(data[i : i+loc[1]]), i, true
+		}
+	}
+	return "", 0, false
+}
+
+func configParseError(path string, data []byte, err error) error {
+	placeholder, offset, ok := misplacedEnvPlaceholder(data)
+	if !ok {
+		return fmt.Errorf("failed to parse config %s: %w", path, err)
+	}
+	return fmt.Errorf("failed to parse config %s: env placeholder %s at byte offset %d is not inside a JSON string (env placeholders are only expanded in string values): %w", path, placeholder, offset, err)
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -1336,24 +1394,34 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	data = expandEnvVars(data)
+	var tree interface{}
+	if err := decodeJSONValue(data, &tree); err != nil {
+		return nil, configParseError(path, data, err)
+	}
+
+	var rawDoc map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawDoc); err != nil {
+		return nil, configParseError(path, data, err)
+	}
+
+	expanded, err := json.Marshal(expandEnvTree(tree))
+	if err != nil {
+		return nil, err
+	}
 
 	sessionEphemeralConfigured := false
 	providersConfigured := false
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err == nil {
-		if sessionRaw, ok := raw["session"]; ok {
-			var rawSession map[string]json.RawMessage
-			if err := json.Unmarshal(sessionRaw, &rawSession); err == nil {
-				_, sessionEphemeralConfigured = rawSession["ephemeral"]
-			}
-		}
-		if providersRaw, ok := raw["providers"]; ok && len(providersRaw) > 2 {
-			providersConfigured = true
+	if sessionRaw, ok := rawDoc["session"]; ok {
+		var rawSession map[string]json.RawMessage
+		if err := json.Unmarshal(sessionRaw, &rawSession); err == nil {
+			_, sessionEphemeralConfigured = rawSession["ephemeral"]
 		}
 	}
+	if providersRaw, ok := rawDoc["providers"]; ok && len(providersRaw) > 2 {
+		providersConfigured = true
+	}
 
-	if err := json.Unmarshal(data, cfg); err != nil {
+	if err := json.Unmarshal(expanded, cfg); err != nil {
 		return nil, err
 	}
 	if !sessionEphemeralConfigured {
@@ -1374,6 +1442,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.base = cfg.clone()
+	cfg.rawDoc = rawDoc
 	return cfg, nil
 }
 
@@ -1392,15 +1462,25 @@ func (c *Config) Reload(path string) error {
 
 	c.Agents = loaded.Agents
 	c.Bindings = loaded.Bindings
+	c.Groups = loaded.Groups
 	c.Session = loaded.Session
 	c.Channels = loaded.Channels
 	c.Providers = loaded.Providers
 	c.Gateway = loaded.Gateway
+	c.Server = loaded.Server
 	c.Tools = loaded.Tools
 	c.Heartbeat = loaded.Heartbeat
 	c.Devices = loaded.Devices
 	c.Logs = loaded.Logs
 	c.Keyring = loaded.Keyring
+	c.Updates = loaded.Updates
+	c.Goal = loaded.Goal
+	c.Language = loaded.Language
+	c.TUI = loaded.TUI
+	c.Commands = loaded.Commands
+	c.Harness = loaded.Harness
+	c.rawDoc = loaded.rawDoc
+	c.base = loaded.base
 	return nil
 }
 
@@ -1414,53 +1494,73 @@ func DefaultConfigPath() string {
 	return filepath.Join(GetLeleDir(), "config.json")
 }
 
+var errConfigIsNil = fmt.Errorf("config is nil")
+
 func SaveConfig(path string, cfg *Config) error {
+	return saveConfig(path, cfg, nil)
+}
+
+func saveConfig(path string, cfg *Config, beforeWrite func()) error {
+	if cfg == nil {
+		return errConfigIsNil
+	}
+
 	cfg.mu.RLock()
-	defer cfg.mu.RUnlock()
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	tmp, err := os.CreateTemp(dir, ".lele-config-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			os.Remove(tmpName)
+	next, err := jsonTreeOf(cfg)
+	snapshot := cfg.clone()
+	var base map[string]interface{}
+	if err == nil {
+		baseConfig := cfg.base
+		if baseConfig == nil {
+			baseConfig = DefaultConfig()
 		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		base, err = jsonTreeOf(baseConfig)
+	}
+	fallbackRaw := cfg.rawDoc
+	cfg.mu.RUnlock()
+	if err != nil {
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
+	if snapshot == nil {
+		return fmt.Errorf("failed to snapshot config for saving %s", path)
 	}
 
-	if err := os.Rename(tmpName, path); err != nil {
+	raw, state, readErr := rawDocumentFromFile(path)
+	if state == documentCorrupt {
+		return fmt.Errorf("refusing to save over an unparsable config %s: %w", path, readErr)
+	}
+	if state == documentMissing {
+		raw = fallbackRaw
+		if raw == nil {
+			raw = map[string]json.RawMessage{}
+		}
+	}
+
+	merged, err := mergeConfigDocument(raw, base, next)
+	if err != nil {
 		return err
 	}
-	committed = true
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+	if beforeWrite != nil {
+		beforeWrite()
+	}
+	if err := writeConfigFile(path, data); err != nil {
+		return err
+	}
+	cfg.markSaved(merged, snapshot)
 	return nil
+}
+
+func (c *Config) markSaved(raw map[string]json.RawMessage, base *Config) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	base.base = nil
+	base.rawDoc = nil
+	c.rawDoc = raw
+	c.base = base
 }
 
 func (c *Config) TelegramVerbose() VerboseLevel {

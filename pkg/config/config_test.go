@@ -618,30 +618,28 @@ func TestProvidersConfig_ResolveModelAlias_KeyOnlyNoModelField(t *testing.T) {
 	}
 }
 
+func expandEnvFixture(t *testing.T, input string) map[string]string {
+	t.Helper()
+	output := expandEnvString(input)
+	var result map[string]string
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return result
+}
+
 func TestExpandEnvVars_Basic(t *testing.T) {
 	os.Setenv("TEST_API_KEY", "my-secret-key")
 	defer os.Unsetenv("TEST_API_KEY")
 
-	input := []byte(`{"api_key": "{{ENV_TEST_API_KEY}}"}`)
-	output := expandEnvVars(input)
-
-	var result map[string]string
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	result := expandEnvFixture(t, `{"api_key": "{{ENV_TEST_API_KEY}}"}`)
 	if result["api_key"] != "my-secret-key" {
 		t.Errorf("api_key = %q, want 'my-secret-key'", result["api_key"])
 	}
 }
 
 func TestExpandEnvVars_WithDefault(t *testing.T) {
-	input := []byte(`{"api_key": "{{ENV_MISSING_KEY:default-value}}"}`)
-	output := expandEnvVars(input)
-
-	var result map[string]string
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	result := expandEnvFixture(t, `{"api_key": "{{ENV_MISSING_KEY:default-value}}"}`)
 	if result["api_key"] != "default-value" {
 		t.Errorf("api_key = %q, want 'default-value'", result["api_key"])
 	}
@@ -651,26 +649,14 @@ func TestExpandEnvVars_EnvExistsOverridesDefault(t *testing.T) {
 	os.Setenv("TEST_OVERRIDE_KEY", "actual-value")
 	defer os.Unsetenv("TEST_OVERRIDE_KEY")
 
-	input := []byte(`{"api_key": "{{ENV_TEST_OVERRIDE_KEY:default-value}}"}`)
-	output := expandEnvVars(input)
-
-	var result map[string]string
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	result := expandEnvFixture(t, `{"api_key": "{{ENV_TEST_OVERRIDE_KEY:default-value}}"}`)
 	if result["api_key"] != "actual-value" {
 		t.Errorf("api_key = %q, want 'actual-value'", result["api_key"])
 	}
 }
 
 func TestExpandEnvVars_EmptyWhenNoDefault(t *testing.T) {
-	input := []byte(`{"api_key": "{{ENV_NONEXISTENT_KEY}}"}`)
-	output := expandEnvVars(input)
-
-	var result map[string]string
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	result := expandEnvFixture(t, `{"api_key": "{{ENV_NONEXISTENT_KEY}}"}`)
 	if result["api_key"] != "" {
 		t.Errorf("api_key = %q, want ''", result["api_key"])
 	}
@@ -682,13 +668,7 @@ func TestExpandEnvVars_MultipleVars(t *testing.T) {
 	defer os.Unsetenv("TEST_KEY1")
 	defer os.Unsetenv("TEST_KEY2")
 
-	input := []byte(`{"key1": "{{ENV_TEST_KEY1}}", "key2": "{{ENV_TEST_KEY2:default2}}"}`)
-	output := expandEnvVars(input)
-
-	var result map[string]string
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	result := expandEnvFixture(t, `{"key1": "{{ENV_TEST_KEY1}}", "key2": "{{ENV_TEST_KEY2:default2}}"}`)
 	if result["key1"] != "value1" {
 		t.Errorf("key1 = %q, want 'value1'", result["key1"])
 	}
