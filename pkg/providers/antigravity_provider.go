@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 const (
@@ -103,7 +103,7 @@ func (p *AntigravityProvider) Chat(
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := common.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
@@ -449,12 +449,18 @@ func (p *AntigravityProvider) parseSSEResponse(body string) (*LLMResponse, error
 		mappedFinish = "length"
 	}
 
-	return &LLMResponse{
+	response := &LLMResponse{
 		Content:      strings.Join(contentParts, ""),
 		ToolCalls:    toolCalls,
 		FinishReason: mappedFinish,
 		Usage:        usage,
-	}, nil
+	}
+
+	if err := scanner.Err(); err != nil {
+		return response, common.StreamScanError(err)
+	}
+
+	return response, nil
 }
 
 func extractPartThoughtSignature(thoughtSignature string, thoughtSignatureSnake string) string {
@@ -587,7 +593,7 @@ func FetchAntigravityProjectID(accessToken string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("reading loadCodeAssist response: %w", err)
 	}
@@ -630,7 +636,7 @@ func FetchAntigravityModels(accessToken, projectID string) ([]AntigravityModelIn
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading fetchAvailableModels response: %w", err)
 	}

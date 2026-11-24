@@ -961,3 +961,35 @@ func TestFailoverError_ErrorStringIncludesRetryAfter(t *testing.T) {
 		t.Errorf("expected fractional retry_after, got %q", fractional.Error())
 	}
 }
+
+func TestErrStreamTruncatedIsRetriable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "bare truncation",
+			err:  fmt.Errorf("%w: x", common.ErrStreamTruncated),
+		},
+		{
+			name: "truncation caused by a transport error",
+			err:  fmt.Errorf("%w: %v", common.ErrStreamTruncated, io.ErrUnexpectedEOF),
+		},
+		{
+			name: "truncation caused by an over-long line",
+			err:  fmt.Errorf("%w: provider sent a single SSE line larger than 1 MB", common.ErrStreamTruncated),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !IsRetriableError(tt.err) {
+				t.Fatalf("IsRetriableError(%v) = false, want true so llm_runner retries instead of persisting a half answer", tt.err)
+			}
+			classified := ClassifyError(tt.err, "anthropic", "claude-sonnet-4-6")
+			if classified != nil && classified.IsTerminal() {
+				t.Fatalf("ClassifyError(%v) = %+v, want a non-terminal reason", tt.err, classified)
+			}
+		})
+	}
+}

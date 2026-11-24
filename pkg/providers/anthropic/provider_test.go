@@ -436,3 +436,82 @@ func TestProviderOAuthModePrependsIdentityBlock(t *testing.T) {
 		t.Errorf("System[0].Text = %q, want %q", params.System[0].Text, "You are helpful")
 	}
 }
+func TestTranslateToolsRequiredSurvives(t *testing.T) {
+	tests := []struct {
+		name       string
+		parameters map[string]interface{}
+		wantJSON   []string
+	}{
+		{
+			name: "required as []string from built-in tools",
+			parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]interface{}{"type": "string"},
+					"text": map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"path", "text"},
+			},
+			wantJSON: []string{`"required":["path","text"]`},
+		},
+		{
+			name: "required as []interface{} from MCP tools",
+			parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]interface{}{"type": "string"},
+				},
+				"required": []interface{}{"path"},
+			},
+			wantJSON: []string{`"required":["path"]`},
+		},
+		{
+			name: "extra schema keywords are forwarded",
+			parameters: map[string]interface{}{
+				"type":                 "object",
+				"properties":           map[string]interface{}{"path": map[string]interface{}{"type": "string"}},
+				"required":             []string{"path"},
+				"additionalProperties": false,
+				"$defs":                map[string]interface{}{"Opts": map[string]interface{}{"type": "object"}},
+				"anyOf":                []interface{}{map[string]interface{}{"type": "object"}},
+			},
+			wantJSON: []string{
+				`"required":["path"]`,
+				`"additionalProperties":false`,
+				`"$defs":{"Opts":{"type":"object"}}`,
+				`"anyOf":[{"type":"object"}]`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tools := []ToolDefinition{{
+				Type: "function",
+				Function: ToolFunctionDefinition{
+					Name:        "some_tool",
+					Description: "does things",
+					Parameters:  tt.parameters,
+				},
+			}}
+
+			params, err := buildParams([]Message{{Role: "user", Content: "hi"}}, tools, "claude-sonnet-4-5-20250929", map[string]interface{}{})
+			if err != nil {
+				t.Fatalf("buildParams() error: %v", err)
+			}
+			data, err := json.Marshal(params.Tools)
+			if err != nil {
+				t.Fatalf("marshal tools: %v", err)
+			}
+			wire := string(data)
+			for _, want := range tt.wantJSON {
+				if !strings.Contains(wire, want) {
+					t.Fatalf("tool schema missing %s: %s", want, wire)
+				}
+			}
+			if !strings.Contains(wire, `"type":"object"`) {
+				t.Fatalf("tool schema lost its object type: %s", wire)
+			}
+		})
+	}
+}

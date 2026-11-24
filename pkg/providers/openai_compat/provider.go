@@ -154,7 +154,7 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -228,7 +228,7 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := common.ReadLimitedBody(resp.Body)
 		return nil, common.NewAPIError(resp, body, req.URL.String())
 
 	}
@@ -476,6 +476,16 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 			chunk.Usage.NormalizeCacheUsage()
 			usage = chunk.Usage
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return &LLMResponse{
+			Content:          contentBuf.String(),
+			ReasoningContent: reasoningBuf.String(),
+			ToolCalls:        toolCalls,
+			FinishReason:     finishReason,
+			Usage:            usage,
+		}, common.StreamScanError(err)
 	}
 
 	onChunk("", true)

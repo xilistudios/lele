@@ -1,10 +1,13 @@
 package providers
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/auth"
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 func TestBuildRequestUsesFunctionFieldsWhenToolCallNameMissing(t *testing.T) {
@@ -125,4 +128,24 @@ func TestCreateAntigravityTokenSourceLoginHints(t *testing.T) {
 			t.Errorf("stored AccessToken = %q, want %q (credential was mutated)", stored.AccessToken, "stale-access")
 		}
 	})
+}
+
+func TestParseSSEResponseTooLongLine(t *testing.T) {
+	p := &AntigravityProvider{}
+	body := "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}}\n" +
+		"data: {\"pad\":\"" + strings.Repeat("x", 2*1024*1024) + "\"}\n"
+
+	resp, err := p.parseSSEResponse(body)
+	if err == nil {
+		t.Fatal("expected an error for an over-long SSE line, got nil")
+	}
+	if !errors.Is(err, common.ErrStreamTruncated) {
+		t.Fatalf("error = %v, want it to wrap common.ErrStreamTruncated", err)
+	}
+	if resp == nil {
+		t.Fatal("expected the partial response alongside the error")
+	}
+	if resp.Content != "hello" {
+		t.Fatalf("partial content = %q, want %q", resp.Content, "hello")
+	}
 }

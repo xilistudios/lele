@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 func deepCopyMessages(in []Message) []Message {
@@ -199,8 +198,8 @@ func TestMessageCharCost_ImageCountedOnceAfterRehydrate(t *testing.T) {
 	if got, want := MessageCharCost(after), MessageCharCost(before); got != want {
 		t.Errorf("MessageCharCost after rehydrate = %d, want %d (image must be counted exactly once)", got, want)
 	}
-	if after.Content != "[image]" {
-		t.Fatalf("fixture sanity: after.Content = %q, want the rehydrated %q", after.Content, "[image]")
+	if after.Content != "" || len(after.ContentParts) != 1 {
+		t.Fatalf("fixture sanity: after = %+v, want the stored empty Content and its single part", after)
 	}
 
 	natural := Message{
@@ -217,9 +216,8 @@ func TestMessageCharCost_ImageCountedOnceAfterRehydrate(t *testing.T) {
 	if err := json.Unmarshal(wire, &round); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	delta := MessageCharCost(round[0]) - MessageCharCost(natural)
-	if marker := utf8.RuneCountInString("[image]"); delta != marker {
-		t.Errorf("natural-shape cost delta after rehydrate = %d, want %d (only the marker)", delta, marker)
+	if delta := MessageCharCost(round[0]) - MessageCharCost(natural); delta != 0 {
+		t.Errorf("natural-shape cost delta after rehydrate = %d, want 0 (no synthesized %q marker)", delta, "[image]")
 	}
 }
 

@@ -1,6 +1,9 @@
 package routing
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -293,5 +296,63 @@ func TestResolveRoute_NoDefaultUsesFirst(t *testing.T) {
 
 	if route.AgentID != "alpha" {
 		t.Errorf("AgentID = %q, want 'alpha' (first in list)", route.AgentID)
+	}
+}
+
+func TestPickAgentIDWarnsOnMissingAgent(t *testing.T) {
+	var buf bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	agents := []config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "support"},
+	}
+	bindings := []config.AgentBinding{
+		{
+			AgentID: "ghost",
+			Match: config.BindingMatch{
+				Channel:   "telegram",
+				AccountID: "*",
+			},
+		},
+	}
+	r := NewRouteResolver(testConfig(agents, bindings))
+
+	route := r.ResolveRoute(RouteInput{Channel: "telegram"})
+	if route.AgentID != "main" {
+		t.Fatalf("AgentID = %q, want 'main'", route.AgentID)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "binding references unknown agent") {
+		t.Fatalf("expected a warning about the unknown binding agent, got %q", output)
+	}
+	if !strings.Contains(output, "ghost") {
+		t.Fatalf("warning does not name the missing agent: %q", output)
+	}
+	if got := strings.Count(output, "binding references unknown agent"); got != 1 {
+		t.Fatalf("warning emitted %d times, want 1: %q", got, output)
+	}
+}
+
+func TestPickAgentIDKnownAgentDoesNotWarn(t *testing.T) {
+	var buf bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	agents := []config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "support"},
+	}
+	r := NewRouteResolver(testConfig(agents, nil))
+
+	if got := r.pickAgentID("support"); got != "support" {
+		t.Fatalf("pickAgentID(support) = %q, want 'support'", got)
+	}
+	if strings.Contains(buf.String(), "binding references unknown agent") {
+		t.Fatalf("unexpected warning for a known agent: %q", buf.String())
 	}
 }

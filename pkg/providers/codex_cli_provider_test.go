@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 func TestParseJSONLEvents_AgentMessage(t *testing.T) {
@@ -590,5 +593,26 @@ func TestCodexCliProvider_Integration(t *testing.T) {
 	lower := strings.ToLower(strings.TrimSpace(resp.Content))
 	if !strings.Contains(lower, "hello") {
 		t.Errorf("Content = %q, expected to contain 'hello'", resp.Content)
+	}
+}
+
+func TestParseJSONLEventsTooLongLine(t *testing.T) {
+	p := &CodexCliProvider{}
+	events := `{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Partial result."}}
+{"type":"pad","value":"` + strings.Repeat("x", 2*1024*1024) + `"}`
+
+	resp, err := p.parseJSONLEvents(events)
+	if err == nil {
+		t.Fatal("expected an error for an over-long JSONL line, got nil")
+	}
+	if !errors.Is(err, common.ErrStreamTruncated) {
+		t.Fatalf("error = %v, want it to wrap common.ErrStreamTruncated", err)
+	}
+	if resp == nil {
+		t.Fatal("expected the partial response alongside the error")
+	}
+	if resp.Content != "Partial result." {
+		t.Fatalf("partial content = %q, want %q", resp.Content, "Partial result.")
 	}
 }

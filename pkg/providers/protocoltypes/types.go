@@ -127,93 +127,67 @@ type CommandApplied struct {
 	Source      string `json:"source,omitempty"`
 }
 
-func (m *Message) MarshalJSON() ([]byte, error) {
-	type rawMessage struct {
-		Role               string              `json:"role"`
-		Content            interface{}         `json:"content"`
-		ToolCalls          []ToolCall          `json:"tool_calls,omitempty"`
-		ToolCallID         string              `json:"tool_call_id,omitempty"`
-		ReasoningContent   string              `json:"reasoning_content"`
-		ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
-		Streaming          bool                `json:"streaming,omitempty"`
-		Attachments        []MessageAttachment `json:"attachments,omitempty"`
-		DisplayContent     string              `json:"display_content,omitempty"`
-		Command            *CommandApplied     `json:"harness_command,omitempty"`
-		ErrorDetail        string              `json:"error_detail,omitempty"`
-	}
+func (m Message) MarshalJSON() ([]byte, error) {
+	type messageFields Message
 
-	content := interface{}(m.Content)
-	if len(m.ContentParts) > 0 {
-		content = m.ContentParts
-	}
-
-	return json.Marshal(rawMessage{
-		Role:               m.Role,
-		Content:            content,
-		ToolCalls:          m.ToolCalls,
-		ToolCallID:         m.ToolCallID,
-		ReasoningContent:   m.ReasoningContent,
-		ExcludeFromContext: m.ExcludeFromContext,
-		Streaming:          m.Streaming,
-		Attachments:        m.Attachments,
-		DisplayContent:     m.DisplayContent,
-		Command:            m.Command,
-		ErrorDetail:        m.ErrorDetail,
-	})
+	return json.Marshal(messageFields(m))
 }
 
 func (m *Message) UnmarshalJSON(data []byte) error {
-	type rawMessage struct {
-		Role               string              `json:"role"`
-		Content            json.RawMessage     `json:"content"`
-		ToolCalls          []ToolCall          `json:"tool_calls,omitempty"`
-		ToolCallID         string              `json:"tool_call_id,omitempty"`
-		ReasoningContent   string              `json:"reasoning_content,omitempty"`
-		ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
-		Streaming          bool                `json:"streaming,omitempty"`
-		Attachments        []MessageAttachment `json:"attachments,omitempty"`
-		DisplayContent     string              `json:"display_content,omitempty"`
-		Command            *CommandApplied     `json:"harness_command,omitempty"`
-		ErrorDetail        string              `json:"error_detail,omitempty"`
-	}
+	type messageFields Message
 
-	var raw rawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	var wire struct {
+		messageFields
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 
-	m.Role = raw.Role
-	m.ToolCalls = raw.ToolCalls
-	m.ToolCallID = raw.ToolCallID
-	m.ReasoningContent = raw.ReasoningContent
-	m.ExcludeFromContext = raw.ExcludeFromContext
-	m.Streaming = raw.Streaming
-	m.Attachments = raw.Attachments
-	m.DisplayContent = raw.DisplayContent
-	m.Command = raw.Command
-	m.ErrorDetail = raw.ErrorDetail
-	m.Content = ""
-	m.ContentParts = nil
+	decoded := Message(wire.messageFields)
+	decoded.Content = ""
 
-	trimmed := strings.TrimSpace(string(raw.Content))
-	if trimmed == "" || trimmed == "null" {
-		return nil
+	text, parts, kind := decodeStoredContent(wire.Content)
+	switch kind {
+	case storedContentText:
+		decoded.Content = text
+	case storedContentParts:
+		if len(decoded.ContentParts) == 0 {
+			decoded.ContentParts = parts
+		}
+		decoded.Content = textFromParts(decoded.ContentParts)
 	}
 
-	var content string
-	if err := json.Unmarshal(raw.Content, &content); err == nil {
-		m.Content = content
-		return nil
+	*m = decoded
+
+	return nil
+}
+
+type storedContentKind int
+
+const (
+	storedContentEmpty storedContentKind = iota
+	storedContentText
+	storedContentParts
+)
+
+func decodeStoredContent(raw json.RawMessage) (string, []ContentPart, storedContentKind) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", nil, storedContentEmpty
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text, nil, storedContentText
 	}
 
 	var parts []ContentPart
-	if err := json.Unmarshal(raw.Content, &parts); err == nil {
-		m.ContentParts = parts
-		m.Content = textFromParts(parts)
-		return nil
+	if err := json.Unmarshal(raw, &parts); err == nil && parts != nil {
+		return "", parts, storedContentParts
 	}
 
-	return nil
+	return "", nil, storedContentEmpty
 }
 
 func (m *Message) TextContent() string {

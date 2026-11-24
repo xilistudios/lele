@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 type RouteInput struct {
@@ -215,7 +216,12 @@ func (r *RouteResolver) pickAgentID(agentID string) string {
 			return normalized
 		}
 	}
-	return NormalizeAgentID(r.resolveDefaultAgentID())
+	fallback := NormalizeAgentID(r.resolveDefaultAgentID())
+	logger.WarnCF("routing", "binding references unknown agent; falling back to default", map[string]interface{}{
+		"binding_agent": normalized,
+		"fallback":      fallback,
+	})
+	return fallback
 }
 
 func (r *RouteResolver) resolveDefaultAgentID() string {

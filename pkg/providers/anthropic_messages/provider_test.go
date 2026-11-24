@@ -3,10 +3,15 @@ package anthropicmessages
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 func TestBuildRequestBody(t *testing.T) {
@@ -1224,5 +1229,154 @@ func TestNewProviderWithTimeout_SetsRequestTimeout(t *testing.T) {
 	}
 	if p.httpClient.Timeout != 0 {
 		t.Errorf("httpClient.Timeout = %v, want 0 (no total timeout)", p.httpClient.Timeout)
+	}
+}
+
+func TestParseAnthropicSSEStreamMidStreamError(t *testing.T) {
+	sseData := joinSSEEvents(
+		sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}`),
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello wor"}}`),
+	)
+
+	readErr := errors.New("connection reset by peer")
+	body := io.MultiReader(strings.NewReader(sseData), iotest.ErrReader(readErr))
+
+	doneCalled := false
+	resp, err := parseAnthropicSSEStream(context.Background(), body, func(chunk string, done bool) {
+		if done {
+			doneCalled = true
+		}
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected an error for a truncated stream, got nil")
+	}
+	if !errors.Is(err, common.ErrStreamTruncated) {
+		t.Fatalf("error = %v, want it to wrap common.ErrStreamTruncated", err)
+	}
+	if !errors.Is(err, readErr) {
+		t.Fatalf("error = %v, want it to wrap the reader error", err)
+	}
+	if doneCalled {
+		t.Fatal("onChunk(\"\", true) must not be called on a truncated stream")
+	}
+	if resp == nil {
+		t.Fatal("expected partial response alongside the error")
+	}
+	if resp.Content != "hello wor" {
+		t.Fatalf("partial content = %q, want %q", resp.Content, "hello wor")
+	}
+}
+
+func TestParseAnthropicSSEStreamTooLongLine(t *testing.T) {
+	line := "data: {\"type\":\"ping\",\"pad\":\"" + strings.Repeat("x", 2*1024*1024) + "\"}\n"
+
+	doneCalled := false
+	_, err := parseAnthropicSSEStream(context.Background(), strings.NewReader(line), func(chunk string, done bool) {
+		if done {
+			doneCalled = true
+		}
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected an error for an over-long SSE line, got nil")
+	}
+	if !errors.Is(err, common.ErrStreamTruncated) {
+		t.Fatalf("error = %v, want it to wrap common.ErrStreamTruncated", err)
+	}
+	if !strings.Contains(err.Error(), "1 MB") {
+		t.Fatalf("error = %q, want it to name the 1 MB line limit", err.Error())
+	}
+	if doneCalled {
+		t.Fatal("onChunk(\"\", true) must not be called for an over-long line")
+	}
+}
+
+func TestStreamingUsageMatchesNonStreaming(t *testing.T) {
+	nonStreamingBody := []byte(`{
+		"content": [{"type": "text", "text": "ok"}],
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 1000,
+			"output_tokens": 42,
+			"cache_read_input_tokens": 5000,
+			"cache_creation_input_tokens": 2000
+		}
+	}`)
+
+	nonStreaming, err := parseResponseBody(nonStreamingBody)
+	if err != nil {
+		t.Fatalf("parseResponseBody() error: %v", err)
+	}
+
+	sseData := joinSSEEvents(
+		sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":1000,"output_tokens":0,"cache_read_input_tokens":5000,"cache_creation_input_tokens":2000}}}`),
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`),
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}`),
+		sseEvent("message_stop", `{"type":"message_stop"}`),
+	)
+
+	streaming, err := parseAnthropicSSEStream(context.Background(), strings.NewReader(sseData), func(string, bool) {}, nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicSSEStream() error: %v", err)
+	}
+	if streaming.Usage == nil {
+		t.Fatal("streaming usage is nil")
+	}
+
+	got, err := json.Marshal(streaming.Usage)
+	if err != nil {
+		t.Fatalf("marshal streaming usage: %v", err)
+	}
+	want, err := json.Marshal(nonStreaming.Usage)
+	if err != nil {
+		t.Fatalf("marshal non-streaming usage: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("streaming usage %s != non-streaming usage %s", got, want)
+	}
+	if streaming.Usage.TotalTokens != 8042 {
+		t.Fatalf("TotalTokens = %d, want 8042", streaming.Usage.TotalTokens)
+	}
+}
+
+func TestParseAnthropicSSEStreamNoUsageStaysNil(t *testing.T) {
+	sseData := joinSSEEvents(
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`),
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+		sseEvent("message_stop", `{"type":"message_stop"}`),
+	)
+
+	resp, err := parseAnthropicSSEStream(context.Background(), strings.NewReader(sseData), func(string, bool) {}, nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicSSEStream() error: %v", err)
+	}
+	if resp.Usage != nil {
+		t.Fatalf("usage = %+v, want nil so the estimate fallback applies", resp.Usage)
+	}
+}
+
+func TestParseAnthropicSSEStreamOutputTokensOnlyUsage(t *testing.T) {
+	sseData := joinSSEEvents(
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`),
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`),
+		sseEvent("message_stop", `{"type":"message_stop"}`),
+	)
+
+	resp, err := parseAnthropicSSEStream(context.Background(), strings.NewReader(sseData), func(string, bool) {}, nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicSSEStream() error: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("usage is nil, want output token usage from message_delta")
+	}
+	if resp.Usage.CompletionTokens != 7 || resp.Usage.TotalTokens != 7 {
+		t.Fatalf("usage = %+v, want completion=7 total=7", resp.Usage)
 	}
 }
