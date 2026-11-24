@@ -2004,7 +2004,12 @@ func TestLoadSkills_AppliesSkillsFilter(t *testing.T) {
 	}
 }
 
-func TestSetAvailableSubagentsConcurrentWithGetInitialContext(t *testing.T) {
+// TestSetAvailableSubagentsConcurrentSmoke is a smoke test, not a regression
+// test for the lock: it only observes the final state, which is identical
+// whether SetAvailableSubagents writes inside or outside initialMu, and this
+// host runs no -race detector. The lock invariant (see the comment on
+// SetAvailableSubagents) is guarded by CI's -race job and code review.
+func TestSetAvailableSubagentsConcurrentSmoke(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagents-race-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)

@@ -121,9 +121,11 @@ type claudeBridgeInitRequest struct {
 }
 
 // claudeBridgeChatRequest is one model step. Messages are lele
-// protocoltypes.Message JSON verbatim (the bridge understands both the plain
-// string content and the content_parts form); system messages have already
-// been folded into System because the SDK takes a single system prompt.
+// protocoltypes.Message JSON serialized field for field, so a multimodal turn
+// carries content_parts (and media) next to a content string that may be empty.
+// bridge_lib.mjs renderContent tolerates both this shape and the folded one,
+// where the parts sat inside a content array; system messages have already been
+// folded into System because the SDK takes a single system prompt.
 type claudeBridgeChatRequest struct {
 	Type     string           `json:"type"`
 	ID       string           `json:"id"`

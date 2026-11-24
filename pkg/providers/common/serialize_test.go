@@ -129,8 +129,41 @@ func (r *repeatingReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-var errEOF = errReaderEOF{}
+func TestSerializeMessagesContentSurvivesUnusableParts(t *testing.T) {
+	wire := wireJSON(t, []Message{{
+		Role:         "user",
+		Content:      "describe this in detail",
+		ContentParts: []protocoltypes.ContentPart{{Type: "image_url"}},
+	}})
+	if got := strings.Count(wire, "describe this in detail"); got != 1 {
+		t.Fatalf("content text appears %d times, want 1: %s", got, wire)
+	}
+	if strings.Contains(wire, `"content":[]`) {
+		t.Fatalf("no part serialized and the text was dropped: %s", wire)
+	}
+}
 
-type errReaderEOF struct{}
+func TestSerializeMessagesContentSurvivesRemoteMediaWhenPartsPresent(t *testing.T) {
+	wire := wireJSON(t, []Message{{
+		Role:         "user",
+		Content:      "what is in this photo?",
+		ContentParts: []protocoltypes.ContentPart{{Type: "text", Text: "   "}},
+		Media:        []string{"https://example.com/photo.png"},
+	}})
+	if got := strings.Count(wire, "what is in this photo?"); got != 1 {
+		t.Fatalf("content text appears %d times, want 1: %s", got, wire)
+	}
+	if strings.Contains(wire, `"content":[]`) {
+		t.Fatalf("remote media and a blank part produced an empty content array: %s", wire)
+	}
+}
 
-func (errReaderEOF) Error() string { return "EOF" }
+func TestSerializeMessagesEmptyContentStaysEmpty(t *testing.T) {
+	wire := wireJSON(t, []Message{{
+		Role:         "user",
+		ContentParts: []protocoltypes.ContentPart{{Type: "image_url"}},
+	}})
+	if wire != `[{"content":[],"role":"user"}]` {
+		t.Fatalf("wire = %s, want the empty content array the plain branch also emits for empty content", wire)
+	}
+}

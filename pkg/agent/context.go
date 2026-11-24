@@ -133,6 +133,10 @@ func (cb *ContextBuilder) SetVideoSupported(v bool) {
 	cb.initialMu.Unlock()
 }
 
+// SetAvailableSubagents replaces the subagent roster and drops the cached
+// initial context. The write happens under initialMu so it cannot interleave
+// with GetInitialContext, which reads availableSubagents and rebuilds
+// initialContext under the same mutex.
 func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
 	cb.initialMu.Lock()
 	defer cb.initialMu.Unlock()

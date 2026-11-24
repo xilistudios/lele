@@ -274,6 +274,13 @@ func SerializeMessages(messages []Message) []any {
 			}
 		}
 
+		if len(parts) == 0 && m.Content != "" {
+			parts = append(parts, map[string]any{
+				"type": "text",
+				"text": m.Content,
+			})
+		}
+
 		msg := map[string]any{
 			"role":    m.Role,
 			"content": parts,
