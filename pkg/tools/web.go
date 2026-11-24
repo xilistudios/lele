@@ -528,7 +528,7 @@ func isPublicIP(ip net.IP) bool {
 		return false
 	}
 	if nat64WellKnownPrefix.Contains(v6) {
-		return isPublicIP(net.IP(v6[12:16]))
+		return isPublicIP(v6[12:16])
 	}
 	return !inNonPublicRange(v6)
 }
