@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -36,6 +37,28 @@ const DefaultResponseHeaderTimeout = DefaultRequestTimeout
 const DefaultStreamIdleTimeout = 5 * time.Minute
 
 const MaxRequestLifetime = 30 * time.Minute
+
+const MaxResponseBodyBytes = 32 << 20
+
+var ErrStreamTruncated = errors.New("provider stream truncated")
+
+func StreamScanError(err error) error {
+	if errors.Is(err, bufio.ErrTooLong) {
+		return fmt.Errorf("%w: provider sent a single SSE line larger than 1 MB", ErrStreamTruncated)
+	}
+	return fmt.Errorf("%w: %w", ErrStreamTruncated, err)
+}
+
+func ReadLimitedBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, MaxResponseBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > MaxResponseBodyBytes {
+		return nil, fmt.Errorf("response body exceeds the %d MB limit", MaxResponseBodyBytes>>20)
+	}
+	return body, nil
+}
 
 func newTransport(proxy string, headerTimeout time.Duration) *http.Transport {
 	if base, ok := http.DefaultTransport.(*http.Transport); ok {
@@ -212,7 +235,7 @@ func SerializeMessages(messages []Message) []any {
 			}
 		}
 
-		if m.Content != "" {
+		if !hasContentParts && m.Content != "" {
 			parts = append(parts, map[string]any{
 				"type": "text",
 				"text": m.Content,

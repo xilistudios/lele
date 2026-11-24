@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"runtime"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 const (
@@ -697,7 +697,7 @@ func (p *GeminiCodeAssistProvider) doCodeAssist(req *http.Request, method, acces
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading gemini code assist %s response: %w", method, err)
 	}

@@ -27,6 +27,8 @@ type (
 	ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 )
 
+const noContentPlaceholder = "[no content]"
+
 const (
 	defaultAPIVersion     = "2023-06-01"
 	defaultBaseURL        = "https://api.anthropic.com/v1"
@@ -160,7 +162,7 @@ func (p *Provider) Chat(
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
@@ -236,7 +238,7 @@ func (p *Provider) ChatStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := common.ReadLimitedBody(resp.Body)
 		return nil, common.NewAPIError(resp, body, endpointURL)
 	}
 
@@ -321,7 +323,7 @@ func buildRequestBody(
 			} else {
 				apiMessages = append(apiMessages, map[string]any{
 					"role":    "user",
-					"content": msg.Content,
+					"content": buildUserContent(msg),
 				})
 			}
 
@@ -352,6 +354,10 @@ func buildRequestBody(
 					"input": input,
 				}
 				content = append(content, toolUse)
+			}
+
+			if len(content) == 0 {
+				continue
 			}
 
 			apiMessages = append(apiMessages, map[string]any{
@@ -395,6 +401,109 @@ func buildRequestBody(
 	}
 
 	return result, nil
+}
+
+func buildUserContent(msg Message) any {
+	if len(msg.ContentParts) == 0 && len(msg.Media) == 0 {
+		if strings.TrimSpace(msg.Content) == "" {
+			return []map[string]any{textContentBlock(noContentPlaceholder)}
+		}
+		return msg.Content
+	}
+	return buildUserContentBlocks(msg)
+}
+
+func buildUserContentBlocks(msg Message) []map[string]any {
+	var blocks []map[string]any
+
+	if len(msg.ContentParts) > 0 {
+		for _, part := range msg.ContentParts {
+			switch part.Type {
+			case "text":
+				if strings.TrimSpace(part.Text) != "" {
+					blocks = append(blocks, textContentBlock(part.Text))
+				}
+			case "image_url":
+				if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+					continue
+				}
+				if mediaType, encoded, ok := splitDataURL(part.ImageURL.URL); ok {
+					blocks = append(blocks, imageContentBlock(mediaType, encoded))
+					continue
+				}
+				blocks = append(blocks, textContentBlock("[image: "+strings.TrimSpace(part.ImageURL.URL)+"]"))
+			case "video_url":
+				if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
+					continue
+				}
+				blocks = append(blocks, textContentBlock("[video: "+strings.TrimSpace(part.VideoURL.URL)+"]"))
+			}
+		}
+	} else {
+		for _, mediaURL := range msg.Media {
+			if mediaType, encoded, ok := splitDataURL(mediaURL); ok && strings.HasPrefix(mediaType, "image/") {
+				blocks = append(blocks, imageContentBlock(mediaType, encoded))
+				continue
+			}
+			blocks = append(blocks, textContentBlock(mediaFallbackText(mediaURL)))
+		}
+
+		if strings.TrimSpace(msg.Content) != "" {
+			blocks = append(blocks, textContentBlock(msg.Content))
+		}
+	}
+
+	if len(blocks) == 0 {
+		blocks = append(blocks, textContentBlock(noContentPlaceholder))
+	}
+
+	return blocks
+}
+
+func mediaFallbackText(mediaURL string) string {
+	if mediaType, _, ok := splitDataURL(mediaURL); ok {
+		return "[media: " + mediaType + "]"
+	}
+	return "[media: " + strings.TrimSpace(mediaURL) + "]"
+}
+
+func textContentBlock(text string) map[string]any {
+	return map[string]any{
+		"type": "text",
+		"text": text,
+	}
+}
+
+func imageContentBlock(mediaType, encoded string) map[string]any {
+	return map[string]any{
+		"type": "image",
+		"source": map[string]any{
+			"type":       "base64",
+			"media_type": mediaType,
+			"data":       encoded,
+		},
+	}
+}
+
+func splitDataURL(raw string) (mediaType string, encoded string, ok bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return "", "", false
+	}
+	comma := strings.Index(trimmed, ",")
+	if comma < 0 {
+		return "", "", false
+	}
+	header := trimmed[5:comma]
+	if !strings.HasSuffix(strings.ToLower(header), ";base64") {
+		return "", "", false
+	}
+	mediaType = strings.TrimSuffix(header, ";base64")
+	encoded = trimmed[comma+1:]
+	if mediaType == "" || encoded == "" {
+		return "", "", false
+	}
+	return mediaType, encoded, true
 }
 
 func buildTools(tools []ToolDefinition) []any {
@@ -604,19 +713,24 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 					usage = &UsageInfo{}
 				}
 				usage.CompletionTokens = int(event.Usage.OutputTokens)
-				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens +
-					usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 			}
 
 		case "message_stop":
 		}
 	}
 
-	onChunk("", true)
-
-	if usage == nil {
-		usage = &UsageInfo{}
+	if err := scanner.Err(); err != nil {
+		return &LLMResponse{
+			Content:      contentBuf.String(),
+			Reasoning:    reasoningBuf.String(),
+			ToolCalls:    toolCalls,
+			FinishReason: finishReason,
+			Usage:        usage,
+		}, common.StreamScanError(err)
 	}
+
+	onChunk("", true)
 
 	return &LLMResponse{
 		Content:      contentBuf.String(),

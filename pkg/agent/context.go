@@ -134,10 +134,10 @@ func (cb *ContextBuilder) SetVideoSupported(v bool) {
 }
 
 func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
-	cb.availableSubagents = subagents
 	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	cb.availableSubagents = subagents
 	cb.initialContext = ""
-	cb.initialMu.Unlock()
 }
 
 func (cb *ContextBuilder) SetMCPServers(servers []tools.MCPServerInfo) {

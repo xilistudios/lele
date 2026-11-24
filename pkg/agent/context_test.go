@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -2000,5 +2001,44 @@ func TestLoadSkills_AppliesSkillsFilter(t *testing.T) {
 	}
 	if strings.Contains(result, "### Skill: beta-skill") {
 		t.Errorf("beta-skill body must be filtered out, got:\n%s", result)
+	}
+}
+
+func TestSetAvailableSubagentsConcurrentWithGetInitialContext(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagents-race-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	cb.SetAvailableSubagents([]subagentInfo{{ID: "seed", Description: "Seed agent"}})
+	if prompt := cb.GetInitialContext(); !strings.Contains(prompt, "**seed**") {
+		t.Fatalf("seed subagent missing from initial context")
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		subagents := []subagentInfo{{ID: fmt.Sprintf("agent-%d", i), Description: "Concurrent agent"}}
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			cb.SetAvailableSubagents(subagents)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = cb.GetInitialContext()
+		}()
+	}
+	wg.Wait()
+
+	cb.SetAvailableSubagents([]subagentInfo{{ID: "final", Description: "Final agent"}})
+	prompt := cb.GetInitialContext()
+	if !strings.Contains(prompt, "**final**") {
+		t.Errorf("later SetAvailableSubagents did not invalidate the cached context")
+	}
+	if strings.Contains(prompt, "**seed**") {
+		t.Errorf("stale subagent list still present after SetAvailableSubagents")
 	}
 }

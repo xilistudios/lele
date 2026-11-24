@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 type CodexCliProvider struct {
@@ -214,6 +216,8 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 		}
 	}
 
+	scanErr := scanner.Err()
+
 	if lastError != "" && len(contentParts) == 0 {
 		return nil, fmt.Errorf("codex cli: %s", lastError)
 	}
@@ -228,10 +232,16 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 		content = stripToolCallsFromText(content)
 	}
 
-	return &LLMResponse{
+	response := &LLMResponse{
 		Content:      strings.TrimSpace(content),
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 		Usage:        usage,
-	}, nil
+	}
+
+	if scanErr != nil {
+		return response, common.StreamScanError(scanErr)
+	}
+
+	return response, nil
 }

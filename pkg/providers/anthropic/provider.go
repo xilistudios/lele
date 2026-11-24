@@ -257,26 +257,45 @@ func translateTools(tools []ToolDefinition) []anthropic.ToolUnionParam {
 	result := make([]anthropic.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		tool := anthropic.ToolParam{
-			Name: t.Function.Name,
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: t.Function.Parameters["properties"],
-			},
+			Name:        t.Function.Name,
+			InputSchema: translateToolSchema(t.Function.Parameters),
 		}
 		if desc := t.Function.Description; desc != "" {
 			tool.Description = anthropic.String(desc)
 		}
-		if req, ok := t.Function.Parameters["required"].([]interface{}); ok {
-			required := make([]string, 0, len(req))
-			for _, r := range req {
-				if s, ok := r.(string); ok {
-					required = append(required, s)
-				}
-			}
-			tool.InputSchema.Required = required
-		}
 		result = append(result, anthropic.ToolUnionParam{OfTool: &tool})
 	}
 	return result
+}
+
+func translateToolSchema(parameters map[string]interface{}) anthropic.ToolInputSchemaParam {
+	schema := anthropic.ToolInputSchemaParam{Properties: parameters["properties"]}
+
+	switch required := parameters["required"].(type) {
+	case []string:
+		schema.Required = required
+	case []interface{}:
+		names := make([]string, 0, len(required))
+		for _, r := range required {
+			if s, ok := r.(string); ok {
+				names = append(names, s)
+			}
+		}
+		schema.Required = names
+	}
+
+	for key, value := range parameters {
+		switch key {
+		case "properties", "required", "type":
+			continue
+		}
+		if schema.ExtraFields == nil {
+			schema.ExtraFields = map[string]any{}
+		}
+		schema.ExtraFields[key] = value
+	}
+
+	return schema
 }
 
 func parseResponse(resp *anthropic.Message) *LLMResponse {
