@@ -32,7 +32,7 @@ func formatBuildInfo() (build string, goVer string) {
 }
 
 func printVersion() {
-	fmt.Printf("%s lele %s\n", logo, formatVersion())
+	fmt.Printf("lele %s\n", formatVersion())
 	build, goVer := formatBuildInfo()
 	if build != "" {
 		fmt.Printf("  Build: %s\n", build)

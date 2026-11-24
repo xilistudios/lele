@@ -91,7 +91,7 @@ func TestStatusCmdConfiguredProvidersOutputIsPinned(t *testing.T) {
 	}
 
 	var want strings.Builder
-	fmt.Fprintf(&want, "%s lele Status\n", logo)
+	fmt.Fprintf(&want, "lele Status\n")
 	fmt.Fprintf(&want, "Version: %s\n", formatVersion())
 	if build, _ := formatBuildInfo(); build != "" {
 		fmt.Fprintf(&want, "Build: %s\n", build)

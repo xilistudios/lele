@@ -98,7 +98,7 @@ func clientPinCmd(authMgr *channels.AuthManager) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n%s Pairing PIN Generated\n", logo)
+	fmt.Printf("\nPairing PIN Generated\n")
 	fmt.Println("------------------------")
 	fmt.Printf("  PIN:     %s\n", pending.PIN)
 	fmt.Printf("  Expires: %s\n", pending.Expires.Format("2006-01-02 15:04:05"))
@@ -114,7 +114,7 @@ func clientListCmd(authMgr *channels.AuthManager) {
 		return
 	}
 
-	fmt.Printf("\n%s Paired Clients (%d)\n", logo, len(clients))
+	fmt.Printf("\nPaired Clients (%d)\n", len(clients))
 	fmt.Println("----------------------")
 	for _, client := range clients {
 		status := "✓ active"
@@ -140,7 +140,7 @@ func clientPendingCmd(authMgr *channels.AuthManager) {
 		return
 	}
 
-	fmt.Printf("\n%s Pending Pairing Requests (%d)\n", logo, len(pins))
+	fmt.Printf("\nPending Pairing Requests (%d)\n", len(pins))
 	fmt.Println("---------------------------------")
 	for _, pending := range pins {
 		remaining := time.Until(pending.Expires)
@@ -170,7 +170,7 @@ func clientStatusCmd(authMgr *channels.AuthManager, cfg *config.Config) {
 	clients := authMgr.ListClients()
 	pins := authMgr.GetPendingPINs()
 
-	fmt.Printf("\n%s Client Channel Status\n", logo)
+	fmt.Printf("\nClient Channel Status\n")
 	fmt.Println("-----------------------")
 
 	nativeCfg := cfg.Channels.Native

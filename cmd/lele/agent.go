@@ -113,15 +113,15 @@ func agentCmd() {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("\n%s %s\n", logo, response)
+		fmt.Printf("\n%s\n", response)
 	} else {
-		fmt.Printf("%s Interactive mode (Ctrl+C to exit)\n\n", logo)
+		fmt.Printf("Interactive mode (Ctrl+C to exit)\n\n")
 		interactiveMode(agentLoop, sessionKey)
 	}
 }
 
 func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
-	prompt := fmt.Sprintf("%s You: ", logo)
+	prompt := "You: "
 
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          prompt,
@@ -167,14 +167,14 @@ func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 			continue
 		}
 
-		fmt.Printf("\n%s %s\n\n", logo, response)
+		fmt.Printf("\n%s\n\n", response)
 	}
 }
 
 func simpleInteractiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Printf("%s You: ", logo)
+		fmt.Printf("You: ")
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -202,6 +202,6 @@ func simpleInteractiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 			continue
 		}
 
-		fmt.Printf("\n%s %s\n\n", logo, response)
+		fmt.Printf("\n%s\n\n", response)
 	}
 }

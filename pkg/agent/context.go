@@ -480,7 +480,7 @@ func (cb *ContextBuilder) getIdentity() string {
 
 	toolsSection := cb.buildToolsSection()
 
-	return fmt.Sprintf(`# lele 🦞
+	return fmt.Sprintf(`# lele
 
 You are lele, a helpful AI assistant.
 

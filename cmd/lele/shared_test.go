@@ -96,12 +96,6 @@ func TestCopyDirectory_SourceNotExist(t *testing.T) {
 	}
 }
 
-func TestLogoConstant(t *testing.T) {
-	if logo != "🦞" {
-		t.Errorf("logo = %q, want %q", logo, "🦞")
-	}
-}
-
 const sharedTestMCPURL = "https://mcp.example.com/mcp"
 
 func newFileKeyringService(t *testing.T, dir string) *keyring.Service {

@@ -95,7 +95,7 @@ func maskAPIKey(key string) string {
 }
 
 func printHelp() {
-	fmt.Printf("%s %s v%s\n\n", logo, tui.WelcomeLogo.Render("lele - Personal AI Assistant"), version)
+	fmt.Printf("%s v%s\n\n", tui.WelcomeLogo.Render("lele - Personal AI Assistant"), version)
 	fmt.Printf("%s: %s\n\n", styleSubTitle.Render("Usage"), styleOption.Render("lele [-c|--config-dir <path>] <command>"))
 	fmt.Println(styleTitle.Render("Commands:"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("onboard"), styleOption.Render("Initialize lele configuration and workspace"))
@@ -752,7 +752,7 @@ func onboard() {
 		}
 	}
 
-	fmt.Printf("\n%s %s\n", logo, tui.WelcomeLogo.Render("lele is ready!"))
+	fmt.Printf("\n%s\n", tui.WelcomeLogo.Render("lele is ready!"))
 
 	maybeStartServices(cfg)
 }

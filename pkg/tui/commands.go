@@ -390,7 +390,7 @@ func (m *Model) buildStatusReport() string {
 	compactions := m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey)
 
 	var sb strings.Builder
-	sb.WriteString("🦞 " + i18n.T("tui.context") + "\n")
+	sb.WriteString(i18n.T("tui.context") + "\n")
 	sb.WriteString(i18n.T("tui.currentContext") + ": " + formatNumber(current) + "\n")
 	sb.WriteString(i18n.T("tui.contextWindow") + ": " + formatNumber(window) + "\n")
 	if window > 0 {
