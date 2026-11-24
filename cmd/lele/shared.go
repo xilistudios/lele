@@ -23,8 +23,6 @@ import (
 //go:embed workspace web/dist
 var embeddedFiles embed.FS
 
-const logo = "🦞"
-
 func getConfigPath() string {
 	return config.DefaultConfigPath()
 }

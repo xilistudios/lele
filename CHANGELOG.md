@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### WebUI
 - **The secret scope is now picked from the agent roster instead of typed** — creating a secret (`/secrets` → *New*) asked for its scope as a free-text, comma-separated list of agent IDs, so a typo silently scoped a secret to an agent that does not exist. The field is now a chip multi-select — one chip per configured agent, built from the app's live agent list (`GET /api/v1/agents`, the same source the sidebar uses) and reusing the `AgentChipMultiSelect` the per-agent *Subagents* tab already ships. No selection still means "all agents" (`scope: []`), an empty roster shows an explicit empty state instead of a bare input, and the value is carried as `string[]` end to end (the old `scopeText`/`.split(',')` parsing is gone). Each chip is a keyboard-toggleable `role="checkbox"` and the group carries the field's accessible name, so the control does not depend on a pointer.
 
+#### Branding
+- **The lobster emoji is gone from every surface** — `🦞` was being printed by the wordmark in a dozen places: the CLI banner and the interactive `You:` prompt, the `lele version` / `lele status` / `lele client pin|list|pending|status` headers, the TUI window title and its `/status` report, the `# lele 🦞` identity line at the top of the system prompt, and the Telegram `/start` greeting. The name now renders as plain `lele` everywhere. The `logo` constant is deleted rather than emptied, so nothing prints a stray blank prefix, and the eleven `tui.title` strings (three embedded, eight downloadable locales) drop the emoji as well. Layout, spacing and every other glyph are untouched. The six test files that use `🦞` as a multi-byte UTF-8 fixture (runewidth, truncation, sanitization) keep it on purpose — there it is test data, not branding.
+
 ### Deprecated
 
 #### Agent

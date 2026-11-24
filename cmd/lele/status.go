@@ -17,7 +17,7 @@ func statusCmd() {
 
 	configPath := getConfigPath()
 
-	fmt.Printf("%s lele Status\n", logo)
+	fmt.Printf("lele Status\n")
 	fmt.Printf("Version: %s\n", formatVersion())
 	build, _ := formatBuildInfo()
 	if build != "" {

@@ -23,11 +23,11 @@ func TestT(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"es", "tui.title", "Lele 🦞"},
+		{"es", "tui.title", "Lele"},
 		{"es", "tui.welcome", "¡Bienvenido a Lele!"},
-		{"en", "tui.title", "Lele 🦞"},
+		{"en", "tui.title", "Lele"},
 		{"en", "tui.welcome", "Welcome to Lele!"},
-		{"pt", "tui.title", "Lele 🦞"},
+		{"pt", "tui.title", "Lele"},
 		{"pt", "tui.welcome", "Bem-vindo ao Lele!"},
 	}
 
