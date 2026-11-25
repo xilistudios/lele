@@ -18,15 +18,16 @@ type AgentContext struct {
 type ResolveAgentFunc func(agentID string) (AgentContext, bool)
 
 type TurnRequest struct {
-	GroupID       string
-	Speaker       string
-	SystemPrompt  string
-	Transcript    string
-	Instruction   string
-	MaxTokens     int
-	EnableTools   bool
-	OriginChannel string
-	OriginChatID  string
+	GroupID        string
+	Speaker        string
+	SystemPrompt   string
+	Transcript     string
+	Instruction    string
+	MaxTokens      int
+	EnableTools    bool
+	OriginChannel  string
+	OriginChatID   string
+	OriginSenderID string
 
 	OnToolCall func(toolCallID, toolName, args, status, result string)
 }
