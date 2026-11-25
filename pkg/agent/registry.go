@@ -279,6 +279,7 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		if old, ok := r.agents[id]; ok {
 			instance.Sessions = old.Sessions
 			instance.ContextBuilder = old.ContextBuilder
+			old.ContextBuilder.SetWorkspace(resolveAgentWorkspace(ac, &cfg.Agents.Defaults))
 			old.ContextBuilder.SetSkillsFilter(ac.Skills)
 			old.ContextBuilder.SetToolsRegistry(instance.Tools)
 			old.ContextBuilder.SetVisionSupported(instance.SupportsImages)

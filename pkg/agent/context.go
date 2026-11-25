@@ -83,6 +83,15 @@ func getGlobalConfigDir() string {
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
+	return &ContextBuilder{
+		workspace:       workspace,
+		skillsLoader:    newSkillsLoader(workspace),
+		memory:          NewMemoryStore(workspace),
+		skillsDiscovery: &skillsDiscoveryPerms{List: true, Search: true, Load: true},
+	}
+}
+
+func newSkillsLoader(workspace string) *skills.SkillsLoader {
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = ""
@@ -95,13 +104,25 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 		directorySkillsDir = filepath.Join(wd, ".lele", "skills")
 		agentsSkillsDir = filepath.Join(wd, ".agents", "skills")
 	}
+	return skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir, agentsSkillsDir)
+}
 
-	return &ContextBuilder{
-		workspace:       workspace,
-		skillsLoader:    skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir, agentsSkillsDir),
-		memory:          NewMemoryStore(workspace),
-		skillsDiscovery: &skillsDiscoveryPerms{List: true, Search: true, Load: true},
+// SetWorkspace re-points the builder at a new workspace, rebuilding the skills
+// loader and the memory store and dropping the cached initial context. The work
+// runs under initialMu so it cannot interleave with GetInitialContext, which
+// builds the prompt from workspace, skillsLoader and memory under that mutex.
+// Tools, vision/video support, subagents, MCP servers and the skills filter are
+// workspace-independent and are patched separately by the reload path.
+func (cb *ContextBuilder) SetWorkspace(workspace string) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	if cb.workspace == workspace {
+		return
 	}
+	cb.workspace = workspace
+	cb.skillsLoader = newSkillsLoader(workspace)
+	cb.memory = NewMemoryStore(workspace)
+	cb.initialContext = ""
 }
 
 func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
