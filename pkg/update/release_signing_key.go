@@ -14,7 +14,10 @@ const (
 	ReleaseSignatureSuffix = ".sig"
 )
 
-var errInvalidReleaseSignature = errors.New("invalid release signature")
+var (
+	errInvalidReleaseSignature        = errors.New("invalid release signature")
+	errReleaseSigningKeyNotConfigured = errors.New("release signing key is not configured")
+)
 
 var releaseSigningPublicKey = decodeSigningPublicKey(ReleaseSigningPublicKeyBase64)
 
@@ -28,7 +31,7 @@ func ReleaseSigningPublicKey() ed25519.PublicKey {
 
 func VerifyChecksumsSignature(publicKey ed25519.PublicKey, checksums, signature []byte) error {
 	if len(publicKey) != ed25519.PublicKeySize {
-		return errors.New("release signing key is not configured")
+		return fmt.Errorf("%w: got a %d byte key", errReleaseSigningKeyNotConfigured, len(publicKey))
 	}
 	if len(signature) != ed25519.SignatureSize {
 		return fmt.Errorf(

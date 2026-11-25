@@ -18,6 +18,11 @@ import (
 	"time"
 )
 
+const (
+	checksumsMaxBytes = 1 << 20
+	signatureMaxBytes = 1 << 10
+)
+
 type DownloadResult struct {
 	ArchivePath string
 	BinaryPath  string
@@ -38,11 +43,14 @@ func NewDownloader() *Downloader {
 	}
 }
 
-func (d *Downloader) releaseKey() ed25519.PublicKey {
-	if len(d.signingKey) == ed25519.PublicKeySize {
-		return d.signingKey
+func (d *Downloader) releaseKey() (ed25519.PublicKey, error) {
+	if len(d.signingKey) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf(
+			"%w: the downloader has a %d byte key, expected %d",
+			errReleaseSigningKeyNotConfigured, len(d.signingKey), ed25519.PublicKeySize,
+		)
 	}
-	return releaseSigningPublicKey
+	return d.signingKey, nil
 }
 
 type Platform struct {
@@ -98,6 +106,11 @@ func ChecksumsName(version string) string {
 }
 
 func (d *Downloader) Download(ctx context.Context, rel *Release, progress func(downloaded, total int64)) (*DownloadResult, error) {
+	signingKey, err := d.releaseKey()
+	if err != nil {
+		return nil, err
+	}
+
 	platform, err := CurrentPlatform()
 	if err != nil {
 		return nil, err
@@ -129,24 +142,24 @@ func (d *Downloader) Download(ctx context.Context, rel *Release, progress func(d
 	cleanup := func() { _ = os.RemoveAll(tempDir) }
 
 	checksumsPath := filepath.Join(tempDir, checksumsName)
-	if err := d.downloadFile(ctx, checksumsAsset.URL, checksumsPath, 0, nil); err != nil {
+	if err := d.downloadFile(ctx, checksumsAsset.URL, checksumsPath, 0, checksumsMaxBytes, nil); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("downloading checksums: %w", err)
 	}
 
 	signaturePath := filepath.Join(tempDir, signatureName)
-	if err := d.downloadFile(ctx, signatureAsset.URL, signaturePath, 0, nil); err != nil {
+	if err := d.downloadFile(ctx, signatureAsset.URL, signaturePath, 0, signatureMaxBytes, nil); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("downloading checksums signature: %w", err)
 	}
 
-	if err := verifyChecksumsSignature(d.releaseKey(), checksumsPath, signaturePath); err != nil {
+	if err := verifyChecksumsSignature(signingKey, checksumsPath, signaturePath); err != nil {
 		cleanup()
 		return nil, err
 	}
 
 	archivePath := filepath.Join(tempDir, archiveName)
-	if err := d.downloadFile(ctx, asset.URL, archivePath, asset.Size, progress); err != nil {
+	if err := d.downloadFile(ctx, asset.URL, archivePath, asset.Size, 0, progress); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("downloading archive: %w", err)
 	}
@@ -170,7 +183,7 @@ func (d *Downloader) Download(ctx context.Context, rel *Release, progress func(d
 	}, nil
 }
 
-func (d *Downloader) downloadFile(ctx context.Context, url, dst string, total int64, progress func(downloaded, total int64)) error {
+func (d *Downloader) downloadFile(ctx context.Context, url, dst string, total, maxBytes int64, progress func(downloaded, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -197,30 +210,44 @@ func (d *Downloader) downloadFile(ctx context.Context, url, dst string, total in
 	}
 	defer f.Close()
 
-	if progress == nil {
-		_, err = io.Copy(f, resp.Body)
+	body := io.Reader(resp.Body)
+	if maxBytes > 0 {
+		body = io.LimitReader(resp.Body, maxBytes+1)
+	}
+
+	written, err := copyWithProgress(f, body, total, progress)
+	if err != nil {
 		return err
+	}
+	if maxBytes > 0 && written > maxBytes {
+		return fmt.Errorf("%s returned %d bytes, more than the %d byte limit", url, written, maxBytes)
+	}
+	return nil
+}
+
+func copyWithProgress(dst io.Writer, src io.Reader, total int64, progress func(downloaded, total int64)) (int64, error) {
+	if progress == nil {
+		return io.Copy(dst, src)
 	}
 
 	var downloaded int64
 	buf := make([]byte, 64*1024)
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := src.Read(buf)
 		if n > 0 {
-			if _, wErr := f.Write(buf[:n]); wErr != nil {
-				return wErr
+			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
+				return downloaded, writeErr
 			}
 			downloaded += int64(n)
 			progress(downloaded, total)
 		}
 		if readErr == io.EOF {
-			break
+			return downloaded, nil
 		}
 		if readErr != nil {
-			return readErr
+			return downloaded, readErr
 		}
 	}
-	return nil
 }
 
 func verifyChecksumsSignature(publicKey ed25519.PublicKey, checksumsPath, signaturePath string) error {

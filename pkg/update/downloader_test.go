@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -301,14 +302,68 @@ func TestDownload_MissingSignatureFile(t *testing.T) {
 
 func TestNewDownloader_PinsReleaseSigningKey(t *testing.T) {
 	d := NewDownloader()
-	if !bytes.Equal(d.releaseKey(), ReleaseSigningPublicKey()) {
+	key, err := d.releaseKey()
+	if err != nil {
+		t.Fatalf("releaseKey: %v", err)
+	}
+	if !bytes.Equal(key, ReleaseSigningPublicKey()) {
 		t.Error("NewDownloader does not default to the pinned release signing key")
 	}
 
 	custom, _ := testSigningKeys(t)
 	d.signingKey = custom
-	if !bytes.Equal(d.releaseKey(), custom) {
+	key, err = d.releaseKey()
+	if err != nil {
+		t.Fatalf("releaseKey: %v", err)
+	}
+	if !bytes.Equal(key, custom) {
 		t.Error("releaseKey ignores an explicitly configured signing key")
+	}
+}
+
+func TestDownload_FailsClosedWithoutSigningKey(t *testing.T) {
+	d := NewDownloader()
+	d.signingKey = nil
+
+	result, err := d.Download(context.Background(), &Release{Tag: "v9.9.9"}, nil)
+	if err == nil {
+		t.Fatal("expected Download to refuse an unconfigured signing key")
+	}
+	if result != nil {
+		t.Errorf("Download returned a result alongside the error: %+v", result)
+	}
+	if !errors.Is(err, errReleaseSigningKeyNotConfigured) {
+		t.Errorf("error = %v, want errReleaseSigningKeyNotConfigured", err)
+	}
+}
+
+func TestDownload_RejectsOversizedChecksums(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.Checksums = bytes.Repeat([]byte("a"), checksumsMaxBytes+1)
+	f.sign(privateKey)
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject an oversized checksums file")
+	}
+	if !strings.Contains(err.Error(), "downloading checksums") || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("error = %v, want an oversized checksums download error", err)
+	}
+}
+
+func TestDownload_RejectsOversizedSignature(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.sign(privateKey)
+	f.Signature = bytes.Repeat([]byte{0}, signatureMaxBytes+1)
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject an oversized signature")
+	}
+	if !strings.Contains(err.Error(), "downloading checksums signature") || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("error = %v, want an oversized signature download error", err)
 	}
 }
 
