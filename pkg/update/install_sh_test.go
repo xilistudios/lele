@@ -112,8 +112,12 @@ func newInstallHarness(t *testing.T, opts installOptions) *installHarness {
 	switch opts.openSSL {
 	case "":
 	case openSSLReal:
-		if !linkOptionalTool(t, harness.binDir, "openssl") {
+		path, ok := linkOptionalTool(t, harness.binDir, "openssl")
+		if !ok {
 			t.Skip("openssl is required for this case")
+		}
+		if !opensslCanVerifyRawin(path) {
+			t.Skip("the available openssl cannot verify oneshot ed25519 signatures (needs OpenSSL >= 3.0)")
 		}
 	case openSSLIncapable:
 		writeStubTool(t, harness.binDir, "openssl", stubIncapableOpenSSL)
@@ -283,17 +287,22 @@ func linkTool(t *testing.T, binDir, name string) {
 	}
 }
 
-func linkOptionalTool(t *testing.T, binDir, name string) bool {
+func linkOptionalTool(t *testing.T, binDir, name string) (string, bool) {
 	t.Helper()
 
 	path, err := exec.LookPath(name)
 	if err != nil {
-		return false
+		return "", false
 	}
 	if err := os.Symlink(path, filepath.Join(binDir, name)); err != nil {
 		t.Fatalf("linking %s: %v", name, err)
 	}
-	return true
+	return path, true
+}
+
+func opensslCanVerifyRawin(path string) bool {
+	output, _ := exec.Command(path, "pkeyutl", "-help").CombinedOutput()
+	return bytes.Contains(output, []byte("-rawin"))
 }
 
 func firstAvailable(t *testing.T, names ...string) string {
