@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,9 +46,79 @@ func NormalizeWhitelistKey(command string) string {
 	return strings.ToLower(strings.Join(strings.Fields(command), " "))
 }
 
+const (
+	secretPlaceholderPrefix = "{{SECRET:"
+	secretEnvPrefix         = "LELE_SECRET_"
+)
+
 var secretPlaceholderInlineRegex = regexp.MustCompile(`\{\{SECRET:([^}]+)\}\}`)
 
 var secretValueShellMeta = regexp.MustCompile("[`;$|&<>\n\r\\\\\"']")
+
+var execBaseEnv = []string{
+	"GIT_TERMINAL_PROMPT=0",
+	"GIT_PAGER=cat",
+	"PAGER=cat",
+	"DEBIAN_FRONTEND=noninteractive",
+}
+
+type shellQuoteState int
+
+const (
+	shellUnquoted shellQuoteState = iota
+	shellSingleQuoted
+	shellDoubleQuoted
+)
+
+type injectedSecretCommand struct {
+	script string
+	env    []string
+}
+
+func secretEnvVariable(index int) string {
+	return secretEnvPrefix + strconv.Itoa(index)
+}
+
+func secretEnvReference(index int, powershell bool) string {
+	if powershell {
+		return "$env:" + secretEnvVariable(index)
+	}
+	return "$" + secretEnvVariable(index)
+}
+
+func buildExecEnv(secretEnv []string) []string {
+	base := os.Environ()
+	env := make([]string, 0, len(base)+len(execBaseEnv)+len(secretEnv))
+	reserved := make(map[string]struct{}, len(secretEnv))
+	for _, entry := range secretEnv {
+		name, _, _ := strings.Cut(entry, "=")
+		reserved[name] = struct{}{}
+	}
+	for _, entry := range base {
+		if name, _, ok := strings.Cut(entry, "="); ok {
+			if _, shadowed := reserved[name]; shadowed {
+				continue
+			}
+		}
+		env = append(env, entry)
+	}
+	env = append(env, execBaseEnv...)
+	return append(env, secretEnv...)
+}
+
+func nextQuoteState(state shellQuoteState, c byte) shellQuoteState {
+	switch {
+	case c == '\'' && state == shellUnquoted:
+		return shellSingleQuoted
+	case c == '\'' && state == shellSingleQuoted:
+		return shellUnquoted
+	case c == '"' && state == shellUnquoted:
+		return shellDoubleQuoted
+	case c == '"' && state == shellDoubleQuoted:
+		return shellUnquoted
+	}
+	return state
+}
 
 func (t *ExecTool) SetContext(channel, chatID string) {
 	t.channel = channel
@@ -205,7 +276,7 @@ func (t *ExecTool) Name() string {
 }
 
 func (t *ExecTool) Description() string {
-	return "Execute a shell command and return its output. Use with caution. Supports {{SECRET:name}} placeholders that are substituted with the named keyring secret at run time (the raw value never appears in logs or session history)."
+	return "Execute a shell command and return its output. Use with caution. Supports {{SECRET:name}} placeholders that are resolved at run time: the value is passed to the child process through its environment (LELE_SECRET_0, LELE_SECRET_1, ...) and the command only carries a $LELE_SECRET_<n> reference ($env:LELE_SECRET_<n> on PowerShell), so the raw value never appears in process argv, logs, or session history. Placeholders inside single quotes are rejected because single quotes disable expansion: use double quotes (recommended, it also preserves values containing whitespace) or no quotes. Secret values containing shell metacharacters are rejected."
 }
 
 func (t *ExecTool) Parameters() map[string]interface{} {
@@ -307,38 +378,32 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	}
 	defer cancel()
 
-	resolvedCommand, err := t.substituteSecrets(ctx, command)
+	resolved, err := t.substituteSecrets(ctx, command)
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
 
-	if resolvedCommand != command {
+	if resolved.script != command {
 		if origMsg, _ := t.guardCommandWithStatus(command, cwd); origMsg == "" {
-			if guardMsg, _ := t.guardCommandWithStatus(resolvedCommand, cwd); guardMsg != "" {
+			if guardMsg, _ := t.guardCommandWithStatus(resolved.script, cwd); guardMsg != "" {
 				return ErrorResult("post-substitution safety guard: " + guardMsg)
 			}
 		}
 	}
-	execCommand := resolvedCommand
 
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", execCommand)
+		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", resolved.script)
 	} else {
-		cmd = exec.CommandContext(bgCtx, "sh", "-c", execCommand)
+		cmd = exec.CommandContext(bgCtx, "sh", "-c", resolved.script)
 	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
 
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_PAGER=cat",
-		"PAGER=cat",
-		"DEBIAN_FRONTEND=noninteractive",
-	)
+	cmd.Env = buildExecEnv(resolved.env)
 
 	cmd.Stdin = nil
 
@@ -575,12 +640,10 @@ func (t *ExecTool) SetSecretSubstitution(enabled bool) {
 	t.secretSubstitution = enabled
 }
 
-func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (string, error) {
-	if !t.secretSubstitution || t.keyringSvc == nil {
-		return command, nil
-	}
-	if !secretPlaceholderInlineRegex.MatchString(command) {
-		return command, nil
+func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (injectedSecretCommand, error) {
+	unchanged := injectedSecretCommand{script: command}
+	if !t.secretSubstitution || t.keyringSvc == nil || !strings.Contains(command, secretPlaceholderPrefix) {
+		return unchanged, nil
 	}
 
 	agentID, sessionKey := AgentToolContextFromCtx(ctx)
@@ -588,28 +651,70 @@ func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (strin
 		agentID = "unknown"
 	}
 
-	var subErr error
-	resolved := secretPlaceholderInlineRegex.ReplaceAllStringFunc(command, func(match string) string {
-		if subErr != nil {
-			return match
+	powershell := runtime.GOOS == "windows"
+	var script strings.Builder
+	script.Grow(len(command))
+	env := make([]string, 0, 2)
+	indexBySecret := make(map[string]int)
+	state := shellUnquoted
+
+	for i := 0; i < len(command); {
+		c := command[i]
+
+		if c == '\\' && state != shellSingleQuoted {
+			end := i + 2
+			if end > len(command) {
+				end = len(command)
+			}
+			script.WriteString(command[i:end])
+			i = end
+			continue
 		}
-		name := secretPlaceholderInlineRegex.FindStringSubmatch(match)[1]
-		name = strings.TrimSpace(name)
-		value, err := t.keyringSvc.GetForAgent(name, agentID, sessionKey)
-		if err != nil {
-			subErr = fmt.Errorf("failed to resolve secret %q: %w", name, err)
-			return match
+
+		if c == '\'' || c == '"' {
+			state = nextQuoteState(state, c)
+			script.WriteByte(c)
+			i++
+			continue
 		}
-		if secretValueShellMeta.MatchString(value) {
-			subErr = fmt.Errorf("secret %q contains shell metacharacters/substitution syntax and cannot be inlined into a command; store the value without shell syntax or pass it via env", name)
-			return match
+
+		if !strings.HasPrefix(command[i:], secretPlaceholderPrefix) {
+			script.WriteByte(c)
+			i++
+			continue
 		}
-		return value
-	})
-	if subErr != nil {
-		return "", subErr
+
+		loc := secretPlaceholderInlineRegex.FindStringIndex(command[i:])
+		if loc == nil || loc[0] != 0 {
+			script.WriteByte(c)
+			i++
+			continue
+		}
+
+		placeholder := command[i : i+loc[1]]
+		name := strings.TrimSpace(secretPlaceholderInlineRegex.FindStringSubmatch(placeholder)[1])
+		if state == shellSingleQuoted {
+			return unchanged, fmt.Errorf("secret %s is inside single quotes, where shells do not expand variables, so it cannot be injected via the environment; move the placeholder outside single quotes or wrap it in double quotes", placeholder)
+		}
+
+		index, seen := indexBySecret[name]
+		if !seen {
+			value, err := t.keyringSvc.GetForAgent(name, agentID, sessionKey)
+			if err != nil {
+				return unchanged, fmt.Errorf("failed to resolve secret %q: %w", name, err)
+			}
+			if secretValueShellMeta.MatchString(value) {
+				return unchanged, fmt.Errorf("secret %q contains shell metacharacters/substitution syntax and cannot be passed to a command environment; store the value without shell syntax", name)
+			}
+			index = len(env)
+			indexBySecret[name] = index
+			env = append(env, secretEnvVariable(index)+"="+value)
+		}
+
+		script.WriteString(secretEnvReference(index, powershell))
+		i += loc[1]
 	}
-	return resolved, nil
+	return injectedSecretCommand{script: script.String(), env: env}, nil
 }
 
 func (t *ExecTool) SetRestrictToWorkspace(restrict bool) {
