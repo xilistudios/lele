@@ -3,10 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/catalog"
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -15,6 +18,8 @@ import (
 const (
 	MaxLLMRetries = 2
 )
+
+var warnThinkingClamp = logger.WarnCF
 
 type llmCallOptions struct {
 	ctx            context.Context
@@ -103,6 +108,7 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	if effort == "" {
 		effort = opts.agent.ThinkingLevel
 	}
+	effort = lc.clampEffortForModel(effort, opts.model)
 
 	switch {
 	case effort == "off":
@@ -137,7 +143,7 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	case opts.agent.Reasoning != nil:
 		reasoningMap := map[string]interface{}{}
 		if opts.agent.Reasoning.Effort != nil {
-			reasoningMap["effort"] = *opts.agent.Reasoning.Effort
+			reasoningMap["effort"] = lc.clampEffortForModel(*opts.agent.Reasoning.Effort, opts.model)
 		}
 		if opts.agent.Reasoning.MaxTokens != nil {
 			reasoningMap["max_tokens"] = *opts.agent.Reasoning.MaxTokens
@@ -178,6 +184,73 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	llmOptions = providers.WithWireSessionID(llmOptions, opts.sessionKey)
 
 	return llmOptions
+}
+
+func (lc *llmCaller) clampEffortForModel(effort, model string) string {
+	if effort == "" {
+		return effort
+	}
+	provider := extractProviderFromModel(model, lc.al.cfg().Agents.Defaults.Provider)
+	return clampEffortToCatalog(effort, provider, providers.StripProviderPrefix(model))
+}
+
+func clampEffortToCatalog(effort, provider, model string) string {
+	if effort == "" || effort == "off" {
+		return effort
+	}
+	spec, ok := catalog.FindCachedModel(provider, model)
+	if !ok || len(spec.ThinkingLevels) == 0 {
+		return effort
+	}
+	if slices.Contains(spec.ThinkingLevels, effort) {
+		return effort
+	}
+	clamped := nearestLowerThinkingLevel(spec.ThinkingLevels, effort)
+	if clamped == "" || clamped == effort {
+		return effort
+	}
+	warnThinkingClamp("agent", "thinking level clamped to model catalog", map[string]interface{}{
+		"provider":  provider,
+		"model":     model,
+		"requested": effort,
+		"clamped":   clamped,
+	})
+	return clamped
+}
+
+func nearestLowerThinkingLevel(levels []string, effort string) string {
+	want := thinkingLevelRank(effort)
+	if want < 0 {
+		return ""
+	}
+	best, bestRank := "", -1
+	lowest, lowestRank := "", -1
+	for _, level := range levels {
+		rank := thinkingLevelRank(level)
+		if rank < 0 {
+			continue
+		}
+		if lowestRank < 0 || rank < lowestRank {
+			lowest, lowestRank = level, rank
+		}
+		if rank < want && rank > bestRank {
+			best, bestRank = level, rank
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return lowest
+}
+
+func thinkingLevelRank(level string) int {
+	level = strings.ToLower(strings.TrimSpace(level))
+	for i, candidate := range config.ThinkingLevels {
+		if candidate == level {
+			return i
+		}
+	}
+	return -1
 }
 
 func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {

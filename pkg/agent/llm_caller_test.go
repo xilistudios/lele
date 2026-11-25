@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/tools"
@@ -624,5 +627,244 @@ func TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey(t *testing.T) {
 	}
 	if want := providers.UnkeyedSessionBucket; v != want {
 		t.Fatalf("%s = %v (%T), want the unkeyed bucket %q", providers.OptWireSessionID, v, v, want)
+	}
+}
+
+func loadCatalogFixture(t *testing.T, providerID string) catalog.Provider {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "catalog", "providers", providerID+".json"))
+	if err != nil {
+		t.Fatalf("read catalog fixture %q: %v", providerID, err)
+	}
+	var provider catalog.Provider
+	if err := json.Unmarshal(raw, &provider); err != nil {
+		t.Fatalf("parse catalog fixture %q: %v", providerID, err)
+	}
+	if len(provider.Models) == 0 {
+		t.Fatalf("catalog fixture %q has no models", providerID)
+	}
+	return provider
+}
+
+func seedCatalog(t *testing.T, providers ...catalog.Provider) {
+	t.Helper()
+	catalog.SetCacheDir(t.TempDir())
+	catalog.ResetLive()
+	t.Cleanup(func() {
+		catalog.ResetLive()
+		catalog.ResetCacheDir()
+	})
+	for _, provider := range providers {
+		if err := catalog.SeedProvider(provider); err != nil {
+			t.Fatalf("seed catalog provider %q: %v", provider.ID, err)
+		}
+	}
+}
+
+func captureThinkingClampWarnings(t *testing.T) *[]map[string]interface{} {
+	t.Helper()
+	var warnings []map[string]interface{}
+	previous := warnThinkingClamp
+	warnThinkingClamp = func(component string, message string, fields map[string]interface{}) {
+		warnings = append(warnings, fields)
+	}
+	t.Cleanup(func() { warnThinkingClamp = previous })
+	return &warnings
+}
+
+func TestClampEffortToCatalog(t *testing.T) {
+	anthropic := loadCatalogFixture(t, "anthropic")
+	var sonnet catalog.Model
+	ok := false
+	for _, m := range anthropic.Models {
+		if m.ID == "claude-sonnet-4-6" {
+			sonnet, ok = m, true
+		}
+	}
+	if !ok {
+		t.Fatal("catalog fixture anthropic is missing claude-sonnet-4-6")
+	}
+	if !reflect.DeepEqual(sonnet.ThinkingLevels, []string{"low", "medium", "high"}) {
+		t.Fatalf("clamp fixtures assume claude-sonnet-4-6 thinking_levels [low medium high], got %v", sonnet.ThinkingLevels)
+	}
+
+	levelLess := catalog.Provider{
+		ID:     "level-less",
+		Name:   "Level-less",
+		Models: []catalog.Model{{ID: "plain-model", Name: "Plain", Reasoning: true, ToolCall: true}},
+	}
+	highOnly := catalog.Provider{
+		ID:     "high-only",
+		Name:   "High only",
+		Models: []catalog.Model{{ID: "only-high", Name: "Only High", ThinkingLevels: []string{"high"}}},
+	}
+	seedCatalog(t, anthropic, levelLess, highOnly)
+
+	tests := []struct {
+		name     string
+		effort   string
+		provider string
+		model    string
+		want     string
+		wantWarn bool
+	}{
+		{name: "xhigh clamps to high", effort: "xhigh", provider: "anthropic", model: "claude-sonnet-4-6", want: "high", wantWarn: true},
+		{name: "max clamps to high", effort: "max", provider: "anthropic", model: "claude-sonnet-4-6", want: "high", wantWarn: true},
+		{name: "supported level is unchanged", effort: "high", provider: "anthropic", model: "claude-sonnet-4-6", want: "high"},
+		{name: "lowest supported level is unchanged", effort: "low", provider: "anthropic", model: "claude-sonnet-4-6", want: "low"},
+		{name: "second catalog model clamps", effort: "xhigh", provider: "anthropic", model: "claude-opus-4-5", want: "high", wantWarn: true},
+		{name: "unknown model passes through", effort: "xhigh", provider: "anthropic", model: "claude-not-in-catalog", want: "xhigh"},
+		{name: "unknown provider passes through", effort: "xhigh", provider: "nope", model: "claude-sonnet-4-6", want: "xhigh"},
+		{name: "empty thinking levels pass through", effort: "xhigh", provider: "level-less", model: "plain-model", want: "xhigh"},
+		{name: "off stays off", effort: "off", provider: "anthropic", model: "claude-sonnet-4-6", want: "off"},
+		{name: "empty effort stays empty", effort: "", provider: "anthropic", model: "claude-sonnet-4-6", want: ""},
+		{name: "below every supported level picks the lowest", effort: "low", provider: "high-only", model: "only-high", want: "high", wantWarn: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			warnings := captureThinkingClampWarnings(t)
+
+			if got := clampEffortToCatalog(tc.effort, tc.provider, tc.model); got != tc.want {
+				t.Fatalf("clampEffortToCatalog(%q, %q, %q) = %q, want %q", tc.effort, tc.provider, tc.model, got, tc.want)
+			}
+
+			switch {
+			case tc.wantWarn:
+				if len(*warnings) != 1 {
+					t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
+				}
+				fields := (*warnings)[0]
+				if fields["requested"] != tc.effort {
+					t.Errorf("warning requested = %v, want %q", fields["requested"], tc.effort)
+				}
+				if fields["clamped"] != tc.want {
+					t.Errorf("warning clamped = %v, want %q", fields["clamped"], tc.want)
+				}
+				if fields["model"] != tc.model {
+					t.Errorf("warning model = %v, want %q", fields["model"], tc.model)
+				}
+			case len(*warnings) != 0:
+				t.Fatalf("clamp warnings = %v, want none", *warnings)
+			}
+		})
+	}
+}
+
+func TestBuildLLMOptions_ClampsEffortToModelCatalog(t *testing.T) {
+	seedCatalog(t, loadCatalogFixture(t, "anthropic"))
+
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	al.registry.mu.Lock()
+	al.registry.agents["main"] = agent
+	al.registry.mu.Unlock()
+
+	const sessionKey = "clamp-session"
+	al.sessionThinking.Store(sessionKey, "xhigh")
+
+	warnings := captureThinkingClampWarnings(t)
+
+	caller := newLLMCaller(al)
+	got := caller.buildLLMOptions(llmCallOptions{
+		ctx:        context.Background(),
+		agent:      agent,
+		messages:   []providers.Message{{Role: "user", Content: "hi"}},
+		model:      "anthropic:claude-sonnet-4-6",
+		sessionKey: sessionKey,
+	})
+
+	reasoning, ok := got["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasoning = %#v, want a map", got["reasoning"])
+	}
+	if reasoning["effort"] != "high" {
+		t.Fatalf("reasoning effort = %v, want the catalog-clamped %q", reasoning["effort"], "high")
+	}
+	if reasoning["enabled"] != true {
+		t.Fatalf("reasoning enabled = %v, want true", reasoning["enabled"])
+	}
+	if len(*warnings) != 1 {
+		t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
+	}
+
+	raw, stillStored := al.sessionThinking.Load(sessionKey)
+	if !stillStored || raw != "xhigh" {
+		t.Fatalf("session thinking level = %v, want the untouched %q", raw, "xhigh")
+	}
+}
+
+func TestBuildLLMOptions_ClampLeavesPersistedSessionLevelUntouched(t *testing.T) {
+	seedCatalog(t, loadCatalogFixture(t, "anthropic"))
+
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	al.registry.mu.Lock()
+	al.registry.agents["main"] = agent
+	al.registry.mu.Unlock()
+
+	const sessionKey = "persisted-clamp-session"
+	if err := agent.Sessions.SetThinkingLevel(sessionKey, "xhigh"); err != nil {
+		t.Fatalf("SetThinkingLevel: %v", err)
+	}
+
+	warnings := captureThinkingClampWarnings(t)
+
+	caller := newLLMCaller(al)
+	got := caller.buildLLMOptions(llmCallOptions{
+		ctx:        context.Background(),
+		agent:      agent,
+		messages:   []providers.Message{{Role: "user", Content: "hi"}},
+		model:      "anthropic:claude-sonnet-4-6",
+		sessionKey: sessionKey,
+	})
+
+	reasoning, ok := got["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasoning = %#v, want a map", got["reasoning"])
+	}
+	if reasoning["effort"] != "high" {
+		t.Fatalf("reasoning effort = %v, want the catalog-clamped %q", reasoning["effort"], "high")
+	}
+	if len(*warnings) != 1 {
+		t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
+	}
+	if stored := agent.Sessions.GetThinkingLevel(sessionKey); stored != "xhigh" {
+		t.Fatalf("persisted thinking level = %q, want the untouched %q", stored, "xhigh")
+	}
+}
+
+func TestBuildLLMOptions_ClampsLegacyReasoningEffort(t *testing.T) {
+	seedCatalog(t, loadCatalogFixture(t, "anthropic"))
+
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.Reasoning = &config.ReasoningConfig{Enable: true, Effort: strPtr("xhigh")}
+	al.registry.mu.Lock()
+	al.registry.agents["main"] = agent
+	al.registry.mu.Unlock()
+
+	warnings := captureThinkingClampWarnings(t)
+
+	caller := newLLMCaller(al)
+	got := caller.buildLLMOptions(llmCallOptions{
+		ctx:      context.Background(),
+		agent:    agent,
+		messages: []providers.Message{{Role: "user", Content: "hi"}},
+		model:    "anthropic:claude-sonnet-4-6",
+	})
+
+	reasoning, ok := got["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasoning = %#v, want a map", got["reasoning"])
+	}
+	if reasoning["effort"] != "high" {
+		t.Fatalf("reasoning effort = %v, want the catalog-clamped %q", reasoning["effort"], "high")
+	}
+	if len(*warnings) != 1 {
+		t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
 	}
 }
