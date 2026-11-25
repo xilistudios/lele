@@ -511,6 +511,9 @@ type ProviderModelInfo struct {
 	ThinkingLevels []string `json:"thinking_levels,omitempty"`
 	Reasoning      bool     `json:"reasoning,omitempty"`
 	ToolCall       bool     `json:"tool_call,omitempty"`
+	// Protocol is the catalog's transport marker. Empty means chat/completions,
+	// or that the id is unknown to the catalog (a live-only id).
+	Protocol string `json:"protocol,omitempty"`
 }
 
 type ToolInfo struct {
