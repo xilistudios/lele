@@ -402,3 +402,102 @@ func TestIndexSnapshotRestoresPreviousIndex(t *testing.T) {
 		t.Errorf("DefaultAPIBaseByType(zai) = %q, want the restored index value", got)
 	}
 }
+
+func providerRefreshInflight(provider string) bool {
+	providerEnsureMu.Lock()
+	defer providerEnsureMu.Unlock()
+	return providerInflight[normalizeType(provider)]
+}
+
+func TestFindCachedModelDoesNotTriggerRefresh(t *testing.T) {
+	ResetLive()
+	SetCacheDir(t.TempDir())
+	t.Cleanup(func() {
+		ResetLive()
+		ResetCacheDir()
+	})
+
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+	t.Setenv("LELE_CATALOG_BASE_URL", srv.URL)
+	t.Setenv("LELE_CATALOG_OFFLINE", "")
+
+	if _, ok := FindCachedModel("uncached-provider", "some-model"); ok {
+		t.Fatal("FindCachedModel found a model in an empty catalog")
+	}
+	if providerRefreshInflight("uncached-provider") {
+		t.Fatal("FindCachedModel started a catalog refresh; hot paths must not turn a miss into network traffic")
+	}
+
+	if _, ok := FindModel("uncached-provider-2", "some-model"); ok {
+		t.Fatal("FindModel found a model in an empty catalog")
+	}
+	if !providerRefreshInflight("uncached-provider-2") {
+		t.Fatal("FindModel did not start a catalog refresh; the test baseline is broken")
+	}
+}
+
+func TestFindCachedModelReadsLiveCatalog(t *testing.T) {
+	ResetLive()
+	SetCacheDir(t.TempDir())
+	t.Cleanup(func() {
+		ResetLive()
+		ResetCacheDir()
+	})
+
+	if err := SeedProvider(Provider{
+		ID:     "anthropic",
+		Models: []Model{{ID: "claude-sonnet-4-6", ThinkingLevels: []string{"low", "medium", "high"}}},
+	}); err != nil {
+		t.Fatalf("SeedProvider: %v", err)
+	}
+
+	SetCacheDir(t.TempDir())
+	if HasCachedProvider("anthropic") {
+		t.Fatal("test setup: the live provider must not be on disk for this assertion")
+	}
+
+	model, ok := FindCachedModel("anthropic", "claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("FindCachedModel missed a live provider model")
+	}
+	if len(model.ThinkingLevels) != 3 {
+		t.Fatalf("thinking levels = %v, want the catalog values", model.ThinkingLevels)
+	}
+}
+
+func TestFindCachedModelReadsDiskCatalog(t *testing.T) {
+	ResetLive()
+	SetCacheDir(t.TempDir())
+	t.Cleanup(func() {
+		ResetLive()
+		ResetCacheDir()
+	})
+
+	if err := SeedProvider(Provider{
+		ID:     "disk-only",
+		Models: []Model{{ID: "disk-model", ThinkingLevels: []string{"high"}}},
+	}); err != nil {
+		t.Fatalf("SeedProvider: %v", err)
+	}
+	ResetLive()
+
+	if !HasCachedProvider("disk-only") {
+		t.Fatal("test setup: the provider should be on disk")
+	}
+
+	model, ok := FindCachedModel("disk-only", "disk-model")
+	if !ok {
+		t.Fatal("FindCachedModel missed a provider cached on disk")
+	}
+	if len(model.ThinkingLevels) != 1 || model.ThinkingLevels[0] != "high" {
+		t.Fatalf("thinking levels = %v, want [high]", model.ThinkingLevels)
+	}
+}
