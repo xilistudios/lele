@@ -3,9 +3,9 @@ package group
 import (
 	"context"
 	"sync"
+	"testing"
 
 	"github.com/xilistudios/lele/pkg/bus"
-	"testing"
 )
 
 type originRecordingExecutor struct {
