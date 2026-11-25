@@ -166,8 +166,10 @@ func TestExec_SecretValueLegitStillWorks(t *testing.T) {
 }
 
 func TestExec_PostSubstitutionGuardIgnoresWhitelist(t *testing.T) {
+	const dangerousValue = "rm -rf /tmp/lele_guard_whitelist_probe"
+
 	svc := newTestKeyring(t)
-	if err := svc.SetFromUI("x", "y; rm -rf /tmp/lele_ws_test", "", nil, nil, "tui"); err != nil {
+	if err := svc.SetFromUI("x", dangerousValue, "", nil, nil, "tui"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -187,18 +189,19 @@ func TestExec_PostSubstitutionGuardIgnoresWhitelist(t *testing.T) {
 	if !result.IsError {
 		t.Fatal("expected error: injected value creates dangerous command even though placeholder-form is whitelisted")
 	}
-	if !strings.Contains(result.ForLLM, "metacharacters") &&
-		!strings.Contains(result.ForLLM, "substitution syntax") &&
-		!strings.Contains(result.ForLLM, "post-substitution safety guard") {
-		t.Errorf("expected security rejection message, got: %s", result.ForLLM)
+	if !strings.Contains(result.ForLLM, "post-substitution safety guard") {
+		t.Errorf("expected the post-substitution guard to block the resolved value, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, dangerousValue) {
+		t.Errorf("SECURITY FAIL: rejected value echoed back in the error: %s", result.ForLLM)
 	}
 }
 
 func TestExec_PostSubstitutionGuardIgnoresContextBypass(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "poc_bypass")
+	const dangerousValue = "rm -rf /tmp/lele_guard_bypass_probe"
 
 	svc := newTestKeyring(t)
-	if err := svc.SetFromUI("x", "y | touch "+marker, "", nil, nil, "tui"); err != nil {
+	if err := svc.SetFromUI("x", dangerousValue, "", nil, nil, "tui"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -220,8 +223,92 @@ func TestExec_PostSubstitutionGuardIgnoresContextBypass(t *testing.T) {
 	if !result.IsError {
 		t.Fatal("expected error: context bypass for placeholder-form must not authorize injected dangerous command")
 	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("SECURITY FAIL: marker file was created despite bypass context applying only to placeholder form")
+	if !strings.Contains(result.ForLLM, "post-substitution safety guard") {
+		t.Errorf("expected the post-substitution guard to block the resolved value, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, dangerousValue) {
+		t.Errorf("SECURITY FAIL: rejected value echoed back in the error: %s", result.ForLLM)
+	}
+}
+
+func TestExec_PostSubstitutionGuardBlocksResolvedValue(t *testing.T) {
+	const dangerousValue = "rm -rf /tmp/lele_guard_probe_463"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", dangerousValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	ws := t.TempDir()
+	tool := NewExecToolWithConfig(ws, false, cfg)
+	tool.SetKeyringService(svc)
+
+	if msg, _ := tool.guardCommandWithStatus("echo "+dangerousValue, ws); msg == "" {
+		t.Fatalf("probe precondition failed: %q is not a deny-pattern match, so this cell cannot pin the guard", dangerousValue)
+	}
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	resolved, err := tool.substituteSecrets(ctx, "echo {{SECRET:tok}}")
+	if err != nil {
+		t.Fatalf("substituteSecrets failed: %v", err)
+	}
+	if want := "echo ${LELE_SECRET_0}"; resolved.script != want {
+		t.Errorf("executed script = %q, want the environment reference %q", resolved.script, want)
+	}
+	if want := "echo " + dangerousValue; resolved.expanded != want {
+		t.Errorf("guard view = %q, want the value-inlined form %q", resolved.expanded, want)
+	}
+
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo {{SECRET:tok}}",
+	})
+	if !result.IsError {
+		t.Fatalf("expected the resolved value to be blocked by the post-substitution guard, got success: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "post-substitution safety guard") {
+		t.Errorf("expected the post-substitution guard to be the rejection, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "metacharacters") {
+		t.Errorf("value %q has no metacharacters, so the guard (not the metacharacter screen) must reject it: %s", dangerousValue, result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, dangerousValue) {
+		t.Errorf("SECURITY FAIL: rejected value echoed back in the error: %s", result.ForLLM)
+	}
+}
+
+func TestGuardCommand_SecretEnvReferenceExemptionIsNarrow(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	tool := NewExecToolWithConfig(t.TempDir(), false, cfg)
+
+	allowed := []string{
+		"echo ${LELE_SECRET_0}",
+		"echo ${lele_secret_12}",
+		"echo ${env:LELE_SECRET_3}",
+		"curl -H 'X-Key: '${LELE_SECRET_0} https://example.test",
+	}
+	for _, command := range allowed {
+		if msg := tool.guardCommand(command, ""); msg != "" {
+			t.Errorf("emitted environment reference %q must not trip the guard, got: %s", command, msg)
+		}
+	}
+
+	denied := []string{
+		"echo ${HOME}",
+		"echo ${PATH}",
+		"echo ${env:HOME}",
+		"echo ${SECRET}",
+		"echo ${LELE_SECRET_}",
+		"echo ${LELE_SECRET_0:-$(id)}",
+		"echo ${LELE_SECRET_0}${HOME}",
+		"echo ${OTHER_SECRET_0}",
+	}
+	for _, command := range denied {
+		if msg := tool.guardCommand(command, ""); msg == "" {
+			t.Errorf("guard must keep rejecting parameter expansion %q; only ${LELE_SECRET_<digits>} is exempt", command)
+		}
 	}
 }
 
@@ -365,7 +452,7 @@ func TestExec_SecretNotInArgv(t *testing.T) {
 	}
 
 	argv := result.ForLLM
-	if !strings.Contains(argv, "$LELE_SECRET_0") {
+	if !strings.Contains(argv, "${LELE_SECRET_0}") {
 		t.Fatalf("child argv must carry the environment reference, got: %q", argv)
 	}
 	if strings.Contains(argv, secretValue) {
@@ -469,7 +556,7 @@ func TestExec_MultipleSecretsDistinctVars(t *testing.T) {
 		t.Fatalf("substituteSecrets failed: %v", err)
 	}
 
-	wantScript := "echo $LELE_SECRET_0:$LELE_SECRET_1:$LELE_SECRET_0"
+	wantScript := "echo ${LELE_SECRET_0}:${LELE_SECRET_1}:${LELE_SECRET_0}"
 	if resolved.script != wantScript {
 		t.Errorf("resolved script = %q, want %q", resolved.script, wantScript)
 	}
@@ -598,11 +685,14 @@ func TestExec_PowerShellEnvRef(t *testing.T) {
 }
 
 func TestExec_SecretEnvReferenceForm(t *testing.T) {
-	if got, want := secretEnvReference(0, false), "$LELE_SECRET_0"; got != want {
+	if got, want := secretEnvReference(0, false), "${LELE_SECRET_0}"; got != want {
 		t.Errorf("POSIX reference = %q, want %q", got, want)
 	}
-	if got, want := secretEnvReference(3, true), "$env:LELE_SECRET_3"; got != want {
+	if got, want := secretEnvReference(3, true), "${env:LELE_SECRET_3}"; got != want {
 		t.Errorf("PowerShell reference = %q, want %q", got, want)
+	}
+	if got, want := secretEnvReference(12, false), "${LELE_SECRET_12}"; got != want {
+		t.Errorf("POSIX reference for a multi-digit index = %q, want %q", got, want)
 	}
 }
 
@@ -688,6 +778,216 @@ func TestExec_BuildExecEnvKeepsOneEntryPerSecret(t *testing.T) {
 	}
 	if secretEntries[0] != "LELE_SECRET_0=fresh-value" {
 		t.Errorf("injected entry = %q, want the resolved value", secretEntries[0])
+	}
+	if !keptUnrelated {
+		t.Error("unrelated inherited environment variables must be preserved")
+	}
+}
+func TestExec_SecretReferenceSuffixIntact(t *testing.T) {
+	const secretValue = "suffix-value-42"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", secretValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{"unquoted", `printf '[%s]' a{{SECRET:tok}}b`, "[a" + secretValue + "b]"},
+		{"double_quoted", `printf '[%s]' "a{{SECRET:tok}}b"`, "[a" + secretValue + "b]"},
+		{"unquoted_suffix", `printf '[%s]' {{SECRET:tok}}_suffix`, "[" + secretValue + "_suffix]"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tool.Execute(ctx, map[string]interface{}{"command": tc.command})
+			if result.IsError {
+				t.Fatalf("exec failed: %s", result.ForLLM)
+			}
+			if got := strings.TrimSpace(result.ForLLM); got != tc.want {
+				t.Errorf("child printed %q, want %q: a word character after the reference must not extend the variable name", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExec_QuotedHeredocPlaceholderFails(t *testing.T) {
+	const secretValue = "heredoc-quoted-secret"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", secretValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{"single_quoted_delimiter", "cat > out.txt <<'EOF'\nvalue={{SECRET:tok}}\nEOF"},
+		{"double_quoted_delimiter", "cat > out.txt <<\"EOF\"\nvalue={{SECRET:tok}}\nEOF"},
+		{"escaped_delimiter", "cat > out.txt <<\\EOF\nvalue={{SECRET:tok}}\nEOF"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tool := NewExecTool(dir, false)
+			tool.SetKeyringService(svc)
+
+			ctx := WithAgentToolContext(context.Background(), "tester", "s")
+			result := tool.Execute(ctx, map[string]interface{}{"command": tc.command})
+
+			if !result.IsError {
+				t.Fatalf("expected an actionable error for a placeholder inside a quoted heredoc, got success: %s", result.ForLLM)
+			}
+			if !strings.Contains(result.ForLLM, "heredoc") {
+				t.Errorf("error must explain the quoted heredoc limitation, got: %s", result.ForLLM)
+			}
+			if !strings.Contains(result.ForLLM, "{{SECRET:tok}}") {
+				t.Errorf("error must name the offending placeholder, got: %s", result.ForLLM)
+			}
+			if strings.Contains(result.ForLLM, secretValue) || strings.Contains(result.ForUser, secretValue) {
+				t.Errorf("SECURITY FAIL: secret value leaked into the error, got: %s", result.ForLLM)
+			}
+
+			if _, err := os.Stat(filepath.Join(dir, "out.txt")); err == nil {
+				t.Fatalf("nothing must be written when the placeholder cannot be expanded")
+			}
+		})
+	}
+}
+
+func TestExec_PlainHeredocExpands(t *testing.T) {
+	const secretValue = "plain-heredoc-value"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", secretValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	tool := NewExecTool(dir, false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	command := "cat > out.txt <<EOT\nvalue={{SECRET:tok}}\nEOT\ncat out.txt"
+
+	resolved, err := tool.substituteSecrets(ctx, command)
+	if err != nil {
+		t.Fatalf("substituteSecrets failed: %v", err)
+	}
+	if !strings.Contains(resolved.script, "${LELE_SECRET_0}") {
+		t.Errorf("an unquoted heredoc body must carry the environment reference, got: %q", resolved.script)
+	}
+	if strings.Contains(resolved.script, secretValue) {
+		t.Errorf("SECURITY FAIL: resolved script carries the value: %q", resolved.script)
+	}
+
+	result := tool.Execute(ctx, map[string]interface{}{"command": command})
+	if result.IsError {
+		t.Fatalf("exec failed: %s", result.ForLLM)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "out.txt"))
+	if err != nil {
+		t.Fatalf("reading heredoc output failed: %v", err)
+	}
+	if want := "value=" + secretValue + "\n"; string(content) != want {
+		t.Errorf("heredoc body = %q, want %q: an unquoted delimiter expands variables", string(content), want)
+	}
+}
+
+func TestExec_CommentApostropheIsNotSingleQuotes(t *testing.T) {
+	const secretValue = "comment-secret-value"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", secretValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo a # don't expand anything here\nprintf '%s' {{SECRET:tok}}",
+	})
+	if result.IsError {
+		t.Fatalf("an apostrophe inside a comment must not be treated as a quote, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, secretValue) {
+		t.Errorf("expected the secret value from the second line, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "a") {
+		t.Errorf("expected the first line output, got: %s", result.ForLLM)
+	}
+}
+
+func TestExec_PowerShellScannerHasNoPOSIXBackslashEscape(t *testing.T) {
+	const secretValue = "pwsh-scanner-value"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", secretValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+
+	posix, err := tool.substituteSecretsForShell(ctx, `echo \{{SECRET:tok}}`, false)
+	if err != nil {
+		t.Fatalf("substituteSecretsForShell(posix) failed: %v", err)
+	}
+	if want := `echo \{{SECRET:tok}}`; posix.script != want {
+		t.Errorf("POSIX script = %q, want the escaped literal %q", posix.script, want)
+	}
+	if len(posix.env) != 0 {
+		t.Errorf("a backslash-escaped placeholder must not export an environment variable, got %v", posix.env)
+	}
+
+	pwsh, err := tool.substituteSecretsForShell(ctx, `Write-Output \{{SECRET:tok}}`, true)
+	if err != nil {
+		t.Fatalf("substituteSecretsForShell(powershell) failed: %v", err)
+	}
+	if want := `Write-Output \${env:LELE_SECRET_0}`; pwsh.script != want {
+		t.Errorf("PowerShell script = %q, want %q: a backslash is not an escape character in PowerShell", pwsh.script, want)
+	}
+	if !slices.Equal(pwsh.env, []string{"LELE_SECRET_0=" + secretValue}) {
+		t.Errorf("PowerShell env = %v, want the resolved secret", pwsh.env)
+	}
+}
+
+func TestExec_BuildExecEnvDropsAllInheritedSecretVariables(t *testing.T) {
+	t.Setenv("LELE_SECRET_1", "stale-inherited")
+	t.Setenv("lele_secret_2", "stale-lowercase")
+	t.Setenv("UNRELATED_INHERITED_VAR", "kept")
+
+	env := buildExecEnv([]string{"LELE_SECRET_0=fresh-value"})
+
+	var secretEntries []string
+	keptUnrelated := false
+	for _, entry := range env {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok && strings.HasPrefix(strings.ToUpper(name), "LELE_SECRET_") {
+			secretEntries = append(secretEntries, entry)
+		}
+		if entry == "UNRELATED_INHERITED_VAR=kept" {
+			keptUnrelated = true
+		}
+	}
+
+	if !slices.Equal(secretEntries, []string{"LELE_SECRET_0=fresh-value"}) {
+		t.Errorf("child env secret entries = %v, want only the injected one: every inherited LELE_SECRET_* must be dropped", secretEntries)
 	}
 	if !keptUnrelated {
 		t.Error("unrelated inherited environment variables must be preserved")
