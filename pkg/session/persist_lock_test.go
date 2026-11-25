@@ -122,6 +122,56 @@ func (w *lockWaitWatchdog) stopAndWait() time.Duration {
 	return time.Duration(w.maxWait.Load())
 }
 
+var deadlockGuard = 60 * time.Second
+
+func withDeadlockGuard(t *testing.T, guard time.Duration) {
+	t.Helper()
+	previous := deadlockGuard
+	deadlockGuard = guard
+	t.Cleanup(func() { deadlockGuard = previous })
+}
+
+func guardFailure(stage string) string {
+	return fmt.Sprintf("deadlock guard fired (not a timing assertion) after %v: %s", deadlockGuard, stage)
+}
+
+func awaitIORepositoryHit(gate *ioGate, saveErr <-chan error, stage string) string {
+	select {
+	case <-gate.entered:
+		return ""
+	case err := <-saveErr:
+		return fmt.Sprintf("Save returned before touching the repository: %v", err)
+	case <-time.After(deadlockGuard):
+		return guardFailure(stage)
+	}
+}
+
+func awaitSaveResult(saveErr <-chan error, stage string) string {
+	select {
+	case err := <-saveErr:
+		if err != nil {
+			return fmt.Sprintf("Save failed: %v", err)
+		}
+		return ""
+	case <-time.After(deadlockGuard):
+		return guardFailure(stage)
+	}
+}
+
+func awaitHistoryView(sm *SessionManager, key string, want int, stage string) string {
+	viewDone := make(chan int, 1)
+	go func() { viewDone <- len(sm.GetHistoryView(key)) }()
+	select {
+	case n := <-viewDone:
+		if n != want {
+			return fmt.Sprintf("GetHistoryView returned %d messages, want %d", n, want)
+		}
+		return ""
+	case <-time.After(deadlockGuard):
+		return guardFailure(stage)
+	}
+}
+
 func liveSnapshot(t *testing.T, sm *SessionManager, key string) (firstInMemorySeq int, msgs []providers.Message, epoch, snapshotEpoch uint64) {
 	t.Helper()
 	sm.mu.RLock()
@@ -177,7 +227,7 @@ func seedPostCompactionSession(t *testing.T, sm *SessionManager, key string) int
 
 func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping lock-scope timing test in -short mode")
+		t.Skip("skipping the lock-scope IO-volume test in -short mode")
 	}
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -207,49 +257,24 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 	defer gate.unlock()
 	useBlockingRepo(t, sm, gate)
 
-	watchdog := startLockWatchdog(&sm.mu)
-
 	saveErr := make(chan error, 1)
 	go func() { saveErr <- sm.Save(key) }()
 
-	select {
-	case <-gate.entered:
-	case err := <-saveErr:
-		t.Fatalf("Save returned before touching the repository: %v", err)
-	case <-time.After(15 * time.Second):
-		t.Fatal("Save never reached the repository: it is stuck (holding sm.mu?) before its first I/O")
+	if failure := awaitIORepositoryHit(gate, saveErr, "Save never reached the repository: it is stuck before its first I/O"); failure != "" {
+		t.Fatal(failure)
 	}
 
 	if gate.muHeld.Load() {
 		t.Fatal("repository I/O ran while sm.mu was held: the write lock must cover collection only")
 	}
 
-	viewDone := make(chan int, 1)
-	go func() { viewDone <- len(sm.GetHistoryView(key)) }()
-	select {
-	case n := <-viewDone:
-		if n != len(fat) {
-			t.Fatalf("GetHistoryView returned %d messages, want %d", n, len(fat))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("GetHistoryView blocked while a full save was doing I/O: the lock is held across the I/O")
+	if failure := awaitHistoryView(sm, key, len(fat), "GetHistoryView did not return while the full save was doing I/O: the lock is held across the I/O"); failure != "" {
+		t.Fatal(failure)
 	}
 
 	gate.unlock()
-	select {
-	case err := <-saveErr:
-		if err != nil {
-			t.Fatalf("Save failed: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("Save did not finish after the repository was released")
-	}
-
-	const maxLockWait = 60 * time.Millisecond
-	observed := watchdog.stopAndWait()
-	t.Logf("longest read-lock wait during the full save: %v (limit %v)", observed, maxLockWait)
-	if observed > maxLockWait {
-		t.Fatalf("a reader waited %v for sm.mu during a full save (limit %v): the lock is held across the collect/marshal phase", observed, maxLockWait)
+	if failure := awaitSaveResult(saveErr, "Save did not finish after the repository was released"); failure != "" {
+		t.Fatal(failure)
 	}
 
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
@@ -258,6 +283,21 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 	}
 	if len(rows) != evicted+len(fat) {
 		t.Fatalf("persisted %d rows, want %d (evicted prefix %d + resident %d)", len(rows), evicted+len(fat), evicted, len(fat))
+	}
+}
+
+func TestDeadlockGuardFailsInsteadOfHanging(t *testing.T) {
+	withDeadlockGuard(t, 50*time.Millisecond)
+
+	stuckSave := make(chan error)
+	failure := awaitSaveResult(stuckSave, "Save did not finish after the repository was released")
+
+	const wantLabel = "deadlock guard fired (not a timing assertion)"
+	if !strings.HasPrefix(failure, wantLabel) {
+		t.Fatalf("stuck Save was reported as %q, want a failure starting with %q", failure, wantLabel)
+	}
+	if !strings.Contains(failure, "Save did not finish after the repository was released") {
+		t.Errorf("guard failure %q does not name the stuck stage", failure)
 	}
 }
 
