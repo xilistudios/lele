@@ -96,17 +96,27 @@ PROTOCOL_MARKERS: dict[str, dict[str, str]] = {
     },
 }
 
-# Id suffixes the gateway answers with 400 ModelDeprecated or 402 "Endpoint is
-# unavailable" (issue #405). A free-tier id mirrors a paid one, so the paid entry
-# stays and only the dead variant leaves the catalog.
+# Fail-safe hiding policy, not a measurement (issue #405). A free-tier id on this
+# gateway is a trial of a paid model and the two measured ones answer 400
+# ModelDeprecated / 402 "Endpoint is unavailable", so the whole `-free` family is
+# hidden: a suffix rule can only hide an id, never offer one the endpoint would
+# reject, and the weekly run cannot probe the gateway to tell the families apart.
+# Known false positive: `beam-free` was measured answering 200 and has no paid
+# twin, so it is not offered by the picker either — it still works if typed, and
+# no config validates against the catalog. Drop the suffix from this list to ship
+# free ids again, but then re-measure the family first: an unmeasured free id
+# that appears in a future snapshot (`hungerg-free` was one) would be OFFERED.
 EXCLUDED_ID_SUFFIXES: dict[str, list[str]] = {
     "opencode_go": ["-free"],
 }
 
 # Ids measured live on the gateway that models.dev's mirror does not list yet
 # (issue #405, 2026-10-22). They lead the model list so the picker's default entry
-# is a verified id, and they bypass the deprecation and limit filters: the gateway
-# is authoritative for what it serves.
+# is a verified id. They bypass the deprecation and the EXCLUDED_ID_SUFFIXES
+# filters — the gateway is authoritative for what it serves — but they DO consume
+# MODEL_LIMITS slots, which is why that cap has to cover pins plus the scored
+# tail. A pin the source cannot resolve aborts the run instead of shipping a
+# catalog whose leading entry silently stopped being verified.
 PINNED_MODEL_IDS: dict[str, list[str]] = {
     "opencode_go": [
         "glm-5.1",
@@ -121,13 +131,24 @@ PINNED_MODEL_IDS: dict[str, list[str]] = {
     ],
 }
 
-# Providers that mirror the same models under the same ids; used to resolve
-# metadata for a pinned id the destination provider does not list.
+# Resolution order for a pinned id's metadata: the provider itself, then these
+# siblings (the same models mirrored by a related provider), then
+# CURATED_MODEL_RECORDS, and only then any other provider in the snapshot. The
+# list is a PRIORITY HINT, not a boundary: `qwen3.7-max`, for example, is not in
+# `opencode` either and resolves from `302ai`, so its limits are another vendor's
+# numbers rather than a measurement on this gateway. Such a fallback is reported
+# on stderr so a weekly run leaves a trace of it.
 MODEL_METADATA_SIBLINGS: dict[str, list[str]] = {
     "opencode_go": ["opencode"],
 }
 
 # Pinned ids absent from models.dev entirely, recorded from the gateway listing.
+# `omen-alpha` is measured working on chat/completions but no source publishes
+# its limits, so the record stays name-only on purpose: the entry ships with
+# `context_window`/`max_output` unset instead of borrowing another vendor's
+# numbers. The wizard then falls back to catalog.DefaultsFor's documented
+# unknown-model defaults (128000/8192) and the picker labels the id as having no
+# published limits. Re-measure before filling these in.
 CURATED_MODEL_RECORDS: dict[str, list[dict]] = {
     "opencode_go": [
         {"id": "omen-alpha", "name": "Omen Alpha"},
@@ -249,12 +270,16 @@ STATIC_PROVIDERS: dict[str, dict] = {
 }
 
 # Cap large aggregator catalogs so files stay reasonable; full lists remain
-# available via live /v1/models fetch.
+# available via live /v1/models fetch. The cap counts pinned ids too, so it has to
+# leave room for the scored tail: `opencode_go` pins 9 ids, and a cap of 30 used to
+# push 5 ids measured as working (`deepseek-v4-pro`, `glm-5.3`, `hy3`,
+# `hy4-preview`, `step-5-preview`) off the end without a word. Whenever the cap
+# does trim a scored model the run now reports how many it dropped.
 MODEL_LIMITS: dict[str, int] = {
     "openrouter": 40,
     "vercel": 30,
     "opencode": 40,
-    "opencode_go": 30,
+    "opencode_go": 35,
     "huggingface": 40,
     "novita": 40,
     "nvidia": 40,
@@ -373,12 +398,17 @@ def resolve_pinned_record(src: dict, provider_id: str, model_id: str) -> dict | 
         record = mdev_models(src, mdev_id).get(model_id)
         if record:
             return record
+    for record in CURATED_MODEL_RECORDS.get(provider_id) or []:
+        if (record.get("id") or "") == model_id:
+            return record
     for mdev_id in sorted(src):
         record = mdev_models(src, mdev_id).get(model_id)
         if record:
-            return record
-    for record in CURATED_MODEL_RECORDS.get(provider_id) or []:
-        if (record.get("id") or "") == model_id:
+            print(
+                f"note: metadata for pinned id {model_id!r} of {provider_id!r} comes from "
+                f"unrelated provider {mdev_id!r}: cross-vendor limits, not a measurement",
+                file=sys.stderr,
+            )
             return record
     return None
 
@@ -402,11 +432,11 @@ def pinned_models(provider_id: str, src: dict) -> list[dict]:
     for model_id in PINNED_MODEL_IDS.get(provider_id) or []:
         record = resolve_pinned_record(src, provider_id, model_id)
         if record is None:
-            print(
-                f"warning: pinned id {model_id!r} for provider {provider_id!r} is missing from the source",
-                file=sys.stderr,
+            raise SystemExit(
+                f"pinned id {model_id!r} of provider {provider_id!r} is missing from the source: "
+                f"refusing to ship a catalog whose leading entry is no longer verified "
+                f"(re-measure the gateway and update PINNED_MODEL_IDS or CURATED_MODEL_RECORDS)"
             )
-            continue
         out.append(convert_model(record))
     return out
 
@@ -426,6 +456,12 @@ def select_models(provider_id: str, mdev_id: str, src: dict, limit: int | None) 
     scored.sort(key=lambda t: (-t[0], t[1]))
     out = pinned + [converted for _, _, converted in scored]
     if limit and len(out) > limit:
+        dropped = [m["id"] for m in out[limit:]]
+        preview = ", ".join(dropped[:5]) + (", …" if len(dropped) > 5 else "")
+        print(
+            f"note: {provider_id} cap {limit} drops {len(dropped)} live id(s): {preview}",
+            file=sys.stderr,
+        )
         out = out[:limit]
     return [mark_protocol(m, provider_id) for m in out]
 
@@ -467,10 +503,18 @@ def dump_json(payload: dict) -> str:
 
 
 def read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    if not path.exists():
         return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"cannot read {path}: {exc} — refusing to rewrite it, that would drop every "
+            f"provider a --providers run does not name"
+        )
+    if not isinstance(payload, dict):
+        raise SystemExit(f"cannot use {path}: expected a JSON object, got {type(payload).__name__}")
+    return payload
 
 
 def write_provider(providers_dir: Path, provider_id: str, payload: dict) -> bool:

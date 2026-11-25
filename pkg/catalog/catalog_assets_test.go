@@ -94,9 +94,44 @@ func TestRepoCatalogOpencodeGoMarksMeasuredNonChatCompletionsIDs(t *testing.T) {
 		}
 	}
 
+	picker := make(map[string]bool, len(p.Models))
+	for _, m := range ChatCompletionsModels(p.Models) {
+		picker[m.ID] = true
+	}
 	for _, m := range p.Models {
-		if m.Protocol != "" && m.SupportsChatCompletions() {
-			t.Errorf("opencode_go[%q] carries a marked protocol %q but claims chat/completions support", m.ID, m.Protocol)
+		if m.Protocol == "" {
+			continue
+		}
+		if _, ok := measured[m.ID]; !ok {
+			t.Errorf("opencode_go[%q] carries protocol %q, which no measurement backs: add it to PROTOCOL_MARKERS with evidence or drop the marker", m.ID, m.Protocol)
+		}
+		if picker[m.ID] {
+			t.Errorf("opencode_go[%q] is marked %q but the picker would still offer it", m.ID, m.Protocol)
+		}
+	}
+}
+
+func TestRepoCatalogOpencodeGoKeepsMeasuredWorkingIDs(t *testing.T) {
+	measuredWorking := []string{
+		"deepseek-v4-pro", "glm-5.3", "hy3", "hy4-preview", "step-5-preview",
+	}
+	p := loadRepoProvider(t, "opencode_go")
+	present := make(map[string]bool, len(p.Models))
+	for _, m := range p.Models {
+		present[m.ID] = true
+	}
+	for _, id := range measuredWorking {
+		if !present[id] {
+			t.Errorf("opencode_go dropped %q: docs measure it answering chat/completions with HTTP 200, so the model cap must not evict it", id)
+		}
+	}
+
+	for _, m := range p.Models {
+		if m.ID != "omen-alpha" {
+			continue
+		}
+		if m.ContextWindow != 0 || m.MaxOutput != 0 {
+			t.Errorf("opencode_go[omen-alpha] = %d/%d context/max_output: no source publishes its limits, so the shipped record must stay name-only", m.ContextWindow, m.MaxOutput)
 		}
 	}
 }
