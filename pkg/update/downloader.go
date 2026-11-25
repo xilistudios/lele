@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -26,10 +27,22 @@ type DownloadResult struct {
 
 type Downloader struct {
 	Client *http.Client
+
+	signingKey ed25519.PublicKey
 }
 
 func NewDownloader() *Downloader {
-	return &Downloader{Client: &http.Client{Timeout: 10 * time.Minute}}
+	return &Downloader{
+		Client:     &http.Client{Timeout: 10 * time.Minute},
+		signingKey: releaseSigningPublicKey,
+	}
+}
+
+func (d *Downloader) releaseKey() ed25519.PublicKey {
+	if len(d.signingKey) == ed25519.PublicKeySize {
+		return d.signingKey
+	}
+	return releaseSigningPublicKey
 }
 
 type Platform struct {
@@ -95,9 +108,18 @@ func (d *Downloader) Download(ctx context.Context, rel *Release, progress func(d
 	if asset == nil {
 		return nil, fmt.Errorf("release %s has no asset for this platform (%s)", rel.Tag, archiveName)
 	}
-	checksumsAsset := rel.FindAsset(ChecksumsName(rel.Version()))
+	checksumsName := ChecksumsName(rel.Version())
+	checksumsAsset := rel.FindAsset(checksumsName)
 	if checksumsAsset == nil {
 		return nil, fmt.Errorf("release %s has no checksums file", rel.Tag)
+	}
+	signatureName := ChecksumsSignatureName(rel.Version())
+	signatureAsset := rel.FindAsset(signatureName)
+	if signatureAsset == nil {
+		return nil, fmt.Errorf(
+			"release %s is not signed: no %s asset (refusing to install an unsigned release)",
+			rel.Tag, signatureName,
+		)
 	}
 
 	tempDir, err := os.MkdirTemp("", "lele-update-*")
@@ -106,16 +128,27 @@ func (d *Downloader) Download(ctx context.Context, rel *Release, progress func(d
 	}
 	cleanup := func() { _ = os.RemoveAll(tempDir) }
 
+	checksumsPath := filepath.Join(tempDir, checksumsName)
+	if err := d.downloadFile(ctx, checksumsAsset.URL, checksumsPath, 0, nil); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("downloading checksums: %w", err)
+	}
+
+	signaturePath := filepath.Join(tempDir, signatureName)
+	if err := d.downloadFile(ctx, signatureAsset.URL, signaturePath, 0, nil); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("downloading checksums signature: %w", err)
+	}
+
+	if err := verifyChecksumsSignature(d.releaseKey(), checksumsPath, signaturePath); err != nil {
+		cleanup()
+		return nil, err
+	}
+
 	archivePath := filepath.Join(tempDir, archiveName)
 	if err := d.downloadFile(ctx, asset.URL, archivePath, asset.Size, progress); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("downloading archive: %w", err)
-	}
-
-	checksumsPath := filepath.Join(tempDir, "checksums.txt")
-	if err := d.downloadFile(ctx, checksumsAsset.URL, checksumsPath, 0, nil); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("downloading checksums: %w", err)
 	}
 
 	if err := verifyChecksum(archivePath, checksumsPath, archiveName); err != nil {
@@ -186,6 +219,21 @@ func (d *Downloader) downloadFile(ctx context.Context, url, dst string, total in
 		if readErr != nil {
 			return readErr
 		}
+	}
+	return nil
+}
+
+func verifyChecksumsSignature(publicKey ed25519.PublicKey, checksumsPath, signaturePath string) error {
+	checksums, err := os.ReadFile(checksumsPath)
+	if err != nil {
+		return fmt.Errorf("reading checksums: %w", err)
+	}
+	signature, err := os.ReadFile(signaturePath)
+	if err != nil {
+		return fmt.Errorf("reading checksums signature: %w", err)
+	}
+	if err := VerifyChecksumsSignature(publicKey, checksums, signature); err != nil {
+		return fmt.Errorf("verifying release signature: %w", err)
 	}
 	return nil
 }

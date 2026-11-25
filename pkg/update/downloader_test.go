@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,45 +33,114 @@ func makeTarGz(t *testing.T, name string, content []byte) []byte {
 	return buf.Bytes()
 }
 
-func TestDownloadVerifyExtract(t *testing.T) {
+func testPlatform(t *testing.T) Platform {
+	t.Helper()
+
 	platform, err := CurrentPlatform()
 	if err != nil {
 		t.Skipf("unsupported platform: %v", err)
 	}
 	if platform.OS == "Windows" {
-		t.Skip("tar.gz path test only")
+		t.Skip("tar.gz fixture only")
 	}
+	return platform
+}
 
-	archiveName := ArchiveName(platform)
-	binaryContent := []byte("#!/bin/sh\necho lele 9.9.9\n")
-	archive := makeTarGz(t, "lele", binaryContent)
+type releaseFixture struct {
+	Tag             string
+	Platform        Platform
+	Archive         []byte
+	Checksums       []byte
+	Signature       []byte
+	IncludeSigAsset bool
+	ServeSigFile    bool
+}
 
+func newReleaseFixture(t *testing.T) *releaseFixture {
+	t.Helper()
+
+	platform := testPlatform(t)
+	archive := makeTarGz(t, "lele", []byte("#!/bin/sh\necho lele 9.9.9\n"))
 	sum := sha256.Sum256(archive)
-	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), archiveName)
+
+	return &releaseFixture{
+		Tag:             "v9.9.9",
+		Platform:        platform,
+		Archive:         archive,
+		Checksums:       fmt.Appendf(nil, "%s  %s\n", hex.EncodeToString(sum[:]), ArchiveName(platform)),
+		IncludeSigAsset: true,
+		ServeSigFile:    true,
+	}
+}
+
+func (f *releaseFixture) sign(privateKey ed25519.PrivateKey) {
+	f.Signature = ed25519.Sign(privateKey, f.Checksums)
+}
+
+func (f *releaseFixture) serve(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	files := map[string][]byte{
+		ArchiveName(f.Platform): f.Archive,
+		ChecksumsName(f.Tag):    f.Checksums,
+	}
+	if f.ServeSigFile {
+		files[ChecksumsSignatureName(f.Tag)] = f.Signature
+	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/archive":
-			w.Write(archive)
-		case "/checksums":
-			w.Write([]byte(checksums))
-		default:
+		body, ok := files[strings.TrimPrefix(r.URL.Path, "/")]
+		if !ok {
 			http.NotFound(w, r)
+			return
 		}
+		_, _ = w.Write(body)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
-	rel := &Release{
-		Tag: "v9.9.9",
-		Assets: []Asset{
-			{Name: archiveName, URL: srv.URL + "/archive"},
-			{Name: ChecksumsName("9.9.9"), URL: srv.URL + "/checksums"},
-		},
+	return srv
+}
+
+func (f *releaseFixture) release(srv *httptest.Server) *Release {
+	names := []string{ArchiveName(f.Platform), ChecksumsName(f.Tag)}
+	if f.IncludeSigAsset {
+		names = append(names, ChecksumsSignatureName(f.Tag))
 	}
 
+	rel := &Release{Tag: f.Tag}
+	for _, name := range names {
+		rel.Assets = append(rel.Assets, Asset{Name: name, URL: srv.URL + "/" + name})
+	}
+	return rel
+}
+
+func downloadFixture(t *testing.T, f *releaseFixture, publicKey ed25519.PublicKey) (*DownloadResult, error) {
+	t.Helper()
+
+	srv := f.serve(t)
+	result, err := newTestDownloader(publicKey).Download(context.Background(), f.release(srv), nil)
+	if err == nil {
+		t.Cleanup(func() { _ = os.RemoveAll(result.TempDir) })
+	}
+	return result, err
+}
+
+func newTestDownloader(publicKey ed25519.PublicKey) *Downloader {
 	d := NewDownloader()
+	d.signingKey = publicKey
+	return d
+}
+
+func TestDownloadVerifyExtract(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.sign(privateKey)
+
+	srv := f.serve(t)
+	d := newTestDownloader(publicKey)
+
 	var lastPct float64
-	res, err := d.Download(context.Background(), rel, func(downloaded, total int64) {
+	res, err := d.Download(context.Background(), f.release(srv), func(downloaded, total int64) {
 		if total > 0 {
 			lastPct = float64(downloaded) / float64(total) * 100
 		}
@@ -77,13 +148,13 @@ func TestDownloadVerifyExtract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
-	defer cleanupTemp(res.TempDir)
+	t.Cleanup(func() { _ = os.RemoveAll(res.TempDir) })
 
 	got, err := os.ReadFile(res.BinaryPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, binaryContent) {
+	if !bytes.Equal(got, []byte("#!/bin/sh\necho lele 9.9.9\n")) {
 		t.Error("extracted binary content mismatch")
 	}
 	if lastPct < 99.9 {
@@ -92,37 +163,17 @@ func TestDownloadVerifyExtract(t *testing.T) {
 }
 
 func TestDownloadChecksumMismatch(t *testing.T) {
-	platform, err := CurrentPlatform()
-	if err != nil || platform.OS == "Windows" {
-		t.Skip("tar.gz path test only")
-	}
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.Checksums = fmt.Appendf(nil, "%s  %s\n", strings.Repeat("0", 64), ArchiveName(f.Platform))
+	f.sign(privateKey)
 
-	archiveName := ArchiveName(platform)
-	archive := makeTarGz(t, "lele", []byte("binary"))
-	checksums := "0000000000000000000000000000000000000000000000000000000000000000  " + archiveName + "\n"
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/archive":
-			w.Write(archive)
-		case "/checksums":
-			w.Write([]byte(checksums))
-		}
-	}))
-	defer srv.Close()
-
-	rel := &Release{
-		Tag: "v9.9.9",
-		Assets: []Asset{
-			{Name: archiveName, URL: srv.URL + "/archive"},
-			{Name: ChecksumsName("9.9.9"), URL: srv.URL + "/checksums"},
-		},
-	}
-
-	d := NewDownloader()
-	_, err = d.Download(context.Background(), rel, nil)
+	_, err := downloadFixture(t, f, publicKey)
 	if err == nil {
 		t.Fatal("expected checksum mismatch error")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Errorf("error = %v, want a checksum mismatch", err)
 	}
 }
 
@@ -135,7 +186,131 @@ func TestDownloadMissingAsset(t *testing.T) {
 	}
 }
 
-func cleanupTemp(dir string) { _ = os.RemoveAll(dir) }
+func TestDownload_RejectsUnsignedRelease(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.IncludeSigAsset = false
+	f.sign(privateKey)
+
+	result, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject a release without a signature asset")
+	}
+	if result != nil {
+		t.Errorf("Download returned a result alongside the error: %+v", result)
+	}
+	want := ChecksumsSignatureName(f.Tag)
+	if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "not signed") {
+		t.Errorf("error = %v, want it to name the missing %s asset", err, want)
+	}
+}
+
+func TestDownload_RejectsInvalidSignature(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.sign(privateKey)
+	f.Signature = ed25519.Sign(privateKey, []byte("a different checksums file\n"))
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject an invalid signature")
+	}
+	if !strings.Contains(err.Error(), "invalid release signature") {
+		t.Errorf("error = %v, want an invalid release signature error", err)
+	}
+}
+
+func TestDownload_RejectsTamperedChecksums(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.sign(privateKey)
+	f.Checksums = bytes.Replace(f.Checksums, []byte("lele_"), []byte("evil_"), 1)
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject tampered checksums")
+	}
+	if !strings.Contains(err.Error(), "invalid release signature") {
+		t.Errorf("error = %v, want an invalid release signature error", err)
+	}
+}
+
+func TestDownload_VerifiesSignatureBeforeChecksum(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.Checksums = fmt.Appendf(nil, "%s  %s\n", strings.Repeat("0", 64), ArchiveName(f.Platform))
+	f.sign(privateKey)
+	f.Signature = ed25519.Sign(privateKey, []byte("unrelated\n"))
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "invalid release signature") {
+		t.Errorf("error = %v, want the signature check to run before the checksum check", err)
+	}
+	if strings.Contains(err.Error(), "checksum mismatch") {
+		t.Error("checksum was trusted before the release signature was verified")
+	}
+}
+
+func TestDownload_RejectsSignatureFromAnotherKey(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, _ := testSigningKeys(t)
+	_, otherPrivateKey := testSigningKeys(t)
+	f.sign(otherPrivateKey)
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject a signature from an unrelated key")
+	}
+	if !strings.Contains(err.Error(), "invalid release signature") {
+		t.Errorf("error = %v, want an invalid release signature error", err)
+	}
+}
+
+func TestDownload_RejectsTruncatedSignature(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.sign(privateKey)
+	f.Signature = f.Signature[:16]
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to reject a truncated signature")
+	}
+	if !strings.Contains(err.Error(), "invalid release signature") {
+		t.Errorf("error = %v, want an invalid release signature error", err)
+	}
+}
+
+func TestDownload_MissingSignatureFile(t *testing.T) {
+	f := newReleaseFixture(t)
+	publicKey, privateKey := testSigningKeys(t)
+	f.sign(privateKey)
+	f.ServeSigFile = false
+
+	_, err := downloadFixture(t, f, publicKey)
+	if err == nil {
+		t.Fatal("expected Download to fail when the signature asset cannot be fetched")
+	}
+	if !strings.Contains(err.Error(), "downloading checksums signature") {
+		t.Errorf("error = %v, want a signature download error", err)
+	}
+}
+
+func TestNewDownloader_PinsReleaseSigningKey(t *testing.T) {
+	d := NewDownloader()
+	if !bytes.Equal(d.releaseKey(), ReleaseSigningPublicKey()) {
+		t.Error("NewDownloader does not default to the pinned release signing key")
+	}
+
+	custom, _ := testSigningKeys(t)
+	d.signingKey = custom
+	if !bytes.Equal(d.releaseKey(), custom) {
+		t.Error("releaseKey ignores an explicitly configured signing key")
+	}
+}
 
 func TestExtractFromTarGz(t *testing.T) {
 	outDir := t.TempDir()
