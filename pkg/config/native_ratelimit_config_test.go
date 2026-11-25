@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestNativeRateLimitDefaultsToDisabled(t *testing.T) {
+func TestNativeRateLimitDefaultsToEnabled(t *testing.T) {
 	rl := DefaultConfig().Channels.Native.RateLimit
 
-	if rl.Enabled {
-		t.Error("DefaultConfig().Channels.Native.RateLimit.Enabled = true, want false")
+	if !rl.Enabled {
+		t.Error("DefaultConfig().Channels.Native.RateLimit.Enabled = false, want the secure default true")
 	}
 	if rl.PinPerMinute != DefaultNativeRateLimitPinPerMinute {
 		t.Errorf("PinPerMinute = %d, want %d", rl.PinPerMinute, DefaultNativeRateLimitPinPerMinute)
@@ -27,6 +27,9 @@ func TestNativeRateLimitDefaultsToDisabled(t *testing.T) {
 	}
 	if rl.WSMessagesPerMinute != DefaultNativeRateLimitWSMessagesPerMinute {
 		t.Errorf("WSMessagesPerMinute = %d, want %d", rl.WSMessagesPerMinute, DefaultNativeRateLimitWSMessagesPerMinute)
+	}
+	if rl.APIPerMinute != 600 || rl.WSMessagesPerMinute != 600 {
+		t.Errorf("API/WS defaults = %d/%d per minute, want the generous 600/600", rl.APIPerMinute, rl.WSMessagesPerMinute)
 	}
 }
 
@@ -260,4 +263,113 @@ func TestNativeRateLimitValidateRejectsNegative(t *testing.T) {
 			t.Errorf("expected invalid_range error for pair_per_minute even when disabled, got %v", errs)
 		}
 	})
+}
+
+func TestRateLimit_UnsetLoadDefaultsEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !loaded.Channels.Native.RateLimit.Enabled {
+		t.Error("LoadConfig({}).Channels.Native.RateLimit.Enabled = false, want true")
+	}
+	if loaded.Channels.Native.RateLimit.APIPerMinute != 600 {
+		t.Errorf("APIPerMinute = %d, want 600", loaded.Channels.Native.RateLimit.APIPerMinute)
+	}
+	if loaded.Channels.Native.RateLimit.WSMessagesPerMinute != 600 {
+		t.Errorf("WSMessagesPerMinute = %d, want 600", loaded.Channels.Native.RateLimit.WSMessagesPerMinute)
+	}
+}
+
+func TestRateLimit_ExplicitFalsePreserved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	document := `{"channels":{"native":{"rate_limit":{"enabled":false,"pin_per_minute":2}}}}`
+	if err := os.WriteFile(path, []byte(document), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Channels.Native.RateLimit.Enabled {
+		t.Error("RateLimit.Enabled = true for an explicit false, want false")
+	}
+	if cfg.Channels.Native.RateLimit.PinPerMinute != 2 {
+		t.Errorf("PinPerMinute = %d, want the explicit 2", cfg.Channels.Native.RateLimit.PinPerMinute)
+	}
+
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	value, ok := jsonPathValue(t, readSavedJSON(t, path), "channels", "native", "rate_limit", "enabled")
+	if !ok || value != false {
+		t.Fatalf("saved rate_limit.enabled = %v (present %v), want the explicit false kept", value, ok)
+	}
+}
+
+func TestRateLimit_JSONNullTreatedUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	document := `{"channels":{"native":{"rate_limit":{"enabled":null}}}}`
+	if err := os.WriteFile(path, []byte(document), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.Channels.Native.RateLimit.Enabled {
+		t.Error("RateLimit.Enabled = false for a JSON null, want the unset default true")
+	}
+
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	value, ok := jsonPathValue(t, readSavedJSON(t, path), "channels", "native", "rate_limit", "enabled")
+	if !ok || value != nil {
+		t.Fatalf("saved rate_limit.enabled = %v (present %v), want the null kept untouched", value, ok)
+	}
+}
+
+func TestRateLimit_UnsetSaveReloadStaysUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"language":"en"}`), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	parsed := readSavedJSON(t, path)
+	requireAbsentJSONPath(t, parsed, "channels", "native", "rate_limit")
+
+	reloaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig (reload): %v", err)
+	}
+	if !reloaded.Channels.Native.RateLimit.Enabled {
+		t.Error("reloaded RateLimit.Enabled = false, want the unset default true")
+	}
+}
+
+func TestRateLimit_InvalidTypeSurfacesError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	document := `{"channels":{"native":{"rate_limit":{"enabled":"yes"}}}}`
+	if err := os.WriteFile(path, []byte(document), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("LoadConfig with a string rate_limit.enabled succeeded, want a type error")
+	}
 }

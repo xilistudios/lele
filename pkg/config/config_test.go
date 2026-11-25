@@ -289,8 +289,8 @@ func TestDefaultConfig_Temperature(t *testing.T) {
 func TestDefaultConfig_Gateway(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Gateway.Host != "0.0.0.0" {
-		t.Error("Gateway host should have default value")
+	if cfg.Gateway.Host != DefaultGatewayHost {
+		t.Errorf("Gateway.Host = %q, want the loopback default %q", cfg.Gateway.Host, DefaultGatewayHost)
 	}
 	if cfg.Gateway.Port == 0 {
 		t.Error("Gateway port should have default value")
@@ -435,8 +435,8 @@ func TestConfig_Complete(t *testing.T) {
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {
 		t.Error("MaxToolIterations should not be negative")
 	}
-	if cfg.Gateway.Host != "0.0.0.0" {
-		t.Error("Gateway host should have default value")
+	if cfg.Gateway.Host != DefaultGatewayHost {
+		t.Errorf("Gateway.Host = %q, want the loopback default %q", cfg.Gateway.Host, DefaultGatewayHost)
 	}
 	if cfg.Gateway.Port == 0 {
 		t.Error("Gateway port should have default value")
