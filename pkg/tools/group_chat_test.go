@@ -336,3 +336,51 @@ func TestRegression_GroupChatFallsBackWhenNoCtx(t *testing.T) {
 		}
 	}
 }
+func TestGroupChatTool_CarriesSenderToNestedGroup(t *testing.T) {
+	var mu sync.Mutex
+	var senders []string
+	resolve := func(id string) (group.AgentContext, bool) {
+		return group.AgentContext{AgentID: id, Name: id, SystemPrompt: "p"}, true
+	}
+	exec := func(ctx context.Context, req group.TurnRequest) (string, int, error) {
+		mu.Lock()
+		senders = append(senders, req.OriginSenderID)
+		mu.Unlock()
+		return "t-" + req.Speaker, 1, nil
+	}
+	pub := &testPublisher{}
+	gm := group.NewGroupManager(resolve, exec, pub.publish)
+	tool := NewGroupChatTool(gm)
+
+	ctx := WithToolSender(WithToolContext(context.Background(), "telegram", "555"), "111|alice")
+	res := tool.Execute(ctx, b4Args("hello"))
+	if strings.Contains(res.ForLLM, "failed to start") {
+		t.Fatalf("unexpected failure: %s", res.ForLLM)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(senders) == 0 {
+		t.Fatal("the nested group never ran a turn")
+	}
+	if senders[0] != "111|alice" {
+		t.Fatalf("nested group OriginSenderID = %q, want the requesting sender %q", senders[0], "111|alice")
+	}
+}
+
+func TestToolSenderContextRoundTrip(t *testing.T) {
+	ctx := WithToolSender(context.Background(), "111|alice")
+	if got := ToolSenderFromCtx(ctx); got != "111|alice" {
+		t.Fatalf("ToolSenderFromCtx = %q, want %q", got, "111|alice")
+	}
+	if got := ToolSenderFromCtx(context.Background()); got != "" {
+		t.Fatalf("ToolSenderFromCtx on a bare context = %q, want empty", got)
+	}
+	chained := WithToolSender(WithToolContext(ctx, "telegram", "555"), "222|bob")
+	if got := ToolSenderFromCtx(chained); got != "222|bob" {
+		t.Fatalf("innermost sender must win, got %q", got)
+	}
+	if channel, chatID := ToolContextFromCtx(chained); channel != "telegram" || chatID != "555" {
+		t.Fatalf("tool context lost: %q/%q", channel, chatID)
+	}
+}

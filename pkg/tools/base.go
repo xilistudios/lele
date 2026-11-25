@@ -7,6 +7,7 @@ type contextKey string
 const (
 	channelCtxKey    contextKey = "tool_channel"
 	chatIDCtxKey     contextKey = "tool_chat_id"
+	senderIDCtxKey   contextKey = "tool_sender_id"
 	agentIDCtxKey    contextKey = "tool_agent_id"
 	sessionKeyCtxKey contextKey = "tool_session_key"
 
@@ -35,6 +36,15 @@ func WithAgentToolContext(ctx context.Context, agentID, sessionKey string) conte
 	ctx = context.WithValue(ctx, agentIDCtxKey, agentID)
 	ctx = context.WithValue(ctx, sessionKeyCtxKey, sessionKey)
 	return ctx
+}
+
+func WithToolSender(ctx context.Context, senderID string) context.Context {
+	return context.WithValue(ctx, senderIDCtxKey, senderID)
+}
+
+func ToolSenderFromCtx(ctx context.Context) string {
+	senderID, _ := ctx.Value(senderIDCtxKey).(string)
+	return senderID
 }
 
 func ToolContextFromCtx(ctx context.Context) (channel, chatID string) {
