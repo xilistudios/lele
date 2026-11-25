@@ -176,4 +176,5 @@ Important paths to back up:
 
 - `docs/logging-and-observability.md`
 - `docs/security-and-sandbox.md`
+- `docs/release-signing.md`
 - `docs/troubleshooting.md`

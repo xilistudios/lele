@@ -43,7 +43,7 @@ lele agent -m "Bạn có thể làm gì?"
 lele tui
 ```
 
-Script cài đặt xác minh SHA256 và mặc định cài vào `~/.local/bin`.
+Script cài đặt xác minh SHA256 (bắt buộc) và chữ ký ed25519 của bản phát hành (khi có OpenSSL ≥ 3.0) và mặc định cài vào `~/.local/bin` — xem `docs/release-signing.md`.
 
 ## Benchmark
 
