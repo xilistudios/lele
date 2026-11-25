@@ -993,3 +993,39 @@ func TestExec_BuildExecEnvDropsAllInheritedSecretVariables(t *testing.T) {
 		t.Error("unrelated inherited environment variables must be preserved")
 	}
 }
+func TestExec_HashOnlyStartsCommentAtWordStart(t *testing.T) {
+	const secretValue = "midword-hash-secret"
+
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("tok", secretValue, "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "printf '%s' url#frag-{{SECRET:tok}}",
+	})
+	if result.IsError {
+		t.Fatalf("exec failed: %s", result.ForLLM)
+	}
+	if want := "url#frag-" + secretValue; strings.TrimSpace(result.ForLLM) != want {
+		t.Errorf("child printed %q, want %q: a '#' that does not start a word is not a comment, so the placeholder must still expand", strings.TrimSpace(result.ForLLM), want)
+	}
+
+	quoted := tool.Execute(ctx, map[string]interface{}{
+		"command": "printf '%s' a#b '{{SECRET:tok}}'",
+	})
+	if !quoted.IsError {
+		t.Fatalf("a mid-word '#' must not open a comment (which would hide the single quotes); got: %s", quoted.ForLLM)
+	}
+	if !strings.Contains(quoted.ForLLM, "single quotes") {
+		t.Errorf("expected the single-quote rejection to survive a mid-word '#', got: %s", quoted.ForLLM)
+	}
+	if strings.Contains(quoted.ForLLM, secretValue) || strings.Contains(quoted.ForUser, secretValue) {
+		t.Errorf("SECURITY FAIL: secret value leaked into the error, got: %s", quoted.ForLLM)
+	}
+}
