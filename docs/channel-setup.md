@@ -170,21 +170,26 @@ Notes:
 - powers the local REST + WebSocket client API
 - used by the built-in web UI and native clients
 - supports pairing PINs and bearer-token auth
-- **behavioral change:** rate limiting on native routes is now **disabled by
-  default**.  Previously the server always enforced fixed limits (10 PINs/min,
-  5 pairings/min, 20 token refreshes/min, 120 API requests/min, 120 WebSocket
-  messages/min per source).  To restore that exact behavior, enable
-  `channels.native.rate_limit.enabled`; the default rates are the same.
-  **A stock install binds all interfaces** (`gateway.host` defaults to
-  `0.0.0.0` and wins over `channels.native.host`, which defaults to
-  `127.0.0.1` but does **not** control the bind address), so the
-  unauthenticated `POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute
-  expiry, no brute-force counter) is reachable from the LAN and, with rate
-  limiting off, has no throttling at all.  Desktop mode
-  forces loopback automatically.  **Enable rate limiting on any machine
-  reachable from an untrusted network.**  Requires a restart.  The
-  authentication log-line sampler (6/min) is **not** a traffic limiter and
-  remains always active.
+- rate limiting on native routes is **enabled by default**
+  (`channels.native.rate_limit.enabled: true`) with per-source-IP budgets of
+  10 PINs/min, 5 pairings/min, 20 token refreshes/min, 600 API requests/min and
+  600 WebSocket messages/min.  An explicit `enabled: false` turns every traffic
+  limiter off; individual rates can be overridden and `0` or omitted means the
+  built-in default.  Requires a restart.  The authentication log-line sampler
+  (6/min) is **not** a traffic limiter and remains always active.
+- **the gateway binds loopback by default** — `gateway.host` defaults to
+  `127.0.0.1` and wins over `channels.native.host`, which defaults to
+  `127.0.0.1` but does **not** control the bind address.  **Migration:** the
+  `gateway.host` default used to be `0.0.0.0`, so a config that never named a
+  host stops answering LAN clients after upgrading.  Set `gateway.host` (or
+  `server.host`) to `0.0.0.0` to restore LAN access; an explicit value is
+  preserved exactly as written, and `--desktop` keeps forcing loopback.  A
+  gateway started from an existing config file that names no host logs a
+  per-startup warning about the change, and any non-loopback bind with the
+  native channel enabled logs a warning whether rate limiting is on or not,
+  because the unauthenticated `POST /api/v1/auth/pair` endpoint (6-digit PIN,
+  5-minute expiry) is then reachable from the network.  **Keep rate limiting
+  enabled on any machine reachable from an untrusted network.**
 
 ## Web
 

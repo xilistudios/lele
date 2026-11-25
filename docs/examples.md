@@ -84,6 +84,10 @@ This page provides concrete configuration snippets for common setups.
 
 ```json
 {
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790
+  },
   "channels": {
     "web": {
       "enabled": true,
@@ -100,12 +104,12 @@ This page provides concrete configuration snippets for common setups.
       "max_upload_size_mb": 50,
       "upload_ttl_hours": 24,
       "rate_limit": {
-        "enabled": false,
+        "enabled": true,
         "pin_per_minute": 10,
         "pair_per_minute": 5,
         "refresh_per_minute": 20,
-        "api_per_minute": 120,
-        "ws_messages_per_minute": 120
+        "api_per_minute": 600,
+        "ws_messages_per_minute": 600
       }
     }
   }

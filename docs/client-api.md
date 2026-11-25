@@ -49,17 +49,23 @@ Add or adjust the `channels.native` block in `~/.lele/config.json`:
       "max_upload_size_mb": 50,
       "upload_ttl_hours": 24,
       "rate_limit": {
-        "enabled": false,
+        "enabled": true,
         "pin_per_minute": 10,
         "pair_per_minute": 5,
         "refresh_per_minute": 20,
-        "api_per_minute": 120,
-        "ws_messages_per_minute": 120
+        "api_per_minute": 600,
+        "ws_messages_per_minute": 600
       }
     }
   }
 }
 ```
+
+The bind address is `gateway.host` (default `127.0.0.1`), **not**
+`channels.native.host`: a LAN client can only reach the API when `gateway.host`
+(or `server.host`) names a non-loopback address such as `0.0.0.0`, and a config
+that never named a host now stays on loopback (the default used to be
+`0.0.0.0`; see `docs/channel-setup.md` for the migration note).
 
 ## Auth Flow
 
@@ -140,20 +146,20 @@ Errors:
 | --- | --- | --- | --- |
 | 400 | `refresh_error` | Token unknown, expired, revoked, or already rotated | End the session and re-authenticate |
 | 400 | `body_invalid` | Malformed request body | Fix the request; the credential is untouched |
-| 429 | `rate_limit_exceeded` | Too many auth requests from this IP (only when rate limiting is enabled) | Back off using `Retry-After`; **keep the session** |
+| 429 | `rate_limit_exceeded` | Too many auth requests from this IP (only reachable while rate limiting is enabled) | Back off using `Retry-After`; **keep the session** |
 
 Only `refresh_error` proves the credential is dead. A 429 is answered by the
 limiter *before* the handler runs, so the refresh token has not been consumed
 and remains valid — clearing the session on a 429 turns a momentary slowdown
-into a sign-out.  With rate limiting disabled (the default) no 429 is produced
-at all, so this branch is only exercised once you enable it.
+into a sign-out.  With rate limiting explicitly disabled
+(`channels.native.rate_limit.enabled: false`) no 429 is produced at all.
 
 ### Rate Limits
 
-Rate limiting is **disabled by default**.  Enable it with
-`channels.native.rate_limit.enabled` (config file, WebUI, or the
+Rate limiting is **enabled by default**.  Turn it off with
+`channels.native.rate_limit.enabled: false` (config file, WebUI, or the
 `LELE_CHANNELS_NATIVE_RATE_LIMIT_*` env vars listed in
-`docs/config-reference.md`).  When enabled, auth endpoints are limited per
+`docs/config-reference.md`).  While enabled, auth endpoints are limited per
 source IP, each with its own budget:
 
 | Endpoint | Default limit | Rationale |
@@ -161,8 +167,8 @@ source IP, each with its own budget:
 | `GET /api/v1/auth/pin` | 10 / min | Requires a token; bounds PIN thrashing that would evict another device's pending PIN |
 | `POST /api/v1/auth/pair` | 5 / min | Bruteforceable 6-digit PIN |
 | `POST /api/v1/auth/refresh` | 20 / min | Background renewal; must never be reachable in normal use |
-| Other API endpoints | 120 / min | General traffic |
-| WebSocket messages | 120 / min | Per-source WS frame budget |
+| Other API endpoints | 600 / min | General traffic |
+| WebSocket messages | 600 / min | Per-source WS frame budget |
 
 Individual rates can be overridden via `pin_per_minute`, `pair_per_minute`,
 `refresh_per_minute`, `api_per_minute`, and `ws_messages_per_minute` inside
@@ -182,8 +188,9 @@ the seconds remaining in the window.
 name or a full client list), and every pairing failure answers the same
 `invalid PIN` body, so the endpoint does not confirm whether a PIN exists.
 That budget is per PIN: with rate limiting disabled, a blind search over the
-million possible PINs is still unthrottled.  Enable rate limiting on any
-machine reachable from an untrusted network.
+million possible PINs is unthrottled again, which is why it is on by default —
+leave it on for any machine reachable from an untrusted network, and prefer
+keeping `gateway.host` on loopback.
 
 ### 4. Check Auth Status
 
