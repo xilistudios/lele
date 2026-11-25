@@ -129,7 +129,7 @@ func countPersistedRows(t *testing.T, db *sql.DB, key string) int {
 
 func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping lock-scope timing test in -short mode")
+		t.Skip("skipping the lock-scope IO-volume test in -short mode")
 	}
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -161,50 +161,24 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 	defer gate.unlock()
 	useBlockingExcludedRangeRepo(t, sm, gate)
 
-	watchdog := startLockWatchdog(&sm.mu)
-
 	saveErr := make(chan error, 1)
 	go func() { saveErr <- sm.Save(key) }()
 
-	select {
-	case <-gate.entered:
-	case err := <-saveErr:
-		t.Fatalf("Save returned before touching the repository: %v", err)
-	case <-time.After(15 * time.Second):
-		t.Fatal("Save never reached the repository: it is stuck (holding sm.mu?) before its first I/O")
+	if failure := awaitIORepositoryHit(gate, saveErr, "Save never reached the repository: it is stuck before its first I/O"); failure != "" {
+		t.Fatal(failure)
 	}
 
 	if gate.muHeld.Load() {
 		t.Fatal("repository I/O ran while sm.mu was held: the write lock must cover collection only")
 	}
 
-	viewDone := make(chan int, 1)
-	go func() { viewDone <- len(sm.GetHistoryView(key)) }()
-	select {
-	case n := <-viewDone:
-		if n != resident {
-			t.Fatalf("GetHistoryView returned %d messages, want %d", n, resident)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("GetHistoryView blocked while an excluded-range save was doing I/O: the lock is held across the I/O")
+	if failure := awaitHistoryView(sm, key, resident, "GetHistoryView did not return while the excluded-range save was doing I/O: the lock is held across the I/O"); failure != "" {
+		t.Fatal(failure)
 	}
-
-	time.Sleep(400 * time.Millisecond)
 
 	gate.unlock()
-	select {
-	case err := <-saveErr:
-		if err != nil {
-			t.Fatalf("Save failed: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("Save did not finish after the repository was released")
-	}
-
-	const maxLockWait = 60 * time.Millisecond
-	if observed := watchdog.stopAndWait(); observed > maxLockWait {
-		t.Fatalf("a reader waited %v for sm.mu during an excluded-range save (limit %v): the lock is held across the collect/marshal phase",
-			observed, maxLockWait)
+	if failure := awaitSaveResult(saveErr, "Save did not finish after the repository was released"); failure != "" {
+		t.Fatal(failure)
 	}
 
 	if got := countPersistedRows(t, s.DB(), key); got != resident {
