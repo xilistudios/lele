@@ -129,6 +129,12 @@ export function isOpenAICompatible(type: string | undefined): boolean {
   return OPENAI_COMPATIBLE_TYPES.has(type)
 }
 
+const CHAT_COMPLETIONS_PROTOCOL = 'chat_completions'
+
+export function speaksChatCompletions(model: { protocol?: string }): boolean {
+  return !model.protocol || model.protocol === CHAT_COMPLETIONS_PROTOCOL
+}
+
 export function normalizeProviderType(raw: string): string {
   const t = raw.toLowerCase().trim().replace(/\./g, '-').replace(/ /g, '_')
   return PROVIDER_TYPE_ALIASES[t] ?? t
@@ -202,10 +208,11 @@ export function ModelSearchInput({
     queryFn: async (): Promise<ModelSuggestion[]> => {
       try {
         const live = await api.providerModels(providerName)
-        if (live.models?.length) return live.models
+        const usable = (live.models ?? []).filter(speaksChatCompletions) as ModelSuggestion[]
+        if (usable.length) return usable
       } catch {}
       const catalog = await api.catalogModels(catalogProvider)
-      return catalog.models ?? []
+      return (catalog.models ?? []).filter(speaksChatCompletions)
     },
     enabled: isOpen,
     staleTime: 60_000,

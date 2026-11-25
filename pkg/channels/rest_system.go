@@ -458,7 +458,7 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	cfg := n.cfgSnapshot()
 	named, ok := cfg.Providers.GetNamed(providerName)
 	if !ok {
-		if models := lookupCatalogModels([]string{providerName}); len(models) > 0 {
+		if models := pickerCatalogModels(providerName); len(models) > 0 {
 			writeJSON(w, http.StatusOK, ProviderModelsResponse{
 				Provider: providerName,
 				Source:   "catalog",
@@ -478,7 +478,7 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	}
 
 	catalogKeys := []string{providerType, providerName}
-	catalogModels := lookupCatalogModels(catalogKeys)
+	catalogModels := pickerCatalogModels(catalogKeys...)
 
 	if apiBase == "" {
 		apiBase = defaultAPIBaseByTypePublic(providerType)
@@ -566,15 +566,8 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var modelsResp struct {
-		Data []struct {
-			ID      string `json:"id"`
-			Object  string `json:"object"`
-			Created int64  `json:"created"`
-			OwnedBy string `json:"owned_by"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &modelsResp); err != nil {
+	models, parseErr := liveProviderModels(body, catalogKeys...)
+	if parseErr != nil {
 		if len(catalogModels) > 0 {
 			writeJSON(w, http.StatusOK, ProviderModelsResponse{
 				Provider: providerName,
@@ -585,18 +578,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		}
 		writeError(w, http.StatusInternalServerError, "failed to parse models response", "parse_error")
 		return
-	}
-
-	models := make([]ProviderModelInfo, 0, len(modelsResp.Data))
-	for _, m := range modelsResp.Data {
-		info := ProviderModelInfo{
-			ID:      m.ID,
-			Object:  m.Object,
-			Created: m.Created,
-			OwnedBy: m.OwnedBy,
-		}
-		enrichProviderModelInfo(&info, catalogKeys...)
-		models = append(models, info)
 	}
 
 	writeJSON(w, http.StatusOK, ProviderModelsResponse{

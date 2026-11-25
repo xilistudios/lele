@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-11-23T18:00:16Z",
+  "updated_at": "2026-11-25T21:42:01Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -265,7 +265,7 @@
       "type": "openai",
       "api_base": "https://opencode.ai/zen/go/v1",
       "file": "providers/opencode_go.json",
-      "model_count": 30
+      "model_count": 35
     },
     "openrouter": {
       "id": "openrouter",

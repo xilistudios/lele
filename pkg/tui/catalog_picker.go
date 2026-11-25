@@ -63,7 +63,7 @@ func (m *Model) refreshCatalogSuggestions(query string) {
 		m.closeCatalogPicker()
 		return
 	}
-	models := catalog.SearchModels(key, query)
+	models := catalog.ChatCompletionsModels(catalog.SearchModels(key, query))
 	ids, labels := buildCatalogSuggestions(models)
 	m.addModelCatalogActive = true
 	m.addModelCatalogIDs = ids
@@ -87,6 +87,9 @@ func buildCatalogSuggestions(models []catalog.Model) (ids, labels []string) {
 		label := cm.ID
 		if cm.Name != "" && !strings.EqualFold(cm.Name, cm.ID) {
 			label += " · " + cm.Name
+		}
+		if cm.ContextWindow == 0 && cm.MaxOutput == 0 {
+			label += " · no published limits"
 		}
 		if len(cm.ThinkingLevels) > 0 {
 			label += " · think " + strings.Join(cm.ThinkingLevels, "/")

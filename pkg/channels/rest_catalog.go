@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -89,16 +90,21 @@ func (n *NativeChannel) handleCatalogModels(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	models := catalog.SearchModels(provider, q)
-	if models == nil {
-		models = []catalog.Model{}
-	}
+	models := catalog.ChatCompletionsModels(catalog.SearchModels(provider, q))
 
 	writeJSON(w, http.StatusOK, CatalogModelsResponse{
 		Provider: provider,
 		Query:    q,
 		Models:   models,
 	})
+}
+
+// pickerCatalogModels returns the catalog models a picker may offer for the
+// first key that resolves. Ids served over another wire protocol are dropped:
+// lele's provider transports only speak chat/completions, so offering them hands
+// the user an id that fails on the first message (issue #405).
+func pickerCatalogModels(keys ...string) []catalog.Model {
+	return catalog.ChatCompletionsModels(lookupCatalogModels(keys))
 }
 
 func (n *NativeChannel) handleCatalogPrefetch(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +162,42 @@ func providerModelFromCatalog(c catalog.Model) ProviderModelInfo {
 		ThinkingLevels: c.ThinkingLevels,
 		Reasoning:      c.Reasoning,
 		ToolCall:       c.ToolCall,
+		Protocol:       c.Protocol,
 	}
+}
+
+// liveProviderModels parses an OpenAI-compatible /models payload and keeps the
+// ids lele's chat/completions transport can drive. The catalog is the only
+// source of the transport marker, so ids it does not know pass through: they are
+// what the endpoint actually serves.
+func liveProviderModels(body []byte, catalogKeys ...string) ([]ProviderModelInfo, error) {
+	var payload struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Created int64  `json:"created"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+
+	models := make([]ProviderModelInfo, 0, len(payload.Data))
+	for _, m := range payload.Data {
+		info := ProviderModelInfo{
+			ID:      m.ID,
+			Object:  m.Object,
+			Created: m.Created,
+			OwnedBy: m.OwnedBy,
+		}
+		enrichProviderModelInfo(&info, catalogKeys...)
+		if !catalog.SupportsChatCompletionsProtocol(info.Protocol) {
+			continue
+		}
+		models = append(models, info)
+	}
+	return models, nil
 }
 
 func catalogModelsToInfos(models []catalog.Model) []ProviderModelInfo {
@@ -199,6 +240,9 @@ func enrichProviderModelInfo(info *ProviderModelInfo, catalogKeys ...string) {
 		}
 		if !info.ToolCall {
 			info.ToolCall = c.ToolCall
+		}
+		if info.Protocol == "" {
+			info.Protocol = c.Protocol
 		}
 		return
 	}
