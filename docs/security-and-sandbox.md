@@ -81,6 +81,55 @@ Lele stores logs locally and the editable config API marks secret fields with me
 
 Even so, avoid placing secrets in prompts, memory files, or user-facing session content.
 
+## Exec Secrets
+
+The `exec` tool resolves `{{SECRET:name}}` placeholders against the agent-scoped keyring at run time.
+Resolution is environment-based, never argv-based:
+
+- every distinct secret referenced by a command is exported to the child process environment as
+  `LELE_SECRET_0`, `LELE_SECRET_1`, … in first-appearance order (one variable per secret name, so the
+  mapping is deterministic and cannot collide between secrets)
+- the executed command carries only the reference — `${LELE_SECRET_0}` for POSIX shells,
+  `${env:LELE_SECRET_0}` for PowerShell. The braces are part of the emitted form: an unbraced `$NAME`
+  would absorb a following word character (`{{SECRET:key}}suffix` must not read the variable
+  `LELE_SECRET_0suffix`)
+- inherited `LELE_SECRET_*` variables are dropped from the child environment, so a command cannot read a
+  value the agent process happens to carry under the same name
+- the raw value therefore never lands in `/proc/<pid>/cmdline` (world-readable on most Linux setups); the
+  stored and displayed command keeps the `{{SECRET:name}}` placeholder form
+
+Quoting: the placeholder must sit where the shell still expands variables.
+
+| context | example | behavior |
+|---|---|---|
+| unquoted | `curl -H X-Api-Key:{{SECRET:key}} https://…` | expands; the value is subject to word splitting **and** pathname (glob) expansion |
+| double quotes | `curl -H "X-Api-Key: {{SECRET:key}}" https://…` | expands; recommended form |
+| single quotes | `echo '{{SECRET:key}}'` | rejected with an actionable error — single quotes disable expansion |
+| unquoted heredoc delimiter | `cat <<EOF > f` | expands; the placeholder is replaced by the reference inside the body |
+| quoted or escaped heredoc delimiter | `cat <<'EOF'`, `cat <<"EOF"`, `cat <<\EOF` | rejected with an actionable error — a quoted heredoc delimiter disables expansion in the body |
+| backslash-escaped (POSIX only) | `echo \{{SECRET:key}}` | left untouched, the literal `{{SECRET:key}}` reaches the command. PowerShell has no backslash escape, so the placeholder still expands there |
+
+Secret values containing shell metacharacters (`` ` ``, `$`, `;`, `|`, `&`, `<`, `>`, quotes, backslashes,
+newlines) are rejected outright: store values without shell syntax. Wrap the reference in double quotes so
+values containing whitespace survive as a single argument.
+
+Limits worth knowing:
+
+- environment injection removes the **argv** exposure, not the **environment** exposure. The value is
+  inherited by the whole child process tree, and `/proc/<pid>/environ` is readable by the process owner
+  (mode `0400`): the same user — and root — can still read it, unlike `/proc/<pid>/cmdline`, which is
+  world-readable (`0444`).
+- any command that prints its environment (`env`, `printenv`, `set -x`, a failing child's diagnostic) writes
+  the value into that command's output, and therefore into the tool result and the session. Do not dump the
+  environment in a command that references a secret. The log/keyring redactor masks known secret values in
+  the copy that reaches the model, but it is a mitigation, not a guarantee: treat such a command as a leak.
+- harness template `!shell` commands do **not** resolve `{{SECRET:name}}` placeholders — template expansion
+  has no keyring access, so placeholders stay literal there.
+- the guard that re-checks the command still runs, and it runs against the value-inlined form of the
+  command, exactly as before env injection existed; values are also screened for shell metacharacters. The
+  only relaxation is the emitted reference itself: `${LELE_SECRET_<digits>}` is exempt from the generic
+  `${…}` deny pattern. Every other `${…}` form stays denied.
+
 ## Recommendations
 
 - keep `restrict_to_workspace` enabled unless you have a specific reason not to

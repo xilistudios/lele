@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,9 +46,342 @@ func NormalizeWhitelistKey(command string) string {
 	return strings.ToLower(strings.Join(strings.Fields(command), " "))
 }
 
+const (
+	secretPlaceholderPrefix = "{{SECRET:"
+	secretEnvPrefix         = "LELE_SECRET_"
+)
+
 var secretPlaceholderInlineRegex = regexp.MustCompile(`\{\{SECRET:([^}]+)\}\}`)
 
 var secretValueShellMeta = regexp.MustCompile("[`;$|&<>\n\r\\\\\"']")
+
+var secretEnvReferenceGuardRegex = regexp.MustCompile(`(?i)\$\{(?:env:)?` + secretEnvPrefix + `[0-9]+\}`)
+
+var execBaseEnv = []string{
+	"GIT_TERMINAL_PROMPT=0",
+	"GIT_PAGER=cat",
+	"PAGER=cat",
+	"DEBIAN_FRONTEND=noninteractive",
+}
+
+type shellQuoteState int
+
+const (
+	shellUnquoted shellQuoteState = iota
+	shellSingleQuoted
+	shellDoubleQuoted
+)
+
+type heredocSpec struct {
+	delimiter string
+	quoted    bool
+	stripTabs bool
+}
+
+type injectedSecretCommand struct {
+	script   string
+	expanded string
+	env      []string
+}
+
+type secretExpander struct {
+	powershell  bool
+	resolve     func(name string) (string, error)
+	script      strings.Builder
+	expanded    strings.Builder
+	env         []string
+	values      []string
+	indexByName map[string]int
+}
+
+func secretEnvVariable(index int) string {
+	return secretEnvPrefix + strconv.Itoa(index)
+}
+
+func secretEnvReference(index int, powershell bool) string {
+	if powershell {
+		return "${env:" + secretEnvVariable(index) + "}"
+	}
+	return "${" + secretEnvVariable(index) + "}"
+}
+
+func maskSecretEnvReferences(command string) string {
+	return secretEnvReferenceGuardRegex.ReplaceAllString(command, "LELE_SECRET_REFERENCE")
+}
+
+func buildExecEnv(secretEnv []string) []string {
+	base := os.Environ()
+	env := make([]string, 0, len(base)+len(execBaseEnv)+len(secretEnv))
+	for _, entry := range base {
+		if name, _, ok := strings.Cut(entry, "="); ok {
+			if strings.HasPrefix(strings.ToUpper(name), secretEnvPrefix) {
+				continue
+			}
+		}
+		env = append(env, entry)
+	}
+	env = append(env, execBaseEnv...)
+	return append(env, secretEnv...)
+}
+
+func nextQuoteState(state shellQuoteState, c byte) shellQuoteState {
+	switch {
+	case c == '\'' && state == shellUnquoted:
+		return shellSingleQuoted
+	case c == '\'' && state == shellSingleQuoted:
+		return shellUnquoted
+	case c == '"' && state == shellUnquoted:
+		return shellDoubleQuoted
+	case c == '"' && state == shellDoubleQuoted:
+		return shellUnquoted
+	}
+	return state
+}
+
+func (e *secretExpander) writeLiteral(text string) {
+	e.script.WriteString(text)
+	e.expanded.WriteString(text)
+}
+
+func (e *secretExpander) indexFor(name string) (int, error) {
+	index, seen := e.indexByName[name]
+	if seen {
+		return index, nil
+	}
+	value, err := e.resolve(name)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve secret %q: %w", name, err)
+	}
+	if secretValueShellMeta.MatchString(value) {
+		return 0, fmt.Errorf("secret %q contains shell metacharacters/substitution syntax and cannot be passed to a command environment; store the value without shell syntax", name)
+	}
+	index = len(e.env)
+	e.indexByName[name] = index
+	e.values = append(e.values, value)
+	e.env = append(e.env, secretEnvVariable(index)+"="+value)
+	return index, nil
+}
+
+func (e *secretExpander) writePlaceholder(name string) error {
+	index, err := e.indexFor(name)
+	if err != nil {
+		return err
+	}
+	e.script.WriteString(secretEnvReference(index, e.powershell))
+	e.expanded.WriteString(e.values[index])
+	return nil
+}
+
+func (e *secretExpander) result() injectedSecretCommand {
+	return injectedSecretCommand{
+		script:   e.script.String(),
+		expanded: e.expanded.String(),
+		env:      e.env,
+	}
+}
+
+func placeholderAt(text string, i int) (string, string, int) {
+	if !strings.HasPrefix(text[i:], secretPlaceholderPrefix) {
+		return "", "", i
+	}
+	loc := secretPlaceholderInlineRegex.FindStringIndex(text[i:])
+	if loc == nil || loc[0] != 0 {
+		return "", "", i
+	}
+	placeholder := text[i : i+loc[1]]
+	name := strings.TrimSpace(secretPlaceholderInlineRegex.FindStringSubmatch(placeholder)[1])
+	return placeholder, name, i + loc[1]
+}
+
+func isShellWordBreak(c byte) bool {
+	switch c {
+	case ' ', '\t', '\n', '\r', ';', '|', '&', '(', ')', '<', '>':
+		return true
+	}
+	return false
+}
+
+func startsShellComment(line string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	return isShellWordBreak(line[i-1])
+}
+
+func parseHeredocOperator(line string, start int) (*heredocSpec, int) {
+	j := start + 2
+	spec := &heredocSpec{}
+	if j < len(line) && line[j] == '-' {
+		spec.stripTabs = true
+		j++
+	}
+	for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
+		j++
+	}
+
+	var delimiter strings.Builder
+	quoted := false
+	for j < len(line) && !isShellWordBreak(line[j]) {
+		c := line[j]
+		if c == '\\' {
+			quoted = true
+			if j+1 < len(line) {
+				delimiter.WriteByte(line[j+1])
+			}
+			j += 2
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quoted = true
+			j++
+			for j < len(line) && line[j] != c {
+				delimiter.WriteByte(line[j])
+				j++
+			}
+			if j < len(line) {
+				j++
+			}
+			continue
+		}
+		delimiter.WriteByte(c)
+		j++
+	}
+	if delimiter.Len() == 0 {
+		return nil, start
+	}
+	spec.delimiter = delimiter.String()
+	spec.quoted = quoted
+	if j > len(line) {
+		j = len(line)
+	}
+	return spec, j
+}
+
+func isHeredocTerminator(line string, spec heredocSpec) bool {
+	if spec.stripTabs {
+		line = strings.TrimLeft(line, "\t")
+	}
+	return line == spec.delimiter
+}
+
+func quotedHeredocError(placeholder string, spec heredocSpec) error {
+	return fmt.Errorf("secret %s is inside a heredoc whose delimiter is quoted (%q), where shells do not expand variables, so it cannot be injected via the environment; use an unquoted delimiter or move the placeholder outside the heredoc", placeholder, spec.delimiter)
+}
+
+func scanShellLine(line string, state *shellQuoteState, specs *[]heredocSpec, powershell bool, exp *secretExpander) error {
+	inComment := false
+	for i := 0; i < len(line); {
+		c := line[i]
+
+		if !inComment {
+			if c == '\\' && !powershell && *state != shellSingleQuoted {
+				end := min(i+2, len(line))
+				exp.writeLiteral(line[i:end])
+				i = end
+				continue
+			}
+
+			if c == '#' && *state == shellUnquoted && startsShellComment(line, i) {
+				inComment = true
+				exp.writeLiteral(line[i : i+1])
+				i++
+				continue
+			}
+
+			if c == '\'' || c == '"' {
+				*state = nextQuoteState(*state, c)
+				exp.writeLiteral(line[i : i+1])
+				i++
+				continue
+			}
+
+			if c == '<' && *state == shellUnquoted && i+1 < len(line) && line[i+1] == '<' && (i+2 >= len(line) || line[i+2] != '<') {
+				if spec, end := parseHeredocOperator(line, i); spec != nil {
+					*specs = append(*specs, *spec)
+					exp.writeLiteral(line[i:end])
+					i = end
+					continue
+				}
+			}
+		}
+
+		placeholder, name, next := placeholderAt(line, i)
+		if placeholder == "" {
+			exp.writeLiteral(line[i : i+1])
+			i++
+			continue
+		}
+		if *state == shellSingleQuoted {
+			return fmt.Errorf("secret %s is inside single quotes, where shells do not expand variables, so it cannot be injected via the environment; move the placeholder outside single quotes or wrap it in double quotes", placeholder)
+		}
+		if err := exp.writePlaceholder(name); err != nil {
+			return err
+		}
+		i = next
+	}
+	return nil
+}
+
+func expandHeredocBodyLine(line string, spec heredocSpec, exp *secretExpander) error {
+	for i := 0; i < len(line); {
+		placeholder, name, next := placeholderAt(line, i)
+		if placeholder == "" {
+			exp.writeLiteral(line[i : i+1])
+			i++
+			continue
+		}
+		if spec.quoted {
+			return quotedHeredocError(placeholder, spec)
+		}
+		if err := exp.writePlaceholder(name); err != nil {
+			return err
+		}
+		i = next
+	}
+	return nil
+}
+
+func scanAndExpand(command string, powershell bool, exp *secretExpander) error {
+	state := shellUnquoted
+	var bodies []heredocSpec
+	for i := 0; i < len(command); {
+		end := strings.IndexByte(command[i:], '\n')
+		hasNewline := end >= 0
+		if hasNewline {
+			end += i
+		} else {
+			end = len(command)
+		}
+		line := command[i:end]
+
+		switch {
+		case len(bodies) == 0:
+			var specs []heredocSpec
+			if err := scanShellLine(line, &state, &specs, powershell, exp); err != nil {
+				return err
+			}
+			bodies = specs
+		case isHeredocTerminator(line, bodies[0]):
+			exp.writeLiteral(line)
+			bodies = bodies[1:]
+			if len(bodies) == 0 {
+				state = shellUnquoted
+			}
+		default:
+			if err := expandHeredocBodyLine(line, bodies[0], exp); err != nil {
+				return err
+			}
+		}
+
+		if hasNewline {
+			exp.writeLiteral("\n")
+			i = end + 1
+		} else {
+			i = end
+		}
+	}
+	return nil
+}
 
 func (t *ExecTool) SetContext(channel, chatID string) {
 	t.channel = channel
@@ -205,7 +539,7 @@ func (t *ExecTool) Name() string {
 }
 
 func (t *ExecTool) Description() string {
-	return "Execute a shell command and return its output. Use with caution. Supports {{SECRET:name}} placeholders that are substituted with the named keyring secret at run time (the raw value never appears in logs or session history)."
+	return "Execute a shell command and return its output. Use with caution. Supports {{SECRET:name}} placeholders that are resolved at run time: the value is passed to the child process through its environment (LELE_SECRET_0, LELE_SECRET_1, ...) and the command only carries a ${LELE_SECRET_<n>} reference (${env:LELE_SECRET_<n>} on PowerShell), so the raw value does not appear in process argv. The value is inherited by the whole child process tree, and any command that prints its environment (env, printenv, set -x) writes it into the tool output and therefore into the session: do not dump the environment in a command that references a secret. Placeholders inside single quotes or inside a heredoc with a quoted delimiter are rejected because neither expands variables: use double quotes (recommended, it also preserves values containing whitespace), no quotes, or an unquoted heredoc delimiter. Secret values containing shell metacharacters are rejected."
 }
 
 func (t *ExecTool) Parameters() map[string]interface{} {
@@ -307,38 +641,32 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	}
 	defer cancel()
 
-	resolvedCommand, err := t.substituteSecrets(ctx, command)
+	resolved, err := t.substituteSecrets(ctx, command)
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
 
-	if resolvedCommand != command {
+	if resolved.script != command {
 		if origMsg, _ := t.guardCommandWithStatus(command, cwd); origMsg == "" {
-			if guardMsg, _ := t.guardCommandWithStatus(resolvedCommand, cwd); guardMsg != "" {
+			if guardMsg, _ := t.guardCommandWithStatus(resolved.expanded, cwd); guardMsg != "" {
 				return ErrorResult("post-substitution safety guard: " + guardMsg)
 			}
 		}
 	}
-	execCommand := resolvedCommand
 
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", execCommand)
+		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", resolved.script)
 	} else {
-		cmd = exec.CommandContext(bgCtx, "sh", "-c", execCommand)
+		cmd = exec.CommandContext(bgCtx, "sh", "-c", resolved.script)
 	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
 
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_PAGER=cat",
-		"PAGER=cat",
-		"DEBIAN_FRONTEND=noninteractive",
-	)
+	cmd.Env = buildExecEnv(resolved.env)
 
 	cmd.Stdin = nil
 
@@ -505,7 +833,7 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 
 func (t *ExecTool) guardCommandWithStatus(command, cwd string) (string, bool) {
 	cmd := strings.TrimSpace(command)
-	lower := strings.ToLower(cmd)
+	lower := maskSecretEnvReferences(strings.ToLower(cmd))
 
 	if t.Whitelisted(cmd) {
 		return "", false
@@ -575,12 +903,14 @@ func (t *ExecTool) SetSecretSubstitution(enabled bool) {
 	t.secretSubstitution = enabled
 }
 
-func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (string, error) {
-	if !t.secretSubstitution || t.keyringSvc == nil {
-		return command, nil
-	}
-	if !secretPlaceholderInlineRegex.MatchString(command) {
-		return command, nil
+func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (injectedSecretCommand, error) {
+	return t.substituteSecretsForShell(ctx, command, runtime.GOOS == "windows")
+}
+
+func (t *ExecTool) substituteSecretsForShell(ctx context.Context, command string, powershell bool) (injectedSecretCommand, error) {
+	unchanged := injectedSecretCommand{script: command, expanded: command}
+	if !t.secretSubstitution || t.keyringSvc == nil || !strings.Contains(command, secretPlaceholderPrefix) {
+		return unchanged, nil
 	}
 
 	agentID, sessionKey := AgentToolContextFromCtx(ctx)
@@ -588,28 +918,21 @@ func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (strin
 		agentID = "unknown"
 	}
 
-	var subErr error
-	resolved := secretPlaceholderInlineRegex.ReplaceAllStringFunc(command, func(match string) string {
-		if subErr != nil {
-			return match
-		}
-		name := secretPlaceholderInlineRegex.FindStringSubmatch(match)[1]
-		name = strings.TrimSpace(name)
-		value, err := t.keyringSvc.GetForAgent(name, agentID, sessionKey)
-		if err != nil {
-			subErr = fmt.Errorf("failed to resolve secret %q: %w", name, err)
-			return match
-		}
-		if secretValueShellMeta.MatchString(value) {
-			subErr = fmt.Errorf("secret %q contains shell metacharacters/substitution syntax and cannot be inlined into a command; store the value without shell syntax or pass it via env", name)
-			return match
-		}
-		return value
-	})
-	if subErr != nil {
-		return "", subErr
+	svc := t.keyringSvc
+	exp := &secretExpander{
+		powershell:  powershell,
+		indexByName: make(map[string]int),
+		resolve: func(name string) (string, error) {
+			return svc.GetForAgent(name, agentID, sessionKey)
+		},
 	}
-	return resolved, nil
+	exp.script.Grow(len(command))
+	exp.expanded.Grow(len(command))
+
+	if err := scanAndExpand(command, powershell, exp); err != nil {
+		return unchanged, err
+	}
+	return exp.result(), nil
 }
 
 func (t *ExecTool) SetRestrictToWorkspace(restrict bool) {
