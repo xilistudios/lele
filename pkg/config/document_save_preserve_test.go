@@ -80,7 +80,7 @@ func TestSaveEditableDocumentPreservesUnmodeledTopLevel(t *testing.T) {
 	}
 }
 
-func TestSaveEditableDocumentResetToDefaultRemovesKey(t *testing.T) {
+func TestSaveEditableDocumentResetToDefaultDropsPortKeepsNamedHost(t *testing.T) {
 	path := writeSaveFixture(t, `{"gateway":{"host":"127.0.0.1","port":9999}}`)
 
 	doc, _, err := LoadEditableDocument(path)
@@ -94,16 +94,12 @@ func TestSaveEditableDocumentResetToDefaultRemovesKey(t *testing.T) {
 		t.Fatalf("SaveEditableDocument: %v", err)
 	}
 
-	parsed := readSavedJSON(t, path)
-	if gateway, ok := parsed["gateway"]; ok {
-		if block, isMap := gateway.(map[string]interface{}); isMap {
-			if _, hasPort := block["port"]; hasPort {
-				t.Errorf("gateway.port survived a reset to default: %v", block)
-			}
-			if _, hasHost := block["host"]; hasHost {
-				t.Errorf("gateway.host survived a reset to default: %v", block)
-			}
-		}
+	block := savedSection(t, readSavedJSON(t, path), "gateway")
+	if _, hasPort := block["port"]; hasPort {
+		t.Errorf("gateway.port survived a reset to default: %v", block)
+	}
+	if host, hasHost := block["host"]; !hasHost || host != def.Gateway.Host {
+		t.Errorf("gateway.host = %v (present %v), want the explicitly named %q kept even at the default", host, hasHost, def.Gateway.Host)
 	}
 
 	reloaded, err := LoadConfig(path)
@@ -112,6 +108,9 @@ func TestSaveEditableDocumentResetToDefaultRemovesKey(t *testing.T) {
 	}
 	if reloaded.Gateway.Port != def.Gateway.Port || reloaded.Gateway.Host != def.Gateway.Host {
 		t.Errorf("gateway = %+v, want the defaults after reset", reloaded.Gateway)
+	}
+	if !reloaded.HostExplicitlyConfigured() {
+		t.Error("HostExplicitlyConfigured() = false, want true: the file still names the host")
 	}
 }
 

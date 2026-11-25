@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -121,4 +122,65 @@ func mergeNamedProvider(base, overlay EditableNamedProviderConfig) EditableNamed
 		base.APIKey = overlay.APIKey
 	}
 	return base
+}
+
+var namedHostPaths = [][]string{
+	{"gateway", "host"},
+	{"channels", "native", "host"},
+}
+
+func treeValueAt(tree map[string]interface{}, path ...string) (interface{}, bool) {
+	var current interface{} = tree
+	for _, key := range path {
+		object, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func setTreeValueAt(tree map[string]interface{}, value interface{}, path ...string) {
+	key := path[0]
+	if len(path) == 1 {
+		tree[key] = value
+		return
+	}
+	child, ok := tree[key].(map[string]interface{})
+	if !ok {
+		child = map[string]interface{}{}
+		tree[key] = child
+	}
+	setTreeValueAt(child, value, path[1:]...)
+}
+
+// keepNamedHosts restores the bind-host keys a file already names when the
+// editable document drops them for equalling the default, so the WebUI writer
+// never turns an explicit gateway.host / channels.native.host into an unset
+// one. The restored value is the default itself, because that is exactly when
+// the document omits the key. server.host needs no such help: the document does
+// not model the server section, so the delta merge preserves it as written.
+func keepNamedHosts(next map[string]interface{}, raw map[string]json.RawMessage) error {
+	defaults, err := jsonTreeOf(DefaultConfig())
+	if err != nil {
+		return err
+	}
+	for _, path := range namedHostPaths {
+		if !rawPathSet(raw, path...) {
+			continue
+		}
+		if _, present := treeValueAt(next, path...); present {
+			continue
+		}
+		defValue, ok := treeValueAt(defaults, path...)
+		if !ok {
+			continue
+		}
+		setTreeValueAt(next, defValue, path...)
+	}
+	return nil
 }
