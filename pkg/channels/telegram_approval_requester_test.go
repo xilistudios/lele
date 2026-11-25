@@ -109,7 +109,7 @@ func TestTelegramApproval_OtherUserCannotApprove(t *testing.T) {
 	}
 }
 
-func TestTelegramApproval_DenyByOtherUserAnswersQuery(t *testing.T) {
+func TestTelegramCallback_DenyAnswersQuery(t *testing.T) {
 	am := NewApprovalManager()
 	approval := am.CreateApproval("telegram:555", "rm -rf /tmp/x", "dangerous command", 555, "111|alice")
 
