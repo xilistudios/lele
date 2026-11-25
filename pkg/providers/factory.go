@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
 	"github.com/xilistudios/lele/pkg/providers/openai_compat"
 )
@@ -50,13 +52,43 @@ func defaultAPIBaseByType(providerType string) string {
 		return "localhost:4321"
 	case "alibaba":
 		return "https://coding-intl.dashscope.aliyuncs.com/v1"
-	case "zai_coding_plan", "zai":
-		return "https://api.z.ai/api/paas/v4"
+	case "zai":
+		return catalog.ZAIAPIBase
 	}
 	if base := catalog.DefaultAPIBaseByType(providerType); base != "" {
 		return base
 	}
 	return ""
+}
+
+var (
+	zaiCodingPlanLegacyBaseWarned atomic.Bool
+	providerBaseWarn              = logger.WarnCF
+)
+
+func zaiCodingPlanUsesLegacyNonCodingBase(providerName, apiBase string) bool {
+	switch NormalizeProvider(strings.TrimSpace(providerName)) {
+	case "zai", "zai_coding_plan":
+	default:
+		return false
+	}
+	return strings.TrimSuffix(strings.TrimSpace(apiBase), "/") == catalog.ZAIAPIBase
+}
+
+func warnOnLegacyZAICodingPlanBase(cfg *config.Config, providerName string) {
+	if cfg == nil || cfg.Providers == nil {
+		return
+	}
+	if !zaiCodingPlanUsesLegacyNonCodingBase(providerName, cfg.Providers.ZAICodingPlan.APIBase) {
+		return
+	}
+	if !zaiCodingPlanLegacyBaseWarned.CompareAndSwap(false, true) {
+		return
+	}
+	providerBaseWarn("providers", "zai_coding_plan api_base uses the non-coding z.ai endpoint; set it to "+catalog.ZAICodingPlanAPIBase, map[string]interface{}{
+		"configured_api_base": catalog.ZAIAPIBase,
+		"suggested_api_base":  catalog.ZAICodingPlanAPIBase,
+	})
 }
 
 const openCodeGoSessionHeaderName = "x-opencode-session"
@@ -280,6 +312,7 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 	if cfg.Providers == nil {
 		cfg.Providers = &config.ProvidersConfig{}
 	}
+	warnOnLegacyZAICodingPlanBase(cfg, providerName)
 
 	lowerModel := strings.ToLower(model)
 
@@ -472,7 +505,7 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				sel.apiBase = cfg.Providers.ZAICodingPlan.APIBase
 				sel.proxy = cfg.Providers.ZAICodingPlan.Proxy
 				if sel.apiBase == "" {
-					sel.apiBase = "https://api.z.ai/api/paas/v4"
+					sel.apiBase = defaultAPIBaseByType("zai_coding_plan")
 				}
 			}
 		case "modelark_coding_plan", "modelark":
