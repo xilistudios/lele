@@ -7,6 +7,12 @@ lightweight catalog/index.json used by lele clients for disk-cache downloads.
 Usage:
   python3 scripts/update_model_catalog.py
   python3 scripts/update_model_catalog.py --source /path/to/models.dev.json
+  python3 scripts/update_model_catalog.py --providers opencode opencode_go
+  python3 scripts/update_model_catalog.py --source snapshot.json --output-dir /tmp/catalog
+
+Without --source the current models.dev/api.json is downloaded, so an offline run
+needs a previously saved snapshot (see --source). The index `updated_at` only
+moves when the generated content changes, which keeps reruns byte-identical.
 """
 
 from __future__ import annotations
@@ -64,6 +70,68 @@ MDEV_TO_LELE: dict[str, str] = {
     "perplexity": "perplexity-agent",
     "azure_foundry": "azure",
     "bedrock": "amazon-bedrock",
+}
+
+# Issue #405: a live probe of POST https://opencode.ai/zen/go/v1/chat/completions
+# (2026-10-22, every lele header, streaming and non-streaming) recorded which ids
+# the gateway refuses over chat/completions. models.dev has no transport field, so
+# this curated map is the source of truth for the protocol marker. Values name the
+# wire protocol the id is served over; "" (absent) means chat/completions.
+#   gpt-5.6-luna, grok-4.7  -> 400 ModelProtocolUnsupported (issue #405 report)
+#   the remaining ids       -> the same 400, measured by the #403 coverage sweep
+# models.dev's per-model `provider.npm` agrees on the family for several of them,
+# but it also tags chat/completions-capable ids (hy4, kimi-k2.7-code) the same
+# way, so it cannot replace this map.
+PROTOCOL_MARKERS: dict[str, dict[str, str]] = {
+    "opencode_go": {
+        "gpt-5.6-luna": "responses",
+        "gpt-6-luna": "responses",
+        "grok-4.6": "responses",
+        "grok-4.7": "responses",
+        "muse-spark-1.2-contributor": "responses",
+        "muse-spark-1.3-contributor": "responses",
+        "claude-haiku-5-5": "anthropic_messages",
+        "minimax-m2.7": "anthropic_messages",
+        "gemini-4-argon-contributor": "gemini",
+    },
+}
+
+# Id suffixes the gateway answers with 400 ModelDeprecated or 402 "Endpoint is
+# unavailable" (issue #405). A free-tier id mirrors a paid one, so the paid entry
+# stays and only the dead variant leaves the catalog.
+EXCLUDED_ID_SUFFIXES: dict[str, list[str]] = {
+    "opencode_go": ["-free"],
+}
+
+# Ids measured live on the gateway that models.dev's mirror does not list yet
+# (issue #405, 2026-10-22). They lead the model list so the picker's default entry
+# is a verified id, and they bypass the deprecation and limit filters: the gateway
+# is authoritative for what it serves.
+PINNED_MODEL_IDS: dict[str, list[str]] = {
+    "opencode_go": [
+        "glm-5.1",
+        "grok-4.6",
+        "kimi-k2.6",
+        "minimax-m2.5",
+        "minimax-m2.7",
+        "minimax-m3.1-flash",
+        "omen-alpha",
+        "qwen3.6-plus",
+        "qwen3.7-max",
+    ],
+}
+
+# Providers that mirror the same models under the same ids; used to resolve
+# metadata for a pinned id the destination provider does not list.
+MODEL_METADATA_SIBLINGS: dict[str, list[str]] = {
+    "opencode_go": ["opencode"],
+}
+
+# Pinned ids absent from models.dev entirely, recorded from the gateway listing.
+CURATED_MODEL_RECORDS: dict[str, list[dict]] = {
+    "opencode_go": [
+        {"id": "omen-alpha", "name": "Omen Alpha"},
+    ]
 }
 
 # Optional per-provider API base overrides (lele defaults win over models.dev).
@@ -290,93 +358,203 @@ def load_models_dev(source: str | None) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def select_models(mdev_id: str, src: dict, limit: int | None) -> list[dict]:
-    p = src.get(mdev_id) or {}
-    models = p.get("models") or {}
-    items = list(models.values()) if isinstance(models, dict) else list(models)
-    scored = []
-    for m in items:
-        if not m.get("id") or m.get("status") == "deprecated":
+def mdev_models(src: dict, mdev_id: str) -> dict[str, dict]:
+    raw = (src.get(mdev_id) or {}).get("models") or {}
+    items = list(raw.values()) if isinstance(raw, dict) else list(raw)
+    return {(m.get("id") or ""): m for m in items}
+
+
+def resolve_pinned_record(src: dict, provider_id: str, model_id: str) -> dict | None:
+    own_and_siblings = [provider_id, *MODEL_METADATA_SIBLINGS.get(provider_id, [])]
+    for lele_id in own_and_siblings:
+        mdev_id = MDEV_TO_LELE.get(lele_id)
+        if not mdev_id:
             continue
-        scored.append((score_model(m), m.get("id") or "", convert_model(m)))
-    scored.sort(key=lambda t: (-t[0], t[1]))
-    out = [c for _, _, c in scored]
-    if limit and len(out) > limit:
-        out = out[:limit]
+        record = mdev_models(src, mdev_id).get(model_id)
+        if record:
+            return record
+    for mdev_id in sorted(src):
+        record = mdev_models(src, mdev_id).get(model_id)
+        if record:
+            return record
+    for record in CURATED_MODEL_RECORDS.get(provider_id) or []:
+        if (record.get("id") or "") == model_id:
+            return record
+    return None
+
+
+def is_excluded(provider_id: str, model_id: str) -> bool:
+    lowered = model_id.lower()
+    return any(lowered.endswith(s) for s in EXCLUDED_ID_SUFFIXES.get(provider_id) or [])
+
+
+def mark_protocol(model: dict, provider_id: str) -> dict:
+    protocol = (PROTOCOL_MARKERS.get(provider_id) or {}).get(model.get("id") or "")
+    if not protocol:
+        return model
+    marked = {"id": model.get("id") or "", "protocol": protocol}
+    marked.update({k: v for k, v in model.items() if k != "id"})
+    return marked
+
+
+def pinned_models(provider_id: str, src: dict) -> list[dict]:
+    out: list[dict] = []
+    for model_id in PINNED_MODEL_IDS.get(provider_id) or []:
+        record = resolve_pinned_record(src, provider_id, model_id)
+        if record is None:
+            print(
+                f"warning: pinned id {model_id!r} for provider {provider_id!r} is missing from the source",
+                file=sys.stderr,
+            )
+            continue
+        out.append(convert_model(record))
     return out
 
 
-def build_catalog(src: dict) -> dict:
-    providers_dir = CATALOG_DIR / "providers"
-    providers_dir.mkdir(parents=True, exist_ok=True)
+def select_models(provider_id: str, mdev_id: str, src: dict, limit: int | None) -> list[dict]:
+    pinned = pinned_models(provider_id, src)
+    pinned_ids = {m["id"] for m in pinned}
+    items = mdev_models(src, mdev_id).values()
+    scored = []
+    for m in items:
+        model_id = m.get("id") or ""
+        if not model_id or model_id in pinned_ids:
+            continue
+        if m.get("status") == "deprecated" or is_excluded(provider_id, model_id):
+            continue
+        scored.append((score_model(m), model_id, convert_model(m)))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    out = pinned + [converted for _, _, converted in scored]
+    if limit and len(out) > limit:
+        out = out[:limit]
+    return [mark_protocol(m, provider_id) for m in out]
 
-    # Remove stale provider files so deleted providers disappear from the PR.
-    for old in providers_dir.glob("*.json"):
-        old.unlink()
 
-    index = {
-        "version": 1,
-        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": "models.dev",
-        "providers": {},
+def build_provider_payload(provider_id: str, src: dict) -> dict:
+    if provider_id in STATIC_PROVIDERS:
+        static = STATIC_PROVIDERS[provider_id]
+        return {
+            "id": provider_id,
+            "name": static["name"],
+            "type": static.get("type") or "openai",
+            "api_base": static.get("api_base") or API_BASE_OVERRIDES.get(provider_id, ""),
+            "models": [mark_protocol(m, provider_id) for m in static.get("models") or []],
+        }
+    mdev_id = MDEV_TO_LELE[provider_id]
+    mdev = src.get(mdev_id) or {}
+    return {
+        "id": provider_id,
+        "name": mdev.get("name") or provider_id,
+        "type": "anthropic" if provider_id in ("minimax", "minimax_cn", "anthropic") else "openai",
+        "api_base": API_BASE_OVERRIDES.get(provider_id) or mdev.get("api") or "",
+        "models": select_models(provider_id, mdev_id, src, MODEL_LIMITS.get(provider_id)),
     }
 
-    all_ids = set(MDEV_TO_LELE) | set(STATIC_PROVIDERS)
-    for pid in sorted(all_ids):
-        if pid in STATIC_PROVIDERS:
-            static = STATIC_PROVIDERS[pid]
-            payload = {
-                "id": pid,
-                "name": static["name"],
-                "type": static.get("type") or "openai",
-                "api_base": static.get("api_base") or API_BASE_OVERRIDES.get(pid, ""),
-                "models": static.get("models") or [],
-            }
-        else:
-            mdev_id = MDEV_TO_LELE[pid]
-            mdev = src.get(mdev_id) or {}
-            models = select_models(mdev_id, src, MODEL_LIMITS.get(pid))
-            payload = {
-                "id": pid,
-                "name": mdev.get("name") or pid,
-                "type": "anthropic" if pid in ("minimax", "minimax_cn", "anthropic") else "openai",
-                "api_base": API_BASE_OVERRIDES.get(pid) or mdev.get("api") or "",
-                "models": models,
-            }
 
-        fname = f"{pid}.json"
-        (providers_dir / fname).write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        index["providers"][pid] = {
-            "id": pid,
-            "name": payload["name"],
-            "type": payload["type"],
-            "api_base": payload["api_base"],
-            "file": f"providers/{fname}",
-            "model_count": len(payload["models"]),
-        }
+def index_entry(provider_id: str, payload: dict) -> dict:
+    return {
+        "id": provider_id,
+        "name": payload["name"],
+        "type": payload["type"],
+        "api_base": payload["api_base"],
+        "file": f"providers/{provider_id}.json",
+        "model_count": len(payload["models"]),
+    }
 
+
+def dump_json(payload: dict) -> str:
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_provider(providers_dir: Path, provider_id: str, payload: dict) -> bool:
+    path = providers_dir / f"{provider_id}.json"
+    text = dump_json(payload)
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return False
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def prune_providers(providers_dir: Path, keep: set[str]) -> bool:
+    removed = False
+    for old in providers_dir.glob("*.json"):
+        if old.stem not in keep:
+            old.unlink()
+            removed = True
+    return removed
+
+
+def build_catalog(src: dict, catalog_dir: Path, only: list[str] | None) -> dict:
+    providers_dir = catalog_dir / "providers"
+    providers_dir.mkdir(parents=True, exist_ok=True)
+    index_path = catalog_dir / "index.json"
+
+    all_ids = sorted(set(MDEV_TO_LELE) | set(STATIC_PROVIDERS))
+    unknown = sorted(set(only or []) - set(all_ids))
+    if unknown:
+        raise SystemExit(f"unknown provider id(s): {', '.join(unknown)}")
+    targets = [pid for pid in all_ids if not only or pid in only]
+
+    previous_index = read_json(index_path)
+    previous_entries = previous_index.get("providers") or {}
+    entries: dict[str, dict] = dict(previous_entries) if only else {}
+    changed = False
+
+    for pid in targets:
+        payload = build_provider_payload(pid, src)
+        changed = write_provider(providers_dir, pid, payload) or changed
+        entries[pid] = index_entry(pid, payload)
+
+    if not only:
+        changed = prune_providers(providers_dir, set(entries)) or changed
+        entries = {pid: entries[pid] for pid in sorted(entries)}
+
+    if entries != previous_entries:
+        changed = True
+
+    updated_at = previous_index.get("updated_at") or ""
+    if changed or not updated_at:
+        updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    index = {
+        "version": previous_index.get("version", 1),
+        "updated_at": updated_at,
+        "source": "models.dev",
+        "providers": entries,
+    }
+    index_path.write_text(dump_json(index), encoding="utf-8")
     return index
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--source", help="Local models.dev api.json path (skip download)")
+    ap.add_argument("--output-dir", help="Write the catalog here instead of ./catalog")
+    ap.add_argument(
+        "--providers",
+        nargs="+",
+        metavar="ID",
+        help="Regenerate only these provider ids and leave the rest of the catalog untouched",
+    )
     args = ap.parse_args()
 
     print(f"Loading models.dev from {args.source or MODELS_DEV_URL}…")
     src = load_models_dev(args.source)
-    index = build_catalog(src)
+    catalog_dir = Path(args.output_dir) if args.output_dir else CATALOG_DIR
+    index = build_catalog(src, catalog_dir, args.providers)
 
-    (CATALOG_DIR / "index.json").write_text(
-        json.dumps(index, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    total_models = sum(e["model_count"] for e in index["providers"].values())
+    print(
+        f"Wrote {len(index['providers'])} providers / {total_models} models → {catalog_dir} "
+        f"(updated_at {index['updated_at']})"
     )
-
-    n_models = sum(e["model_count"] for e in index["providers"].values())
-    print(f"Wrote {len(index['providers'])} providers / {n_models} models → {CATALOG_DIR}")
     return 0
 
 
