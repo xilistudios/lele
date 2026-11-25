@@ -30,8 +30,27 @@ func (m Model) SupportsThinking() bool {
 	return m.Reasoning || len(m.ThinkingLevels) > 0
 }
 
+// SupportsChatCompletionsProtocol reports whether a protocol marker names a wire
+// protocol lele's OpenAI-compatible transport can drive. An empty marker means
+// chat/completions, so catalogs written before the marker existed stay usable.
+func SupportsChatCompletionsProtocol(protocol string) bool {
+	return protocol == "" || protocol == ProtocolChatCompletions
+}
+
 func (m Model) SupportsChatCompletions() bool {
-	return m.Protocol == "" || m.Protocol == ProtocolChatCompletions
+	return SupportsChatCompletionsProtocol(m.Protocol)
+}
+
+// ChatCompletionsModels keeps the models an OpenAI-compatible transport can
+// drive, preserving order. The result is never nil.
+func ChatCompletionsModels(models []Model) []Model {
+	out := make([]Model, 0, len(models))
+	for _, m := range models {
+		if m.SupportsChatCompletions() {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 type Provider struct {

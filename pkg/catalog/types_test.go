@@ -77,3 +77,21 @@ func TestModelJSONRoundTripProtocol(t *testing.T) {
 		}
 	})
 }
+
+func TestChatCompletionsModels(t *testing.T) {
+	models := []Model{
+		{ID: "gpt-5.6-luna", Protocol: ProtocolResponses},
+		{ID: "glm-5.1"},
+		{ID: "minimax-m2.7", Protocol: ProtocolAnthropicMessages},
+		{ID: "explicit", Protocol: ProtocolChatCompletions},
+	}
+
+	got := ChatCompletionsModels(models)
+	if len(got) != 2 || got[0].ID != "glm-5.1" || got[1].ID != "explicit" {
+		t.Fatalf("ChatCompletionsModels() = %v, want [glm-5.1 explicit]", modelIDs(got))
+	}
+
+	if got := ChatCompletionsModels(nil); got == nil || len(got) != 0 {
+		t.Fatalf("ChatCompletionsModels(nil) = %v, want an empty non-nil slice", got)
+	}
+}
