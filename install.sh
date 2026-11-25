@@ -10,6 +10,14 @@ REPO="xilistudios/lele"
 BINARY="lele"
 DEFAULT_PREFIX="${HOME}/.local"
 
+# Release signing key (ed25519, PKIX PEM). The release workflow signs
+# lele_<version>_checksums.txt with the matching private key and publishes the
+# detached raw signature as lele_<version>_checksums.txt.sig. Keep this in sync
+# with pkg/update/release_signing_key.go; see docs/release-signing.md.
+RELEASE_SIGNING_PUBKEY_PEM='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAybtp/SDuO9p/gqHXUBrdORoVDwmDwUiM8NmsxwbPd5o=
+-----END PUBLIC KEY-----'
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 log()   { printf '  %s\n' "$@"; }
@@ -138,10 +146,30 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 http_get "$URL" "${TMPDIR}/${ARCHIVE}"
 
-# Verify checksum
+# Verify authenticity (ed25519 signature over the checksums file) before
+# trusting the checksum, then integrity (sha256) before extracting.
 CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY}_${VERSION_NUM}_checksums.txt"
-info "Verifying checksum..."
+SIGNATURE_URL="${CHECKSUMS_URL}.sig"
+
+info "Verifying release signature..."
 http_get "$CHECKSUMS_URL" "${TMPDIR}/checksums.txt"
+
+if ! command -v openssl >/dev/null 2>&1; then
+  log "Warning: openssl not found, skipping authenticity verification."
+  log "The sha256 checksum is still enforced; install openssl for the full check."
+elif http_get "$SIGNATURE_URL" "${TMPDIR}/checksums.txt.sig" 2>/dev/null; then
+  printf '%s\n' "$RELEASE_SIGNING_PUBKEY_PEM" > "${TMPDIR}/release-signing-key.pem"
+  if openssl pkeyutl -verify -pubin -inkey "${TMPDIR}/release-signing-key.pem" \
+      -rawin -in "${TMPDIR}/checksums.txt" -sigfile "${TMPDIR}/checksums.txt.sig" >/dev/null 2>&1; then
+    log "Release signature OK"
+  else
+    err "Release signature verification failed. The download may have been tampered with."
+  fi
+else
+  log "Warning: this release is not signed, skipping authenticity verification."
+fi
+
+info "Verifying checksum..."
 
 EXPECTED=$(grep "${ARCHIVE}" "${TMPDIR}/checksums.txt" | awk '{print $1}')
 if [ -z "$EXPECTED" ]; then
@@ -153,8 +181,7 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
   ACTUAL=$(shasum -a 256 "${TMPDIR}/${ARCHIVE}" | awk '{print $1}')
 else
-  log "Warning: sha256sum/shasum not found, skipping checksum verification."
-  ACTUAL="$EXPECTED"
+  err "sha256sum or shasum is required to verify the download; install one and retry."
 fi
 
 if [ "$ACTUAL" != "$EXPECTED" ]; then
