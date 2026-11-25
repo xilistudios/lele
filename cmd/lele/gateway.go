@@ -64,6 +64,49 @@ func parseGatewayFlags(args []string) (desktop bool, port int, debug bool) {
 	return desktop, port, debug
 }
 
+type gatewayBindWarning struct {
+	component string
+	message   string
+	fields    map[string]interface{}
+}
+
+func configFilePresent(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func gatewayBindWarnings(cfg *config.Config, serverHost string, serverPort int, desktop, configFileExists bool) []gatewayBindWarning {
+	if desktop || cfg == nil {
+		return nil
+	}
+
+	warnings := make([]gatewayBindWarning, 0, 2)
+
+	if cfg.Channels.Native.Enabled && !channels.IsLoopbackHost(serverHost) {
+		rateLimitState := "disabled"
+		if cfg.Channels.Native.RateLimit.Enabled {
+			rateLimitState = "enabled"
+		}
+		warnings = append(warnings, gatewayBindWarning{
+			component: "native",
+			message: fmt.Sprintf("native API binds %s:%d (reachable from the network) with rate limiting %s — anyone who pairs can run tools; set gateway.host or server.host to 127.0.0.1 unless LAN access is intended",
+				serverHost, serverPort, rateLimitState),
+			fields: map[string]interface{}{"host": serverHost, "port": serverPort, "rate_limit_enabled": cfg.Channels.Native.RateLimit.Enabled},
+		})
+	}
+
+	if configFileExists && !cfg.HostExplicitlyConfigured() && channels.IsLoopbackHost(serverHost) {
+		warnings = append(warnings, gatewayBindWarning{
+			component: "server",
+			message: fmt.Sprintf("gateway.host is unset; lele binds loopback (%s) by default. "+
+				"Set gateway.host explicitly (e.g. \"0.0.0.0\") for LAN access.", config.DefaultGatewayHost),
+			fields: map[string]interface{}{"host": serverHost, "port": serverPort, "default": config.DefaultGatewayHost},
+		})
+	}
+
+	return warnings
+}
+
 func shouldServeWebUI(cfg *config.Config, desktop bool) bool {
 	if desktop {
 		return true
@@ -269,9 +312,8 @@ func gatewayCmd() {
 		serverPort = portOverride
 	}
 
-	if !desktop && cfg.Channels.Native.Enabled && !cfg.Channels.Native.RateLimit.Enabled && !channels.IsLoopbackHost(serverHost) {
-		logger.WarnCF("native", fmt.Sprintf("native API rate limiting is disabled and the server binds %s:%d (reachable from the network) — set channels.native.rate_limit.enabled=true to throttle /api/v1/auth/pair", serverHost, serverPort),
-			map[string]interface{}{"host": serverHost, "port": serverPort})
+	for _, warning := range gatewayBindWarnings(cfg, serverHost, serverPort, desktop, configFilePresent(getConfigPath())) {
+		logger.WarnCF(warning.component, warning.message, warning.fields)
 	}
 
 	srv := server.New(&server.Config{

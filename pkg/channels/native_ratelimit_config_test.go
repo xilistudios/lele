@@ -27,6 +27,11 @@ type rateLimitTestServer struct {
 	clientID string
 }
 
+func withRateLimitDisabled(cfg *config.Config) *config.Config {
+	cfg.Channels.Native.RateLimit = config.NativeRateLimitConfig{Enabled: false}
+	return cfg
+}
+
 func newRateLimitTestServer(t *testing.T, cfg *config.Config) *rateLimitTestServer {
 	t.Helper()
 
@@ -99,13 +104,13 @@ func postRefresh(t *testing.T, baseURL, token string) *http.Response {
 	return resp
 }
 
-func TestRateLimitDisabledByDefaultServesNo429(t *testing.T) {
+func TestRateLimitExplicitlyDisabledServesNo429(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 
-	ts := newRateLimitTestServer(t, cfg)
+	ts := newRateLimitTestServer(t, withRateLimitDisabled(cfg))
 
 	for i := 0; i < 20; i++ {
 		resp := postPair(t, ts.server.URL, "000000")
@@ -128,7 +133,7 @@ func TestRateLimitDisabledLeavesLimitersNil(t *testing.T) {
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 
-	ts := newRateLimitTestServer(t, cfg)
+	ts := newRateLimitTestServer(t, withRateLimitDisabled(cfg))
 
 	ch := ts.channel
 	if ch.pinLimiter != nil {
@@ -271,6 +276,7 @@ func TestRateLimitDisabledStopIsSafe(t *testing.T) {
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 	cfg.Channels.Native.LeleDir = t.TempDir()
+	withRateLimitDisabled(cfg)
 
 	msgBus := bus.NewMessageBus()
 	defer msgBus.Close()
@@ -286,7 +292,7 @@ func TestRateLimitDisabledStopIsSafe(t *testing.T) {
 	if native.pinLimiter != nil || native.pairLimiter != nil ||
 		native.refreshLimiter != nil || native.apiLimiter != nil ||
 		native.wsMessageLimiter != nil {
-		t.Fatal("expected nil traffic limiters with default config")
+		t.Fatal("expected nil traffic limiters with rate limiting explicitly disabled")
 	}
 
 	ctx := t.Context()
@@ -302,7 +308,7 @@ func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 
-	ts := newRateLimitTestServer(t, cfg)
+	ts := newRateLimitTestServer(t, withRateLimitDisabled(cfg))
 
 	if ts.channel.wsMessageLimiter != nil {
 		t.Fatal("wsMessageLimiter must be nil when rate limiting is disabled")
@@ -365,7 +371,7 @@ func TestAuthLogSamplerStaysActiveWhenRateLimitDisabled(t *testing.T) {
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 
-	ts := newRateLimitTestServer(t, cfg)
+	ts := newRateLimitTestServer(t, withRateLimitDisabled(cfg))
 
 	if ts.channel.authLogLimiter == nil {
 		t.Fatal("authLogLimiter must be non-nil even when rate limiting is disabled")
@@ -409,6 +415,7 @@ func TestRateLimitDisabledConstructorUsesNilNotNoop(t *testing.T) {
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 	cfg.Channels.Native.LeleDir = t.TempDir()
+	withRateLimitDisabled(cfg)
 
 	msgBus := bus.NewMessageBus()
 	defer msgBus.Close()
@@ -441,6 +448,7 @@ func TestNewNativeChannelStopWithNilLimiters(t *testing.T) {
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
 	cfg.Channels.Native.LeleDir = t.TempDir()
+	withRateLimitDisabled(cfg)
 
 	msgBus := bus.NewMessageBus()
 	defer msgBus.Close()
@@ -757,4 +765,45 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 			t.Fatalf("ws: first rate-limit error at index %d, want 5 (WSMessagesPerMinute=5)", firstErrIdx)
 		}
 	})
+}
+
+func TestRateLimitEnabledByDefaultConstructsGenerousBuckets(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels.Native.Enabled = true
+	cfg.Channels.Native.Host = "127.0.0.1"
+	cfg.Channels.Native.Port = 0
+	cfg.Channels.Native.LeleDir = t.TempDir()
+
+	if !cfg.Channels.Native.RateLimit.Enabled {
+		t.Fatal("DefaultConfig() disables native rate limiting; the secure default is on")
+	}
+
+	msgBus := bus.NewMessageBus()
+	defer msgBus.Close()
+
+	native, err := NewNativeChannel(cfg, msgBus, newNativeTestAgentLoop(cfg), NewApprovalManager())
+	if err != nil {
+		t.Fatalf("NewNativeChannel() error = %v", err)
+	}
+
+	limiters := []struct {
+		name  string
+		limit *rateLimiter
+		rate  int
+	}{
+		{name: "pin", limit: native.pinLimiter, rate: config.DefaultNativeRateLimitPinPerMinute},
+		{name: "pair", limit: native.pairLimiter, rate: config.DefaultNativeRateLimitPairPerMinute},
+		{name: "refresh", limit: native.refreshLimiter, rate: config.DefaultNativeRateLimitRefreshPerMinute},
+		{name: "api", limit: native.apiLimiter, rate: 600},
+		{name: "ws", limit: native.wsMessageLimiter, rate: 600},
+	}
+	for _, limiter := range limiters {
+		if limiter.limit == nil {
+			t.Errorf("%s limiter is nil; the default config must enable every bucket", limiter.name)
+			continue
+		}
+		if limiter.limit.rate != limiter.rate {
+			t.Errorf("%s limiter rate = %d, want %d", limiter.name, limiter.limit.rate, limiter.rate)
+		}
+	}
 }

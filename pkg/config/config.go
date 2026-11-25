@@ -141,9 +141,10 @@ type Config struct {
 	Commands map[string]CommandDefinition `json:"commands,omitempty"`
 	Harness  HarnessConfig                `json:"harness,omitempty"`
 
-	mu     sync.RWMutex
-	rawDoc map[string]json.RawMessage
-	base   *Config
+	mu                  sync.RWMutex
+	rawDoc              map[string]json.RawMessage
+	base                *Config
+	gatewayHostExplicit bool
 }
 
 type CommandDefinition struct {
@@ -182,6 +183,7 @@ func (c *Config) clone() *Config {
 	}
 	cloned.rawDoc = c.rawDoc
 	cloned.base = c.base
+	cloned.gatewayHostExplicit = c.gatewayHostExplicit
 	return &cloned
 }
 
@@ -356,11 +358,12 @@ type NativeRateLimitConfig struct {
 }
 
 const (
+	DefaultNativeRateLimitEnabled             = true
 	DefaultNativeRateLimitPinPerMinute        = 10
 	DefaultNativeRateLimitPairPerMinute       = 5
 	DefaultNativeRateLimitRefreshPerMinute    = 20
-	DefaultNativeRateLimitAPIPerMinute        = 120
-	DefaultNativeRateLimitWSMessagesPerMinute = 120
+	DefaultNativeRateLimitAPIPerMinute        = 600
+	DefaultNativeRateLimitWSMessagesPerMinute = 600
 )
 
 type NativeConfig struct {
@@ -1010,6 +1013,8 @@ func normalizeProviderKey(provider string) string {
 	return p
 }
 
+const DefaultGatewayHost = "127.0.0.1"
+
 type GatewayConfig struct {
 	Host string `json:"host" env:"LELE_GATEWAY_HOST"`
 	Port int    `json:"port" env:"LELE_GATEWAY_PORT"`
@@ -1030,7 +1035,16 @@ func (c *Config) EffectiveServerHost() string {
 	if c.Channels.Native.Host != "" {
 		return c.Channels.Native.Host
 	}
-	return "0.0.0.0"
+	return DefaultGatewayHost
+}
+
+func (c *Config) HostExplicitlyConfigured() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.gatewayHostExplicit
 }
 
 func (c *Config) EffectiveServerPort() int {
@@ -1200,7 +1214,7 @@ func DefaultConfig() *Config {
 				UploadTTLHours:    24,
 				LeleDir:           "",
 				RateLimit: NativeRateLimitConfig{
-					Enabled:             false,
+					Enabled:             DefaultNativeRateLimitEnabled,
 					PinPerMinute:        DefaultNativeRateLimitPinPerMinute,
 					PairPerMinute:       DefaultNativeRateLimitPairPerMinute,
 					RefreshPerMinute:    DefaultNativeRateLimitRefreshPerMinute,
@@ -1230,7 +1244,7 @@ func DefaultConfig() *Config {
 			AlibabaCodingPlan: ProviderConfig{},
 		},
 		Gateway: GatewayConfig{
-			Host: "0.0.0.0",
+			Host: DefaultGatewayHost,
 			Port: 18790,
 		},
 		Server: ServerConfig{
@@ -1383,6 +1397,58 @@ func configParseError(path string, data []byte, err error) error {
 	return fmt.Errorf("failed to parse config %s: env placeholder %s at byte offset %d is not inside a JSON string (env placeholders are only expanded in string values): %w", path, placeholder, offset, err)
 }
 
+var gatewayHostEnvVars = []string{"LELE_GATEWAY_HOST", "LELE_SERVER_HOST", "LELE_CHANNELS_NATIVE_HOST"}
+
+func rawValueAt(raw map[string]json.RawMessage, path ...string) (json.RawMessage, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+	value, ok := raw[path[0]]
+	if !ok {
+		return nil, false
+	}
+	for _, key := range path[1:] {
+		object, err := decodeJSONObject(value)
+		if err != nil {
+			return nil, false
+		}
+		node, ok := object[key]
+		if !ok {
+			return nil, false
+		}
+		encoded, err := json.Marshal(node)
+		if err != nil {
+			return nil, false
+		}
+		value = encoded
+	}
+	return value, true
+}
+
+func rawPathSet(raw map[string]json.RawMessage, path ...string) bool {
+	value, ok := rawValueAt(raw, path...)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(string(value)) != "null"
+}
+
+func gatewayHostConfiguredByEnv() bool {
+	for _, name := range gatewayHostEnvVars {
+		if os.Getenv(name) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func gatewayHostExplicitlyConfigured(rawDoc map[string]json.RawMessage) bool {
+	return rawPathSet(rawDoc, "gateway", "host") ||
+		rawPathSet(rawDoc, "server", "host") ||
+		rawPathSet(rawDoc, "channels", "native", "host") ||
+		gatewayHostConfiguredByEnv()
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
@@ -1442,6 +1508,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.gatewayHostExplicit = gatewayHostExplicitlyConfigured(rawDoc)
 	cfg.base = cfg.clone()
 	cfg.rawDoc = rawDoc
 	return cfg, nil
@@ -1481,6 +1548,7 @@ func (c *Config) Reload(path string) error {
 	c.Harness = loaded.Harness
 	c.rawDoc = loaded.rawDoc
 	c.base = loaded.base
+	c.gatewayHostExplicit = loaded.gatewayHostExplicit
 	return nil
 }
 

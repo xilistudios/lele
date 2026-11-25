@@ -3,23 +3,51 @@ package main
 import (
 	"io/fs"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+}
+
 func TestParseWebServerOptions_Defaults(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{})
 
-	if opts.Host != "0.0.0.0" {
-		t.Errorf("Host = %q, want %q", opts.Host, "0.0.0.0")
+	if opts.Host != config.DefaultGatewayHost {
+		t.Errorf("Host = %q, want the loopback default %q", opts.Host, config.DefaultGatewayHost)
 	}
 	if opts.Port <= 0 {
 		t.Errorf("Port = %d, should be > 0", opts.Port)
 	}
 }
 
+func TestParseWebServerOptions_UnreadableConfigStaysLoopback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{ not json"), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() succeeded on a corrupt config; the fallback path is not exercised")
+	}
+
+	opts := parseWebServerOptions([]string{})
+
+	if opts.Host != config.DefaultGatewayHost {
+		t.Errorf("Host = %q, want the loopback default %q when the config cannot be read", opts.Host, config.DefaultGatewayHost)
+	}
+}
+
 func TestParseWebServerOptions_CustomHost(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{"--host", "127.0.0.1"})
 
 	if opts.Host != "127.0.0.1" {
@@ -31,10 +59,11 @@ func TestParseWebServerOptions_CustomHost(t *testing.T) {
 }
 
 func TestParseWebServerOptions_CustomPort(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{"--port", "8080"})
 
-	if opts.Host != "0.0.0.0" {
-		t.Errorf("Host = %q, want %q", opts.Host, "0.0.0.0")
+	if opts.Host != config.DefaultGatewayHost {
+		t.Errorf("Host = %q, want the loopback default %q", opts.Host, config.DefaultGatewayHost)
 	}
 	if opts.Port != 8080 {
 		t.Errorf("Port = %d, want %d", opts.Port, 8080)
@@ -42,6 +71,7 @@ func TestParseWebServerOptions_CustomPort(t *testing.T) {
 }
 
 func TestParseWebServerOptions_BothCustom(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{"--host", "localhost", "--port", "9000"})
 
 	if opts.Host != "localhost" {
@@ -53,6 +83,7 @@ func TestParseWebServerOptions_BothCustom(t *testing.T) {
 }
 
 func TestParseWebServerOptions_InvalidPort(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{"--port", "invalid"})
 
 	if opts.Port <= 0 {
@@ -61,6 +92,7 @@ func TestParseWebServerOptions_InvalidPort(t *testing.T) {
 }
 
 func TestParseWebServerOptions_NegativePort(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{"--port", "-1"})
 
 	if opts.Port <= 0 {
@@ -69,6 +101,7 @@ func TestParseWebServerOptions_NegativePort(t *testing.T) {
 }
 
 func TestParseWebServerOptions_PortZero(t *testing.T) {
+	isolateConfigDir(t)
 	opts := parseWebServerOptions([]string{"--port", "0"})
 
 	if opts.Port <= 0 {

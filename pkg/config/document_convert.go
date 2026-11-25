@@ -239,6 +239,9 @@ func SaveEditableDocument(path string, doc *EditableDocument) error {
 		if err != nil {
 			return err
 		}
+		if err := keepNamedHosts(next, raw); err != nil {
+			return fmt.Errorf("failed to keep named hosts: %w", err)
+		}
 	}
 
 	merged, err := mergeConfigDocument(raw, base, next)

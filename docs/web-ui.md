@@ -27,6 +27,11 @@ With the unified server architecture, all HTTP services (API, Web UI, health che
 }
 ```
 
+`server.host: "0.0.0.0"` is a **non-default, explicit opt-in**: the bind address
+defaults to `127.0.0.1`, so leave the key out (or set `127.0.0.1`) for a
+local-only UI and set `0.0.0.0`/a LAN address only when other machines must
+reach it.
+
 This replaces the previous separate ports configuration:
 
 ```json

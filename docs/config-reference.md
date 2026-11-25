@@ -185,12 +185,21 @@ See `docs/channel-setup.md`.
 
 Controls per-source-IP rate limiting on the native REST API, plus a per-client budget for WebSocket messages.
 
-- `enabled` (default `false`) — master switch; all limits are inactive when off
+- `enabled` (default `true`) — master switch; all limits are inactive when off
 - `pin_per_minute` (default `10`) — `GET /api/v1/auth/pin` requests per minute
 - `pair_per_minute` (default `5`) — `POST /api/v1/auth/pair` attempts per minute
 - `refresh_per_minute` (default `20`) — `POST /api/v1/auth/refresh` renewals per minute
-- `api_per_minute` (default `120`) — all other API requests per minute
-- `ws_messages_per_minute` (default `120`) — WebSocket frames per minute
+- `api_per_minute` (default `600`) — all other API requests per minute
+- `ws_messages_per_minute` (default `600`) — WebSocket frames per minute
+
+Rate limiting is on for every config that does not opt out — a JSON `null` (or
+an absent key) means "unset" and keeps the default, while an explicit
+`"enabled": false` is preserved.  **Migration:** two values changed for configs
+that leave them unset: the switch flipped from `false` to `true`, and the
+API/WebSocket budgets were raised from `120` to `600` per minute so ordinary
+browser traffic is not throttled.  A config that names no per-minute value now
+inherits `600`/`600`; the PIN, pairing and refresh budgets are unchanged.  Set
+`"enabled": false` to restore the previous no-throttling behavior.
 
 Setting a field to `0` (or omitting it) means "use the built-in default"
 listed above.  Negative values are rejected by validation.
@@ -341,6 +350,35 @@ Controls device event monitoring.
 ## `gateway`
 
 Controls host and port for the health endpoints exposed by the gateway process.
+
+```json
+{
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790
+  }
+}
+```
+
+- `host` — bind address of the gateway server; defaults to `127.0.0.1` (loopback)
+- `port` — bind port; defaults to `18790`
+
+The bind address is resolved as `server.host` → `gateway.host` →
+`channels.native.host`, and then `127.0.0.1` when none of them is set, so
+`channels.native.host` alone does not expose the server on the network.  Env
+overrides: `LELE_GATEWAY_HOST`, `LELE_GATEWAY_PORT` (plus `LELE_SERVER_HOST` and
+`LELE_CHANNELS_NATIVE_HOST` for the higher-priority fields).
+
+**Migration:** `gateway.host` used to default to `0.0.0.0`, so a `config.json`
+that never named a host only accepts loopback clients after the upgrade.  Set
+`"host": "0.0.0.0"` (here or under `server`) to restore LAN access — an explicit
+value is preserved exactly as written (it also survives a save from the settings
+UI, which never deletes a host the file names), and only an unset host falls back
+to the loopback default.  `lele gateway` logs a notice on every start when a
+config file names no host and the effective bind is loopback — the same line
+appears for a fresh install created by onboarding, so it states the posture
+rather than claiming something changed — and it also warns on any non-loopback
+bind with `channels.native.enabled`.
 
 ## `updates`
 
