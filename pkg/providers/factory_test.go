@@ -646,11 +646,29 @@ func TestDefaultAPIBaseByType_CatalogProviders(t *testing.T) {
 
 func withoutCatalogIndex(t *testing.T) {
 	t.Helper()
-	catalog.ResetLive()
-	t.Cleanup(func() {
-		catalog.ResetLive()
-		_ = catalog.LoadIndexFromCache()
+	previous := catalog.IndexSnapshot()
+	catalog.RestoreIndex(nil)
+	t.Cleanup(func() { catalog.RestoreIndex(previous) })
+}
+
+func TestWithoutCatalogIndexRestoresThePriorIndex(t *testing.T) {
+	previous := catalog.IndexSnapshot()
+	sentinel := &catalog.Index{Providers: map[string]catalog.IndexEntry{
+		"zai": {ID: "zai", APIBase: "https://sentinel.example/v1"},
+	}}
+	catalog.RestoreIndex(sentinel)
+	t.Cleanup(func() { catalog.RestoreIndex(previous) })
+
+	t.Run("scope sees no index", func(t *testing.T) {
+		withoutCatalogIndex(t)
+		if got := catalog.IndexSnapshot(); got != nil {
+			t.Fatalf("IndexSnapshot() inside the scope = %v, want nil", got)
+		}
 	})
+
+	if got := catalog.IndexSnapshot(); got != sentinel {
+		t.Fatalf("IndexSnapshot() after the scope = %v, want the prior index restored exactly", got)
+	}
 }
 
 func TestDefaultAPIBase_ZAICodingPlan(t *testing.T) {
@@ -674,13 +692,13 @@ func TestDefaultAPIBase_ZAI(t *testing.T) {
 func TestFactory_LegacyZAICodingPlanFallback(t *testing.T) {
 	withoutCatalogIndex(t)
 
-	const want = "https://api.z.ai/api/coding/paas/v4"
 	tests := []struct {
 		name     string
 		provider string
+		want     string
 	}{
-		{name: "typed field via the zai alias", provider: "zai"},
-		{name: "named entry via zai_coding_plan", provider: "zai_coding_plan"},
+		{name: "typed field via the zai alias", provider: "zai", want: catalog.ZAIAPIBase},
+		{name: "named entry via zai_coding_plan", provider: "zai_coding_plan", want: catalog.ZAICodingPlanAPIBase},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -695,35 +713,107 @@ func TestFactory_LegacyZAICodingPlanFallback(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolveProviderSelection() error = %v", err)
 			}
-			if got.apiBase != want {
-				t.Errorf("apiBase = %q, want %q", got.apiBase, want)
+			if got.apiBase != tt.want {
+				t.Errorf("apiBase = %q, want %q", got.apiBase, tt.want)
 			}
 		})
 	}
 }
 
-func TestZAICodingPlanUsesLegacyNonCodingBase(t *testing.T) {
+func TestZaiCodingPlanConfiguredBase(t *testing.T) {
 	const legacy = "https://api.z.ai/api/paas/v4"
 
 	tests := []struct {
-		name         string
-		providerName string
-		apiBase      string
-		want         bool
+		name     string
+		cfg      *config.Config
+		provider string
+		want     string
+		wantOK   bool
 	}{
-		{name: "canonical legacy base", providerName: "zai_coding_plan", apiBase: legacy, want: true},
-		{name: "legacy base with trailing slash", providerName: "zai_coding_plan", apiBase: legacy + "/", want: true},
-		{name: "zai alias", providerName: "zai", apiBase: legacy, want: true},
-		{name: "z.ai spelling", providerName: "z.ai", apiBase: legacy, want: true},
-		{name: "empty base keeps the catalog default", providerName: "zai_coding_plan", apiBase: "", want: false},
-		{name: "coding base already fixed", providerName: "zai_coding_plan", apiBase: "https://api.z.ai/api/coding/paas/v4", want: false},
-		{name: "custom base", providerName: "zai_coding_plan", apiBase: "https://proxy.example/v1", want: false},
-		{name: "other provider", providerName: "zhipu", apiBase: legacy, want: false},
+		{
+			name:     "typed block via the provider name",
+			cfg:      zaiConfig(config.ProviderConfig{APIBase: legacy}),
+			provider: "zai_coding_plan",
+			want:     legacy,
+			wantOK:   true,
+		},
+		{
+			name:     "named entry whose id is zai_coding_plan",
+			cfg:      zaiNamedConfig("zai_coding_plan", "zai_coding_plan", legacy),
+			provider: "zai_coding_plan",
+			want:     legacy,
+			wantOK:   true,
+		},
+		{
+			name:     "webui-named entry whose type is zai_coding_plan",
+			cfg:      zaiNamedConfig("webui-zai", "zai_coding_plan", legacy),
+			provider: "webui-zai",
+			want:     legacy,
+			wantOK:   true,
+		},
+		{
+			name:     "webui-named entry with the z.ai id spelling",
+			cfg:      zaiNamedConfig("z.ai", "zai_coding_plan", legacy),
+			provider: "z.ai",
+			want:     legacy,
+			wantOK:   true,
+		},
+		{
+			name:     "zai is not a coding plan provider",
+			cfg:      zaiConfig(config.ProviderConfig{APIBase: legacy}),
+			provider: "zai",
+		},
+		{
+			name:     "named entry of another type",
+			cfg:      zaiNamedConfig("proxy", "openai", "https://proxy.example/v1"),
+			provider: "proxy",
+		},
+		{
+			name:     "nil config",
+			provider: "zai_coding_plan",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := zaiCodingPlanUsesLegacyNonCodingBase(tt.providerName, tt.apiBase); got != tt.want {
-				t.Errorf("zaiCodingPlanUsesLegacyNonCodingBase(%q, %q) = %v, want %v", tt.providerName, tt.apiBase, got, tt.want)
+			got, ok := zaiCodingPlanConfiguredBase(tt.cfg, tt.provider)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("zaiCodingPlanConfiguredBase(%q) = (%q, %v), want (%q, %v)", tt.provider, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func zaiConfig(provider config.ProviderConfig) *config.Config {
+	return &config.Config{Providers: &config.ProvidersConfig{ZAICodingPlan: provider}}
+}
+
+func zaiNamedConfig(id, typ, apiBase string) *config.Config {
+	return &config.Config{Providers: &config.ProvidersConfig{
+		Named: map[string]config.NamedProviderConfig{
+			id: {Type: typ, ProviderConfig: config.ProviderConfig{APIKey: "zai-key", APIBase: apiBase}},
+		},
+	}}
+}
+
+func TestIsLegacyZAICodingPlanBase(t *testing.T) {
+	tests := []struct {
+		name    string
+		apiBase string
+		want    bool
+	}{
+		{name: "canonical legacy base", apiBase: catalog.ZAIAPIBase, want: true},
+		{name: "legacy base with trailing slash", apiBase: catalog.ZAIAPIBase + "/", want: true},
+		{name: "legacy base with repeated trailing slashes", apiBase: catalog.ZAIAPIBase + "//", want: true},
+		{name: "legacy base with surrounding whitespace", apiBase: "  " + catalog.ZAIAPIBase + "  ", want: true},
+		{name: "legacy base in upper case", apiBase: "https://API.Z.AI/api/paas/v4", want: true},
+		{name: "empty base keeps the catalog default", apiBase: "", want: false},
+		{name: "coding base already fixed", apiBase: catalog.ZAICodingPlanAPIBase, want: false},
+		{name: "custom base", apiBase: "https://proxy.example/v1", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLegacyZAICodingPlanBase(tt.apiBase); got != tt.want {
+				t.Errorf("isLegacyZAICodingPlanBase(%q) = %v, want %v", tt.apiBase, got, tt.want)
 			}
 		})
 	}
@@ -1116,21 +1206,45 @@ func TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo(t *testing.T) {
 	}
 }
 
-func TestResolveProviderSelection_WarnsOnceOnLegacyZAICodingPlanBase(t *testing.T) {
-	withoutCatalogIndex(t)
+type providerBaseWarning struct {
+	message string
+	fields  map[string]interface{}
+}
 
-	var messages []string
-	var fields []map[string]interface{}
-	previousWarn := providerBaseWarn
+func captureProviderBaseWarnings(t *testing.T) *[]providerBaseWarning {
+	t.Helper()
+	var captured []providerBaseWarning
+	previous := providerBaseWarn
 	providerBaseWarn = func(_ string, message string, extra map[string]interface{}) {
-		messages = append(messages, message)
-		fields = append(fields, extra)
+		captured = append(captured, providerBaseWarning{message: message, fields: extra})
 	}
+	zaiCodingPlanLegacyBaseWarned.Store(false)
 	t.Cleanup(func() {
-		providerBaseWarn = previousWarn
+		providerBaseWarn = previous
 		zaiCodingPlanLegacyBaseWarned.Store(false)
 	})
-	zaiCodingPlanLegacyBaseWarned.Store(false)
+	return &captured
+}
+
+func assertLegacyBaseWarning(t *testing.T, warnings []providerBaseWarning, wantConfigured string) {
+	t.Helper()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %d, want exactly 1: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0].message, catalog.ZAICodingPlanAPIBase) {
+		t.Errorf("warning %q does not point at the coding base", warnings[0].message)
+	}
+	if got := warnings[0].fields["suggested_api_base"]; got != catalog.ZAICodingPlanAPIBase {
+		t.Errorf("suggested_api_base = %v, want %q", got, catalog.ZAICodingPlanAPIBase)
+	}
+	if got := warnings[0].fields["configured_api_base"]; got != wantConfigured {
+		t.Errorf("configured_api_base = %v, want the value found on disk %q", got, wantConfigured)
+	}
+}
+
+func TestResolveProviderSelection_WarnsOnceOnLegacyZAICodingPlanBase(t *testing.T) {
+	withoutCatalogIndex(t)
+	warnings := captureProviderBaseWarnings(t)
 
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Provider = "zai_coding_plan"
@@ -1138,7 +1252,7 @@ func TestResolveProviderSelection_WarnsOnceOnLegacyZAICodingPlanBase(t *testing.
 	cfg.Providers = &config.ProvidersConfig{
 		ZAICodingPlan: config.ProviderConfig{
 			APIKey:  "zai-key",
-			APIBase: "https://api.z.ai/api/paas/v4",
+			APIBase: "  https://API.Z.AI/api/paas/v4/  ",
 		},
 	}
 
@@ -1148,48 +1262,154 @@ func TestResolveProviderSelection_WarnsOnceOnLegacyZAICodingPlanBase(t *testing.
 		}
 	}
 
-	if len(messages) != 1 {
-		t.Fatalf("warnings = %d, want exactly 1: %v", len(messages), messages)
+	assertLegacyBaseWarning(t, *warnings, "https://API.Z.AI/api/paas/v4/")
+}
+
+func TestResolveProviderSelection_WarnsOnNamedLegacyZAICodingPlanBase(t *testing.T) {
+	withoutCatalogIndex(t)
+	warnings := captureProviderBaseWarnings(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "webui-zai"
+	cfg.Agents.Defaults.Model = "glm-4.6"
+	cfg.Providers = zaiNamedConfig("webui-zai", "zai_coding_plan", catalog.ZAIAPIBase).Providers
+
+	got, err := resolveProviderSelection(cfg)
+	if err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
 	}
-	if !strings.Contains(messages[0], "https://api.z.ai/api/coding/paas/v4") {
-		t.Errorf("warning %q does not point at the coding base", messages[0])
-	}
-	if got := fields[0]["suggested_api_base"]; got != "https://api.z.ai/api/coding/paas/v4" {
-		t.Errorf("suggested_api_base = %v, want the coding base", got)
+
+	assertLegacyBaseWarning(t, *warnings, catalog.ZAIAPIBase)
+	if got.apiBase != catalog.ZAIAPIBase {
+		t.Errorf("apiBase = %q, want the stored value %q", got.apiBase, catalog.ZAIAPIBase)
 	}
 }
 
-func TestResolveProviderSelection_KeepsExplicitZAICodingPlanBase(t *testing.T) {
+func TestResolveProviderSelection_NoWarningForZAICodingPlanCodingBase(t *testing.T) {
 	withoutCatalogIndex(t)
-
-	previousWarn := providerBaseWarn
-	providerBaseWarn = func(_ string, message string, _ map[string]interface{}) {
-		t.Errorf("unexpected warning: %s", message)
-	}
-	t.Cleanup(func() {
-		providerBaseWarn = previousWarn
-		zaiCodingPlanLegacyBaseWarned.Store(false)
-	})
-	zaiCodingPlanLegacyBaseWarned.Store(false)
+	warnings := captureProviderBaseWarnings(t)
 
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Provider = "zai_coding_plan"
 	cfg.Agents.Defaults.Model = "glm-4.6"
 	cfg.Providers = &config.ProvidersConfig{
-		ZAICodingPlan: config.ProviderConfig{
-			APIKey:  "zai-key",
-			APIBase: "https://proxy.example/zaicoding/v1",
-		},
+		ZAICodingPlan: config.ProviderConfig{APIKey: "zai-key", APIBase: catalog.ZAICodingPlanAPIBase},
+	}
+
+	if _, err := resolveProviderSelection(cfg); err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
+	}
+
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %d, want none for the coding base: %v", len(*warnings), *warnings)
+	}
+}
+
+func TestResolveProviderSelection_NoWarningForGeneralZAIProvider(t *testing.T) {
+	withoutCatalogIndex(t)
+	warnings := captureProviderBaseWarnings(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "zai"
+	cfg.Agents.Defaults.Model = "glm-4.6"
+	cfg.Providers = &config.ProvidersConfig{
+		ZAICodingPlan: config.ProviderConfig{APIKey: "zai-key", APIBase: catalog.ZAIAPIBase},
 	}
 
 	got, err := resolveProviderSelection(cfg)
 	if err != nil {
 		t.Fatalf("resolveProviderSelection() error = %v", err)
 	}
-	if want := "https://proxy.example/zaicoding/v1"; got.apiBase != want {
-		t.Errorf("apiBase = %q, want the explicit value %q", got.apiBase, want)
+
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %d, want none for the general zai endpoint: %v", len(*warnings), *warnings)
 	}
-	if want := "https://proxy.example/zaicoding/v1"; cfg.Providers.ZAICodingPlan.APIBase != want {
-		t.Errorf("cfg.Providers.ZAICodingPlan.APIBase = %q, want the explicit value %q to survive untouched", cfg.Providers.ZAICodingPlan.APIBase, want)
+	if got.apiBase != catalog.ZAIAPIBase {
+		t.Errorf("apiBase = %q, want the general endpoint %q", got.apiBase, catalog.ZAIAPIBase)
+	}
+}
+
+func TestResolveProviderSelection_KeepsExplicitZAICodingPlanBase(t *testing.T) {
+	withoutCatalogIndex(t)
+	warnings := captureProviderBaseWarnings(t)
+
+	const explicit = "https://proxy.example/zaicoding/v1"
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "zai_coding_plan"
+	cfg.Agents.Defaults.Model = "glm-4.6"
+	cfg.Providers = &config.ProvidersConfig{
+		ZAICodingPlan: config.ProviderConfig{APIKey: "zai-key", APIBase: explicit},
+	}
+
+	got, err := resolveProviderSelection(cfg)
+	if err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
+	}
+	if got.apiBase != explicit {
+		t.Errorf("apiBase = %q, want the explicit value %q", got.apiBase, explicit)
+	}
+	if cfg.Providers.ZAICodingPlan.APIBase != explicit {
+		t.Errorf("cfg.Providers.ZAICodingPlan.APIBase = %q, want the explicit value %q to survive untouched", cfg.Providers.ZAICodingPlan.APIBase, explicit)
+	}
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %d, want none for a custom base: %v", len(*warnings), *warnings)
+	}
+}
+
+func TestResolveProviderSelection_KeepsStoredLegacyZAICodingPlanBase(t *testing.T) {
+	withoutCatalogIndex(t)
+
+	tests := []struct {
+		name     string
+		cfg      func() *config.Config
+		stored   func(*config.Config) string
+		provider string
+	}{
+		{
+			name: "typed block",
+			cfg: func() *config.Config {
+				cfg := config.DefaultConfig()
+				cfg.Agents.Defaults.Provider = "zai_coding_plan"
+				cfg.Agents.Defaults.Model = "glm-4.6"
+				cfg.Providers = &config.ProvidersConfig{
+					ZAICodingPlan: config.ProviderConfig{APIKey: "zai-key", APIBase: catalog.ZAIAPIBase},
+				}
+				return cfg
+			},
+			stored:   func(cfg *config.Config) string { return cfg.Providers.ZAICodingPlan.APIBase },
+			provider: "",
+		},
+		{
+			name: "named entry",
+			cfg: func() *config.Config {
+				cfg := config.DefaultConfig()
+				cfg.Agents.Defaults.Provider = "webui-zai"
+				cfg.Agents.Defaults.Model = "glm-4.6"
+				cfg.Providers = zaiNamedConfig("webui-zai", "zai_coding_plan", catalog.ZAIAPIBase).Providers
+				return cfg
+			},
+			stored:   func(cfg *config.Config) string { return cfg.Providers.Named["webui-zai"].APIBase },
+			provider: "webui-zai",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := captureProviderBaseWarnings(t)
+
+			cfg := tt.cfg()
+			got, err := resolveProviderSelection(cfg)
+			if err != nil {
+				t.Fatalf("resolveProviderSelection() error = %v", err)
+			}
+
+			if stored := tt.stored(cfg); stored != catalog.ZAIAPIBase {
+				t.Errorf("stored api_base = %q, want the legacy value %q to survive untouched", stored, catalog.ZAIAPIBase)
+			}
+			if got.apiBase != catalog.ZAIAPIBase {
+				t.Errorf("apiBase = %q, want the stored legacy value %q to be used as is", got.apiBase, catalog.ZAIAPIBase)
+			}
+			assertLegacyBaseWarning(t, *warnings, catalog.ZAIAPIBase)
+		})
 	}
 }

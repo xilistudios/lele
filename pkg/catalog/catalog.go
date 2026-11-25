@@ -31,7 +31,7 @@ func DefaultAPIBaseByType(providerType string) string {
 		return "https://generativelanguage.googleapis.com/v1beta"
 	case "zhipu", "glm":
 		return "https://open.bigmodel.cn/api/paas/v4"
-	case "zai", "z.ai":
+	case "zai":
 		return ZAIAPIBase
 	case "zai_coding_plan":
 		return ZAICodingPlanAPIBase

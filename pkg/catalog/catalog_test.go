@@ -318,6 +318,8 @@ func TestBaseLessProviderTypesNormalize(t *testing.T) {
 }
 
 func TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent(t *testing.T) {
+	previous := IndexSnapshot()
+	t.Cleanup(func() { RestoreIndex(previous) })
 	ResetLive()
 	SetCacheDir(t.TempDir())
 	t.Cleanup(ResetCacheDir)
@@ -345,10 +347,9 @@ func TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent(t *testing.T) 
 
 func withoutCatalogIndex(t *testing.T) {
 	t.Helper()
-	previous := loadIndex()
-	setIndex(nil)
-	t.Setenv("LELE_CATALOG_OFFLINE", "1")
-	t.Cleanup(func() { setIndex(previous) })
+	previous := IndexSnapshot()
+	RestoreIndex(nil)
+	t.Cleanup(func() { RestoreIndex(previous) })
 }
 
 func TestCatalogOffline_ZAICodingPlan(t *testing.T) {
@@ -363,8 +364,41 @@ func TestCatalogOffline_ZAICodingPlan(t *testing.T) {
 func TestCatalogOffline_ZAI(t *testing.T) {
 	withoutCatalogIndex(t)
 
-	const want = "https://api.z.ai/api/paas/v4"
-	if got := DefaultAPIBaseByType("zai"); got != want {
-		t.Errorf("DefaultAPIBaseByType(zai) = %q, want %q", got, want)
+	tests := []struct {
+		name string
+		typ  string
+		want string
+	}{
+		{name: "zai keeps the general endpoint", typ: "zai", want: "https://api.z.ai/api/paas/v4"},
+		{name: "z.ai normalizes to zhipu", typ: "z.ai", want: "https://open.bigmodel.cn/api/paas/v4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DefaultAPIBaseByType(tt.typ); got != tt.want {
+				t.Errorf("DefaultAPIBaseByType(%q) = %q, want %q", tt.typ, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIndexSnapshotRestoresPreviousIndex(t *testing.T) {
+	previous := IndexSnapshot()
+	t.Cleanup(func() { RestoreIndex(previous) })
+
+	snapshot := &Index{Providers: map[string]IndexEntry{"zai": {ID: "zai", APIBase: "https://proxy.example/v1"}}}
+	RestoreIndex(snapshot)
+	saved := IndexSnapshot()
+
+	RestoreIndex(nil)
+	if got := IndexSnapshot(); got != nil {
+		t.Fatalf("IndexSnapshot() after RestoreIndex(nil) = %v, want nil", got)
+	}
+
+	RestoreIndex(saved)
+	if got := IndexSnapshot(); got != snapshot {
+		t.Fatalf("IndexSnapshot() after RestoreIndex(saved) = %v, want the saved snapshot", got)
+	}
+	if got := DefaultAPIBaseByType("zai"); got != "https://proxy.example/v1" {
+		t.Errorf("DefaultAPIBaseByType(zai) = %q, want the restored index value", got)
 	}
 }

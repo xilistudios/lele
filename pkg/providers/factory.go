@@ -66,27 +66,41 @@ var (
 	providerBaseWarn              = logger.WarnCF
 )
 
-func zaiCodingPlanUsesLegacyNonCodingBase(providerName, apiBase string) bool {
-	switch NormalizeProvider(strings.TrimSpace(providerName)) {
-	case "zai", "zai_coding_plan":
-	default:
-		return false
+func zaiCodingPlanConfiguredBase(cfg *config.Config, providerName string) (string, bool) {
+	if cfg == nil || cfg.Providers == nil {
+		return "", false
 	}
-	return strings.TrimSuffix(strings.TrimSpace(apiBase), "/") == catalog.ZAIAPIBase
+	name := NormalizeProvider(providerName)
+	if named, ok := cfg.Providers.GetNamed(providerName); ok {
+		typ := NormalizeProvider(named.Type)
+		if typ == "" {
+			typ = name
+		}
+		if typ != "zai_coding_plan" && name != "zai_coding_plan" {
+			return "", false
+		}
+		return named.APIBase, true
+	}
+	if name != "zai_coding_plan" {
+		return "", false
+	}
+	return cfg.Providers.ZAICodingPlan.APIBase, true
+}
+
+func isLegacyZAICodingPlanBase(apiBase string) bool {
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(apiBase), "/"), catalog.ZAIAPIBase)
 }
 
 func warnOnLegacyZAICodingPlanBase(cfg *config.Config, providerName string) {
-	if cfg == nil || cfg.Providers == nil {
-		return
-	}
-	if !zaiCodingPlanUsesLegacyNonCodingBase(providerName, cfg.Providers.ZAICodingPlan.APIBase) {
+	apiBase, ok := zaiCodingPlanConfiguredBase(cfg, providerName)
+	if !ok || !isLegacyZAICodingPlanBase(apiBase) {
 		return
 	}
 	if !zaiCodingPlanLegacyBaseWarned.CompareAndSwap(false, true) {
 		return
 	}
 	providerBaseWarn("providers", "zai_coding_plan api_base uses the non-coding z.ai endpoint; set it to "+catalog.ZAICodingPlanAPIBase, map[string]interface{}{
-		"configured_api_base": catalog.ZAIAPIBase,
+		"configured_api_base": strings.TrimSpace(apiBase),
 		"suggested_api_base":  catalog.ZAICodingPlanAPIBase,
 	})
 }
@@ -505,7 +519,7 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				sel.apiBase = cfg.Providers.ZAICodingPlan.APIBase
 				sel.proxy = cfg.Providers.ZAICodingPlan.Proxy
 				if sel.apiBase == "" {
-					sel.apiBase = defaultAPIBaseByType("zai_coding_plan")
+					sel.apiBase = defaultAPIBaseByType(providerName)
 				}
 			}
 		case "modelark_coding_plan", "modelark":

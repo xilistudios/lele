@@ -108,6 +108,14 @@ func setIndex(idx *Index) {
 	indexMu.Unlock()
 }
 
+func IndexSnapshot() *Index {
+	return loadIndex()
+}
+
+func RestoreIndex(idx *Index) {
+	setIndex(idx)
+}
+
 func loadProviderFromDisk(key string) *Provider {
 	path := ProviderCachePath(key)
 	data, err := os.ReadFile(path)
