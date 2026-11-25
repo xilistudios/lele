@@ -89,7 +89,7 @@ func (n *NativeChannel) handleCatalogModels(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	models := catalog.SearchModels(provider, q)
+	models := chatCompletionsModels(catalog.SearchModels(provider, q))
 	if models == nil {
 		models = []catalog.Model{}
 	}
@@ -99,6 +99,16 @@ func (n *NativeChannel) handleCatalogModels(w http.ResponseWriter, r *http.Reque
 		Query:    q,
 		Models:   models,
 	})
+}
+
+func chatCompletionsModels(models []catalog.Model) []catalog.Model {
+	out := make([]catalog.Model, 0, len(models))
+	for _, m := range models {
+		if m.SupportsChatCompletions() {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (n *NativeChannel) handleCatalogPrefetch(w http.ResponseWriter, r *http.Request) {

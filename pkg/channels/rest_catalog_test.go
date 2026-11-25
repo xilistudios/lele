@@ -629,3 +629,95 @@ func TestProviderModelsForUnknownNameStill404(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 	}
 }
+func seedOpencodeGoCatalog(t *testing.T) {
+	t.Helper()
+	if err := catalog.SeedProvider(catalog.Provider{
+		ID: "opencode_go", Name: "OpenCode Go", Type: "openai",
+		APIBase: "https://opencode.ai/zen/go/v1",
+		Models: []catalog.Model{
+			{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", ContextWindow: 1050000, ToolCall: true, Protocol: catalog.ProtocolResponses},
+			{ID: "grok-4.7", Name: "Grok 4.7", ContextWindow: 500000, ToolCall: true, Protocol: catalog.ProtocolResponses},
+			{ID: "glm-5.1", Name: "GLM-5.1", ContextWindow: 204800, ToolCall: true},
+			{ID: "minimax-m2.7", Name: "MiniMax M2.7", ContextWindow: 204800, ToolCall: true, Protocol: catalog.ProtocolAnthropicMessages},
+			{ID: "minimax-m3.1-flash", Name: "MiniMax M3.1 Flash", ContextWindow: 1000000, ToolCall: true},
+		},
+	}); err != nil {
+		t.Fatalf("seed opencode_go: %v", err)
+	}
+}
+
+func TestCatalogModelsFiltersUnsupportedProtocols(t *testing.T) {
+	ts := newCatalogTestServer(t, nil)
+	seedOpencodeGoCatalog(t)
+
+	resp, dec := catalogAuthedGet(t, ts, "/api/v1/catalog/models?provider=opencode_go")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload CatalogModelsResponse
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if len(payload.Models) == 0 {
+		t.Fatal("expected the usable opencode_go models")
+	}
+
+	got := make([]string, 0, len(payload.Models))
+	for _, m := range payload.Models {
+		got = append(got, m.ID)
+		if !m.SupportsChatCompletions() {
+			t.Errorf("picker offers %q (protocol %q): the endpoint answers 400 ModelProtocolUnsupported", m.ID, m.Protocol)
+		}
+	}
+	for _, unwanted := range []string{"gpt-5.6-luna", "grok-4.7", "minimax-m2.7"} {
+		for _, id := range got {
+			if id == unwanted {
+				t.Errorf("picker offers unsupported id %q (models = %v)", unwanted, got)
+			}
+		}
+	}
+	if len(got) != 2 || got[0] != "glm-5.1" || got[1] != "minimax-m3.1-flash" {
+		t.Fatalf("models = %v, want [glm-5.1 minimax-m3.1-flash]", got)
+	}
+}
+
+func TestCatalogModelsFirstEntryIsUsable(t *testing.T) {
+	ts := newCatalogTestServer(t, nil)
+	seedOpencodeGoCatalog(t)
+
+	resp, dec := catalogAuthedGet(t, ts, "/api/v1/catalog/models?provider=opencode_go")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload CatalogModelsResponse
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if len(payload.Models) == 0 {
+		t.Fatal("expected at least one usable model")
+	}
+	first := payload.Models[0]
+	if !first.SupportsChatCompletions() {
+		t.Fatalf("first picker entry is %q (protocol %q): it must speak chat/completions", first.ID, first.Protocol)
+	}
+	if first.ID == "gpt-5.6-luna" {
+		t.Fatalf("first picker entry is the protocol-unsupported %q", first.ID)
+	}
+}
+
+func TestSearchModelsKeepsUnsupportedProtocols(t *testing.T) {
+	newCatalogTestServer(t, nil)
+	seedOpencodeGoCatalog(t)
+
+	var found bool
+	for _, m := range catalog.SearchModels("opencode_go", "") {
+		if m.ID == "gpt-5.6-luna" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("catalog.SearchModels() dropped a protocol-unsupported model: the filter belongs to the picker handler, not the shared lookup")
+	}
+}
