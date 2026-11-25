@@ -122,7 +122,10 @@ func (w *lockWaitWatchdog) stopAndWait() time.Duration {
 	return time.Duration(w.maxWait.Load())
 }
 
-var deadlockGuard = 60 * time.Second
+// deadlockGuard is a generous liveness net, NOT a timing budget: the ~80 MB
+// repository I/O can legitimately take tens of seconds on slow TMPDIR disks
+// (measured 39-45 s under load), so the guard must stay far above that.
+var deadlockGuard = 5 * time.Minute
 
 func withDeadlockGuard(t *testing.T, guard time.Duration) {
 	t.Helper()
