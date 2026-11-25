@@ -3,6 +3,8 @@ package main
 import (
 	"io/fs"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -24,6 +26,23 @@ func TestParseWebServerOptions_Defaults(t *testing.T) {
 	}
 	if opts.Port <= 0 {
 		t.Errorf("Port = %d, should be > 0", opts.Port)
+	}
+}
+
+func TestParseWebServerOptions_UnreadableConfigStaysLoopback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{ not json"), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() succeeded on a corrupt config; the fallback path is not exercised")
+	}
+
+	opts := parseWebServerOptions([]string{})
+
+	if opts.Host != config.DefaultGatewayHost {
+		t.Errorf("Host = %q, want the loopback default %q when the config cannot be read", opts.Host, config.DefaultGatewayHost)
 	}
 }
 

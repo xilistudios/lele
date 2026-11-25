@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type webServerOptions struct {
@@ -20,7 +22,7 @@ type webServerOptions struct {
 }
 
 func parseWebServerOptions(args []string) webServerOptions {
-	opts := webServerOptions{Host: "0.0.0.0", Port: 3005}
+	opts := webServerOptions{Host: config.DefaultGatewayHost, Port: 3005}
 
 	cfg, err := loadConfig()
 	if err == nil {
