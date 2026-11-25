@@ -342,3 +342,29 @@ func TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent(t *testing.T) 
 		t.Errorf("Providers()[xai].APIBase = %q, want the index value", got)
 	}
 }
+
+func withoutCatalogIndex(t *testing.T) {
+	t.Helper()
+	previous := loadIndex()
+	setIndex(nil)
+	t.Setenv("LELE_CATALOG_OFFLINE", "1")
+	t.Cleanup(func() { setIndex(previous) })
+}
+
+func TestCatalogOffline_ZAICodingPlan(t *testing.T) {
+	withoutCatalogIndex(t)
+
+	const want = "https://api.z.ai/api/coding/paas/v4"
+	if got := DefaultAPIBaseByType("zai_coding_plan"); got != want {
+		t.Errorf("DefaultAPIBaseByType(zai_coding_plan) = %q, want %q", got, want)
+	}
+}
+
+func TestCatalogOffline_ZAI(t *testing.T) {
+	withoutCatalogIndex(t)
+
+	const want = "https://api.z.ai/api/paas/v4"
+	if got := DefaultAPIBaseByType("zai"); got != want {
+		t.Errorf("DefaultAPIBaseByType(zai) = %q, want %q", got, want)
+	}
+}

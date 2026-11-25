@@ -6,6 +6,11 @@ import (
 	"sync"
 )
 
+const (
+	ZAIAPIBase           = "https://api.z.ai/api/paas/v4"
+	ZAICodingPlanAPIBase = "https://api.z.ai/api/coding/paas/v4"
+)
+
 func DefaultAPIBaseByType(providerType string) string {
 	t := normalizeType(providerType)
 	if base, ok := indexAPIBase(t); ok && base != "" {
@@ -26,8 +31,10 @@ func DefaultAPIBaseByType(providerType string) string {
 		return "https://generativelanguage.googleapis.com/v1beta"
 	case "zhipu", "glm":
 		return "https://open.bigmodel.cn/api/paas/v4"
-	case "zai", "zai_coding_plan", "z.ai":
-		return "https://api.z.ai/api/paas/v4"
+	case "zai", "z.ai":
+		return ZAIAPIBase
+	case "zai_coding_plan":
+		return ZAICodingPlanAPIBase
 	case "moonshot", "kimi", "kimi-coding":
 		return "https://api.moonshot.cn/v1"
 	case "kimi_for_coding":
