@@ -178,20 +178,20 @@ func TestSetWorkspace_PinnedSkillsFollowTheCurrentLoader(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
-	writeTestSkill(t, workspaceA, "pinned-in-a", "the pinned body from A")
+	writeTestSkill(t, workspaceA, "pinned-in-a", "the description of the pinned skill")
 
 	cb := NewContextBuilder(workspaceA)
 	if _, _, rejected := cb.PinSkills("s1", []string{"pinned-in-a"}); len(rejected) != 0 {
 		t.Fatalf("precondition: the pin must be accepted: %v", rejected)
 	}
-	if prompt := cb.BuildSystemPromptForSession("s1", "agent"); !strings.Contains(prompt, "the pinned body from A") {
+	if prompt := cb.BuildSystemPromptForSession("s1", "agent"); !strings.Contains(prompt, "### Skill: pinned-in-a") {
 		t.Fatal("precondition: the pinned body must render before the switch")
 	}
 
 	cb.SetWorkspace(workspaceB)
 
 	prompt := cb.BuildSystemPromptForSession("s1", "agent")
-	if strings.Contains(prompt, "the pinned body from A") {
+	if strings.Contains(prompt, "### Skill: pinned-in-a") {
 		t.Error("the prompt still renders a pinned body from the old workspace")
 	}
 	if strings.Contains(prompt, "Loaded Skills") {
@@ -206,8 +206,8 @@ func TestSetWorkspace_ConcurrentReadersStayConsistent(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
-	writeTestSkill(t, workspaceA, "skill-a", "the body of skill-a")
-	writeTestSkill(t, workspaceB, "skill-b", "the body of skill-b")
+	writeTestSkill(t, workspaceA, "skill-a", "skill a")
+	writeTestSkill(t, workspaceB, "skill-b", "skill b")
 
 	cb := NewContextBuilder(workspaceA)
 	if _, _, rejected := cb.PinSkills("s1", []string{"skill-a"}); len(rejected) != 0 {
@@ -246,7 +246,7 @@ func TestSetWorkspace_ConcurrentReadersStayConsistent(t *testing.T) {
 		},
 		func() {
 			if prompt := cb.BuildSystemPromptForSession("s1", "agent"); strings.Contains(prompt, "Loaded Skills") &&
-				!strings.Contains(prompt, "the body of skill-a") {
+				!strings.Contains(prompt, "### Skill: skill-a") {
 				fail("prompt advertises loaded skills without rendering a body from the same loader")
 			}
 		},
