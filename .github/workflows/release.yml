@@ -118,6 +118,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GOVERSION: ${{ steps.setup-go.outputs.go-version }}
+          # ed25519 private key (base64) that signs lele_<version>_checksums.txt.
+          # Rotate per docs/release-signing.md; the matching public key is pinned
+          # in pkg/update/release_signing_key.go and install.sh.
+          LELE_RELEASE_SIGNING_KEY: ${{ secrets.LELE_RELEASE_SIGNING_KEY }}
 
   desktop:
     name: Desktop binaries
