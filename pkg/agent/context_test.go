@@ -1056,23 +1056,6 @@ func TestAddAssistantMessage_EmptyMessages(t *testing.T) {
 	}
 }
 
-func TestLoadSkills_NoSkills(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	cb := NewContextBuilder(tmpDir)
-	result := cb.loadSkills()
-
-	if result != "" {
-		if strings.Contains(result, filepath.Join(tmpDir, "skills")) {
-			t.Errorf("Expected no workspace-local skills, but found workspace path in result: %s", result)
-		}
-	}
-}
-
 func TestGetSkillsInfo_NoSkills(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
@@ -1979,28 +1962,6 @@ func TestSetSkillsFilter_UnknownNameDropsSection(t *testing.T) {
 	}
 	if strings.Contains(prompt, "# Skills\n\nThe following skills extend") {
 		t.Errorf("Expected no Skills section when the filter matches nothing:\n%s", prompt)
-	}
-}
-
-func TestLoadSkills_AppliesSkillsFilter(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "load-skills-filter-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	writeTestSkill(t, tmpDir, "alpha-skill", "Alpha description")
-	writeTestSkill(t, tmpDir, "beta-skill", "Beta description")
-
-	cb := NewContextBuilder(tmpDir)
-	cb.SetSkillsFilter([]string{"alpha-skill"})
-
-	result := cb.loadSkills()
-	if !strings.Contains(result, "### Skill: alpha-skill") {
-		t.Errorf("Expected alpha-skill body, got:\n%s", result)
-	}
-	if strings.Contains(result, "### Skill: beta-skill") {
-		t.Errorf("beta-skill body must be filtered out, got:\n%s", result)
 	}
 }
 

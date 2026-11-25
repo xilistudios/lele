@@ -648,7 +648,7 @@ func (al *AgentLoop) SkillsLoader() *skills.SkillsLoader {
 	if agent == nil || agent.ContextBuilder == nil {
 		return nil
 	}
-	return agent.ContextBuilder.skillsLoader
+	return agent.ContextBuilder.SkillsLoader()
 }
 
 func (al *AgentLoop) SkillInstaller() *skills.SkillInstaller {

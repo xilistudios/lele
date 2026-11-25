@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,4 +93,46 @@ func loadSkillFrom(t *testing.T, instance *AgentInstance, name string) *tools.To
 	}
 	ctx := tools.WithAgentToolContext(context.Background(), instance.ID, "s1")
 	return loadTool.Execute(ctx, map[string]interface{}{"skill": name})
+}
+
+func TestReloadAgents_UpdateMemoryWritesToNewWorkspace(t *testing.T) {
+	pinFileUsageMode(t)
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+
+	registry := NewAgentRegistry(workspaceReloadCfg(t, workspaceA))
+	first, ok := registry.GetAgent("alpha")
+	if !ok {
+		t.Fatal("expected the agent to be registered")
+	}
+	if _, ok := first.Tools.Get("update_memory"); !ok {
+		t.Fatal("precondition: update_memory must be registered on the agent")
+	}
+
+	registry.ReloadAgents(workspaceReloadCfg(t, workspaceB))
+
+	second, _ := registry.GetAgent("alpha")
+	memoryTool, ok := second.Tools.Get("update_memory")
+	if !ok {
+		t.Fatal("update_memory missing after the reload")
+	}
+	res := memoryTool.Execute(context.Background(), map[string]interface{}{"content": "remember-workspace-b"})
+	if res.IsError {
+		t.Fatalf("update_memory after the reload failed: %s", res.ForLLM)
+	}
+
+	written, err := os.ReadFile(filepath.Join(workspaceB, tools.MemoryFileName))
+	if err != nil {
+		t.Fatalf("update_memory after the reload did not write into the new workspace: %v", err)
+	}
+	if !strings.Contains(string(written), "remember-workspace-b") {
+		t.Errorf("MEMORY.md under the new workspace = %q, want the note written after the reload", written)
+	}
+	oldContent, err := os.ReadFile(filepath.Join(workspaceA, tools.MemoryFileName))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read the old workspace MEMORY.md: %v", err)
+	}
+	if strings.Contains(string(oldContent), "remember-workspace-b") {
+		t.Errorf("update_memory after the reload wrote into the old workspace: %q", oldContent)
+	}
 }

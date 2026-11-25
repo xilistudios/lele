@@ -107,21 +107,31 @@ func newSkillsLoader(workspace string) *skills.SkillsLoader {
 	return skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir, directorySkillsDir, agentsSkillsDir)
 }
 
-// SetWorkspace re-points the builder at a new workspace, rebuilding the skills
-// loader and the memory store and dropping the cached initial context. The work
-// runs under initialMu so it cannot interleave with GetInitialContext, which
-// builds the prompt from workspace, skillsLoader and memory under that mutex.
+// SetWorkspace re-points the builder at a new workspace and drops the cached
+// initial context. The loader is built before the write lock is taken; the swap
+// itself happens under initialMu so it cannot interleave with GetInitialContext,
+// which builds the prompt from workspace and skillsLoader under that mutex.
+// Every read of skillsLoader outside that critical section goes through
+// currentSkillsLoader, so no reader can observe the field racing this write.
 // Tools, vision/video support, subagents, MCP servers and the skills filter are
 // workspace-independent and are patched separately by the reload path.
 func (cb *ContextBuilder) SetWorkspace(workspace string) {
+	cb.initialMu.RLock()
+	unchanged := cb.workspace == workspace
+	cb.initialMu.RUnlock()
+	if unchanged {
+		return
+	}
+
+	loader := newSkillsLoader(workspace)
+
 	cb.initialMu.Lock()
 	defer cb.initialMu.Unlock()
 	if cb.workspace == workspace {
 		return
 	}
 	cb.workspace = workspace
-	cb.skillsLoader = newSkillsLoader(workspace)
-	cb.memory = NewMemoryStore(workspace)
+	cb.skillsLoader = loader
 	cb.initialContext = ""
 }
 
@@ -288,8 +298,14 @@ func (cb *ContextBuilder) SetSkillsFilter(filter []string) {
 	cb.initialMu.Unlock()
 }
 
-func (cb *ContextBuilder) SkillsLoader() *skills.SkillsLoader {
+func (cb *ContextBuilder) currentSkillsLoader() *skills.SkillsLoader {
+	cb.initialMu.RLock()
+	defer cb.initialMu.RUnlock()
 	return cb.skillsLoader
+}
+
+func (cb *ContextBuilder) SkillsLoader() *skills.SkillsLoader {
+	return cb.currentSkillsLoader()
 }
 
 func (cb *ContextBuilder) SetSkillUsage(agentID string, store *skills.UsageStore) {
@@ -393,7 +409,7 @@ func (cb *ContextBuilder) ClearLoadedSkills(sessionKey string) {
 	cb.initialMu.Unlock()
 }
 
-func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
+func (cb *ContextBuilder) renderablePinned(loader *skills.SkillsLoader, sessionKey string) []string {
 	cb.initialMu.RLock()
 	filter := cb.skillsFilter
 	pinned := append([]string(nil), cb.loadedSkills[sessionKey]...)
@@ -404,7 +420,7 @@ func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
 	}
 	out := make([]string, 0, len(pinned))
 	for _, name := range pinned {
-		if cb.skillsLoader.SkillResolvable(filter, name) {
+		if loader.SkillResolvable(filter, name) {
 			out = append(out, name)
 		}
 	}
@@ -413,16 +429,17 @@ func (cb *ContextBuilder) renderablePinned(sessionKey string) []string {
 
 func (cb *ContextBuilder) SkillsInContext(sessionKey string) []string {
 	cb.initialMu.RLock()
+	loader := cb.skillsLoader
 	filter := cb.skillsFilter
 	usage := cb.skillUsage
 	agentID := cb.skillUsageAgent
 	cb.initialMu.RUnlock()
 
 	var names []string
-	for _, s := range cb.skillsLoader.TopSkills(filter, usage.CountsFor(agentID), maxContextSkills) {
+	for _, s := range loader.TopSkills(filter, usage.CountsFor(agentID), maxContextSkills) {
 		names = append(names, s.Name)
 	}
-	for _, name := range cb.renderablePinned(sessionKey) {
+	for _, name := range cb.renderablePinned(loader, sessionKey) {
 		if !slices.Contains(names, name) {
 			names = append(names, name)
 		}
@@ -560,8 +577,9 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 
 func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string) string {
 	prompt := cb.BuildSystemPrompt()
-	if names := cb.renderablePinned(sessionKey); len(names) > 0 {
-		if content := cb.skillsLoader.LoadSkillsForContext(names); content != "" {
+	loader := cb.currentSkillsLoader()
+	if names := cb.renderablePinned(loader, sessionKey); len(names) > 0 {
+		if content := loader.LoadSkillsForContext(names); content != "" {
 			prompt = prompt + "\n\n---\n\n# Loaded Skills\n\n" + content
 		}
 	}
@@ -984,34 +1002,8 @@ func (cb *ContextBuilder) currentSkillsFilter() []string {
 	return cb.skillsFilter
 }
 
-func (cb *ContextBuilder) loadSkills() string {
-	allSkills := cb.skillsLoader.ListSkills()
-	if len(allSkills) == 0 {
-		return ""
-	}
-
-	var skillNames []string
-	filter := cb.currentSkillsFilter()
-	for _, s := range allSkills {
-		if !skills.SkillAllowed(filter, s.Name) {
-			continue
-		}
-		skillNames = append(skillNames, s.Name)
-	}
-	if len(skillNames) == 0 {
-		return ""
-	}
-
-	content := cb.skillsLoader.LoadSkillsForContext(skillNames)
-	if content == "" {
-		return ""
-	}
-
-	return "# Skill Definitions\n\n" + content
-}
-
 func (cb *ContextBuilder) GetSkillsInfo() map[string]interface{} {
-	allSkills := cb.skillsLoader.ListSkills()
+	allSkills := cb.currentSkillsLoader().ListSkills()
 	skillNames := make([]string, 0, len(allSkills))
 	for _, s := range allSkills {
 		skillNames = append(skillNames, s.Name)
