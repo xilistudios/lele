@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,11 +15,17 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 )
 
+var (
+	ErrApprovalNotFound          = errors.New("approval not found")
+	ErrApprovalSessionMismatch   = errors.New("approval session mismatch")
+	ErrApprovalRequesterMismatch = errors.New("approval requester mismatch")
+)
+
 var conversationAliasSuffix = regexp.MustCompile(`:chat:\d+$`)
 
 func approvalSessionMatches(approvalKey, callerKey string) bool {
 	if approvalKey == "" || callerKey == "" {
-		return true
+		return false
 	}
 	if approvalKey == callerKey {
 		return true
@@ -25,6 +33,28 @@ func approvalSessionMatches(approvalKey, callerKey string) bool {
 	a := conversationAliasSuffix.ReplaceAllString(approvalKey, "")
 	b := conversationAliasSuffix.ReplaceAllString(callerKey, "")
 	return a == b
+}
+
+func requesterIDPart(requesterID string) string {
+	if idx := strings.Index(requesterID, "|"); idx >= 0 {
+		return requesterID[:idx]
+	}
+	return requesterID
+}
+
+func approvalRequesterMatches(approvalRequesterID, callerRequesterID string) bool {
+	if approvalRequesterID == "" {
+		return true
+	}
+	if callerRequesterID == "" {
+		return false
+	}
+	return requesterIDPart(approvalRequesterID) == requesterIDPart(callerRequesterID)
+}
+
+type approvalAuthority struct {
+	sessionKey  string
+	requesterID string
 }
 
 type ApprovalManager struct {
@@ -36,6 +66,7 @@ type ApprovalManager struct {
 type PendingApproval struct {
 	ID           string
 	SessionKey   string
+	RequesterID  string
 	Command      string
 	Reason       string
 	ChatID       int64
@@ -61,12 +92,13 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
-func (am *ApprovalManager) CreateApproval(sessionKey, command, reason string, chatID int64) *PendingApproval {
+func (am *ApprovalManager) CreateApproval(sessionKey, command, reason string, chatID int64, requesterID string) *PendingApproval {
 	am.cleanupExpired()
 
 	approval := &PendingApproval{
 		ID:           generateID(),
 		SessionKey:   sessionKey,
+		RequesterID:  requesterID,
 		Command:      command,
 		Reason:       reason,
 		ChatID:       chatID,
@@ -106,19 +138,36 @@ func (am *ApprovalManager) GetApproval(approvalID string) *PendingApproval {
 }
 
 func (am *ApprovalManager) HandleApproval(approvalID string, approved bool) (*PendingApproval, error) {
-	return am.HandleApprovalForSession(approvalID, approved, "")
+	return am.resolveApproval(approvalID, approved, nil)
 }
 
 func (am *ApprovalManager) HandleApprovalForSession(approvalID string, approved bool, callerSessionKey string) (*PendingApproval, error) {
+	return am.resolveApproval(approvalID, approved, &approvalAuthority{sessionKey: callerSessionKey})
+}
+
+func (am *ApprovalManager) HandleApprovalForRequester(approvalID string, approved bool, callerSessionKey, callerRequesterID string) (*PendingApproval, error) {
+	return am.resolveApproval(approvalID, approved, &approvalAuthority{
+		sessionKey:  callerSessionKey,
+		requesterID: callerRequesterID,
+	})
+}
+
+func (am *ApprovalManager) resolveApproval(approvalID string, approved bool, authority *approvalAuthority) (*PendingApproval, error) {
 	am.mu.Lock()
 	approval, ok := am.pending[approvalID]
 	if !ok {
 		am.mu.Unlock()
-		return nil, fmt.Errorf("approval not found: %s", approvalID)
+		return nil, fmt.Errorf("%w: %s", ErrApprovalNotFound, approvalID)
 	}
-	if !approvalSessionMatches(approval.SessionKey, callerSessionKey) {
-		am.mu.Unlock()
-		return nil, fmt.Errorf("approval session mismatch")
+	if authority != nil {
+		if !approvalSessionMatches(approval.SessionKey, authority.sessionKey) {
+			am.mu.Unlock()
+			return nil, ErrApprovalSessionMismatch
+		}
+		if !approvalRequesterMatches(approval.RequesterID, authority.requesterID) {
+			am.mu.Unlock()
+			return nil, ErrApprovalRequesterMismatch
+		}
 	}
 	delete(am.pending, approvalID)
 	am.mu.Unlock()

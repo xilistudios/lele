@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -51,16 +52,26 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request not available"))
 	}
 	callerSessionKey := fmt.Sprintf("telegram:%d", query.Message.GetChat().ID)
+	callerRequesterID := telegramSenderID(query.From.ID, query.From.Username)
 
-	logger.DebugCF("telegram", "handleApprovalCallback calling HandleApprovalForSession", map[string]interface{}{
-		"approval_id":        approvalID,
-		"approved":           approved,
-		"caller_session_key": callerSessionKey,
+	logger.DebugCF("telegram", "handleApprovalCallback calling HandleApprovalForRequester", map[string]interface{}{
+		"approval_id":         approvalID,
+		"approved":            approved,
+		"caller_session_key":  callerSessionKey,
+		"caller_requester_id": callerRequesterID,
 	})
 
-	approval, err := c.approvalManager.HandleApprovalForSession(approvalID, approved, callerSessionKey)
+	approval, err := c.approvalManager.HandleApprovalForRequester(approvalID, approved, callerSessionKey, callerRequesterID)
 	if err != nil {
-		if strings.Contains(err.Error(), "approval session mismatch") {
+		switch {
+		case errors.Is(err, ErrApprovalRequesterMismatch):
+			logger.WarnCF("telegram", "Approval requester mismatch rejected", map[string]interface{}{
+				"approval_id":         approvalID,
+				"caller_requester_id": callerRequesterID,
+				"caller_session_key":  callerSessionKey,
+			})
+			return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("⚠️ Only the user who requested this command can approve it"))
+		case errors.Is(err, ErrApprovalSessionMismatch):
 			logger.WarnCF("telegram", "Approval session mismatch rejected", map[string]interface{}{
 				"approval_id":        approvalID,
 				"caller_session_key": callerSessionKey,

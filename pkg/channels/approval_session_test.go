@@ -10,7 +10,7 @@ import (
 
 func TestHandleApprovalForSessionRejectsCrossSession(t *testing.T) {
 	am := NewApprovalManager()
-	approval := am.CreateApproval("telegram:111", "rm -rf /", "dangerous command", 111)
+	approval := am.CreateApproval("telegram:111", "rm -rf /", "dangerous command", 111, "")
 
 	if approval == nil {
 		t.Fatal("expected approval to be created")
@@ -49,7 +49,7 @@ func TestHandleApprovalForSessionRejectsCrossSession(t *testing.T) {
 
 func TestHandleApprovalForSessionAllowsSameSession(t *testing.T) {
 	am := NewApprovalManager()
-	approval := am.CreateApproval("telegram:777", "make test", "build verification", 777)
+	approval := am.CreateApproval("telegram:777", "make test", "build verification", 777, "")
 
 	handled, err := am.HandleApprovalForSession(approval.ID, true, "telegram:777")
 	if err != nil {
@@ -74,7 +74,7 @@ func TestHandleApprovalForSessionAllowsSameSession(t *testing.T) {
 
 func TestHandleApprovalUnscopedStillWorks(t *testing.T) {
 	am := NewApprovalManager()
-	approval := am.CreateApproval("telegram:555", "echo hi", "trivial", 555)
+	approval := am.CreateApproval("telegram:555", "echo hi", "trivial", 555, "")
 
 	handled, err := am.HandleApproval(approval.ID, false)
 	if err != nil {
@@ -95,12 +95,12 @@ func TestHandleApprovalUnscopedStillWorks(t *testing.T) {
 		t.Fatal("response channel was not signaled")
 	}
 
-	a2 := am.CreateApproval("", "ls -la", "listing", 0)
-	if _, err := am.HandleApprovalForSession(a2.ID, true, ""); err != nil {
-		t.Fatalf("empty caller key must be allowed (legacy), got: %v", err)
+	a2 := am.CreateApproval("", "ls -la", "listing", 0, "")
+	if _, err := am.HandleApprovalForSession(a2.ID, true, ""); err == nil {
+		t.Fatal("empty session keys must be denied (fail closed)")
 	}
-	if am.GetApproval(a2.ID) != nil {
-		t.Fatal("approval must be removed after legacy resolution")
+	if am.GetApproval(a2.ID) == nil {
+		t.Fatal("approval must remain pending after a denied empty-key resolution")
 	}
 }
 
@@ -117,7 +117,7 @@ func TestRESTApprove_CrossSessionForbidden(t *testing.T) {
 	am := NewApprovalManager()
 	ts.channel.approvalManager = am
 	ownerSession := "test-session-" + ts.clientID
-	approval := am.CreateApproval(ownerSession, "rm -rf /tmp/x", "dangerous", 0)
+	approval := am.CreateApproval(ownerSession, "rm -rf /tmp/x", "dangerous", 0, "")
 
 	otherSession := "test-session-other"
 	body := mustMarshal(ApproveRequest{RequestID: approval.ID, Approved: true})
@@ -145,7 +145,7 @@ func TestRESTApprove_SameSessionAllowed(t *testing.T) {
 	ts.channel.approvalManager = am
 	sessionKey := "test-session-" + ts.clientID
 	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
-	approval := am.CreateApproval(sessionKey, "echo hi", "trivial", 0)
+	approval := am.CreateApproval(sessionKey, "echo hi", "trivial", 0, "")
 
 	body := mustMarshal(ApproveRequest{RequestID: approval.ID, Approved: true})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/approve", strings.NewReader(string(body)))

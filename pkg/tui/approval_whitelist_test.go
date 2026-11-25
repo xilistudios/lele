@@ -30,7 +30,7 @@ func pendingApprovalModel(t *testing.T, command string) *Model {
 	if am == nil {
 		t.Fatal("approval manager not initialized")
 	}
-	pa := am.CreateApproval(key, command, "deny pattern", 0)
+	pa := am.CreateApproval(key, command, "deny pattern", 0, "")
 	m.pendingApprovalID = pa.ID
 	m.pendingApprovalCmd = command
 	m.pendingApprovalReason = "deny pattern"
@@ -145,7 +145,7 @@ func TestApproval_WKeyDeduplicates(t *testing.T) {
 	m = sendKeys(m, "w")
 
 	am := m.agentLoop.GetApprovalManager()
-	pa := am.CreateApproval(m.currentKey, "GIT   PUSH ORIGIN MAIN", "deny pattern", 0)
+	pa := am.CreateApproval(m.currentKey, "GIT   PUSH ORIGIN MAIN", "deny pattern", 0, "")
 	m.pendingApprovalID = pa.ID
 	m.pendingApprovalCmd = pa.Command
 	m = sendKeys(m, "w")
