@@ -24,11 +24,19 @@ func catalogPreset(typ, label, keyHint, modelHint string) providerPreset {
 		keyHint:   keyHint,
 		modelHint: modelHint,
 	}
-	if models := catalog.ModelsForProvider(typ); len(models) > 0 && models[0].ID != "" {
-		p.defaultModel = models[0].ID
-		p.defaultModelAlias = models[0].ID
+	if id := catalogDefaultModel(catalog.ModelsForProvider(typ)); id != "" {
+		p.defaultModel = id
+		p.defaultModelAlias = id
 	}
 	return p
+}
+
+func catalogDefaultModel(models []catalog.Model) string {
+	servable := catalog.ChatCompletionsModels(models)
+	if len(servable) == 0 {
+		return ""
+	}
+	return servable[0].ID
 }
 
 var providerPresets = []providerPreset{

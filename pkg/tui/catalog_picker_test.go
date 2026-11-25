@@ -525,3 +525,92 @@ func TestRenderCatalogSuggestionsEmptyAndList(t *testing.T) {
 		t.Errorf("render missing highlighted label: %q", out)
 	}
 }
+
+func seedOpencodeGoCatalog(t *testing.T) {
+	t.Helper()
+	if err := catalog.SeedProvider(catalog.Provider{
+		ID: "opencode_go", Name: "OpenCode Go", Type: "openai",
+		APIBase: "https://opencode.ai/zen/go/v1",
+		Models: []catalog.Model{
+			{ID: "glm-5.1", Name: "GLM-5.1", ContextWindow: 204800, MaxOutput: 131072},
+			{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", ContextWindow: 1050000, Protocol: catalog.ProtocolResponses},
+			{ID: "grok-4.7", Name: "Grok 4.7", ContextWindow: 500000, Protocol: catalog.ProtocolResponses},
+			{ID: "minimax-m2.7", Name: "MiniMax M2.7", ContextWindow: 204800, Protocol: catalog.ProtocolAnthropicMessages},
+			{ID: "omen-alpha", Name: "Omen Alpha"},
+		},
+	}); err != nil {
+		t.Fatalf("seed opencode_go: %v", err)
+	}
+}
+
+func TestCatalogPickerHidesNonChatCompletionsModels(t *testing.T) {
+	m := newCatalogTestModel(t)
+	seedOpencodeGoCatalog(t)
+	m.cfg.Providers.Named["my-go"] = config.NamedProviderConfig{
+		Type:           "opencode_go",
+		ProviderConfig: config.ProviderConfig{APIKey: "sk-go"},
+	}
+
+	m.modalMode = ModalAddModel
+	m.formStepIndex = 1
+	m.providerSelectedName = "my-go"
+	m.formValues = make([]string, addModelStepCount)
+	m.refreshCatalogSuggestions("")
+
+	if !m.addModelCatalogActive {
+		t.Fatal("picker should be active for a catalog provider")
+	}
+	if len(m.addModelCatalogIDs) != 2 {
+		t.Fatalf("picker offers %v, want only [glm-5.1 omen-alpha]", m.addModelCatalogIDs)
+	}
+	for _, id := range m.addModelCatalogIDs {
+		if id == "gpt-5.6-luna" || id == "grok-4.7" || id == "minimax-m2.7" {
+			t.Errorf("picker offers %q: the endpoint answers 400 ModelProtocolUnsupported", id)
+		}
+	}
+	if m.addModelCatalogIDs[0] != "glm-5.1" {
+		t.Errorf("first suggestion = %q, want glm-5.1", m.addModelCatalogIDs[0])
+	}
+	if !strings.Contains(m.addModelCatalogLabels[1], "no published limits") {
+		t.Errorf("label = %q, want it to flag the model whose limits nobody publishes", m.addModelCatalogLabels[1])
+	}
+}
+
+func TestCatalogDefaultModelSkipsUnsupportedProtocol(t *testing.T) {
+	models := []catalog.Model{
+		{ID: "gpt-5.6-luna", Protocol: catalog.ProtocolResponses},
+		{ID: "glm-5.1"},
+	}
+	if got := catalogDefaultModel(models); got != "glm-5.1" {
+		t.Fatalf("catalogDefaultModel() = %q, want glm-5.1", got)
+	}
+	if got := catalogDefaultModel([]catalog.Model{{ID: "gpt-5.6-luna", Protocol: catalog.ProtocolResponses}}); got != "" {
+		t.Fatalf("catalogDefaultModel() = %q, want empty when nothing is servable", got)
+	}
+	if got := catalogDefaultModel(nil); got != "" {
+		t.Fatalf("catalogDefaultModel(nil) = %q, want empty", got)
+	}
+}
+
+func TestApplyCatalogSelectionPrefillsOmenAlphaFromDefaults(t *testing.T) {
+	m := newCatalogTestModel(t)
+	seedOpencodeGoCatalog(t)
+	m.cfg.Providers.Named["my-go"] = config.NamedProviderConfig{
+		Type:           "opencode_go",
+		ProviderConfig: config.ProviderConfig{APIKey: "sk-go"},
+	}
+	m.modalMode = ModalAddModel
+	m.formStepIndex = 1
+	m.providerSelectedName = "my-go"
+	m.formValues = make([]string, addModelStepCount)
+
+	m.textInput.SetValue("omen-alpha")
+	m.applyCatalogSelectionOnEnter()
+
+	if m.formValues[1] != "omen-alpha" {
+		t.Fatalf("formValues[1] = %q, want omen-alpha", m.formValues[1])
+	}
+	if m.formValues[2] != "128000" || m.formValues[3] != "8192" {
+		t.Fatalf("prefill = %q/%q, want the documented unknown-model defaults 128000/8192", m.formValues[2], m.formValues[3])
+	}
+}
