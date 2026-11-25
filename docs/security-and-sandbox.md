@@ -81,6 +81,41 @@ Lele stores logs locally and the editable config API marks secret fields with me
 
 Even so, avoid placing secrets in prompts, memory files, or user-facing session content.
 
+## Exec Secrets
+
+The `exec` tool resolves `{{SECRET:name}}` placeholders against the agent-scoped keyring at run time.
+Resolution is environment-based, never argv-based:
+
+- every distinct secret referenced by a command is exported to the child process environment as
+  `LELE_SECRET_0`, `LELE_SECRET_1`, … in first-appearance order (one variable per secret name, so the
+  mapping is deterministic and cannot collide between secrets)
+- the executed command carries only the reference — `$LELE_SECRET_0` for POSIX shells, `$env:LELE_SECRET_0`
+  for PowerShell
+- the raw value therefore never lands in `/proc/<pid>/cmdline` (world-readable on most Linux setups), in
+  logs, or in session history; the stored and displayed command keeps the `{{SECRET:name}}` placeholder form
+
+Quoting: the placeholder must sit where the shell still expands variables.
+
+| context | example | behavior |
+|---|---|---|
+| unquoted | `curl -H X-Api-Key:{{SECRET:key}} https://…` | expands; the value is subject to word splitting |
+| double quotes | `curl -H "X-Api-Key: {{SECRET:key}}" https://…` | expands; recommended form |
+| single quotes | `echo '{{SECRET:key}}'` | rejected with an actionable error — single quotes disable expansion |
+| backslash-escaped | `echo \{{SECRET:key}}` | left untouched, the literal `{{SECRET:key}}` reaches the command |
+
+Secret values containing shell metacharacters (`` ` ``, `$`, `;`, `|`, `&`, `<`, `>`, quotes, backslashes,
+newlines) are rejected outright: store values without shell syntax. Wrap the reference in double quotes so
+values containing whitespace survive as a single argument.
+
+Limits worth knowing:
+
+- environment injection removes the **argv** exposure, not the **environment** exposure: a child process tree
+  can still read the value from `/proc/<pid>/environ` (restricted to the process owner unless `hidepid=0`).
+- harness template `!shell` commands do **not** resolve `{{SECRET:name}}` placeholders — template expansion
+  has no keyring access, so placeholders stay literal there.
+- the guard that re-checks the resolved command still runs, and values are still screened for shell
+  metacharacters; env injection is not a relaxation of either check.
+
 ## Recommendations
 
 - keep `restrict_to_workspace` enabled unless you have a specific reason not to
