@@ -196,7 +196,35 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 		applyCacheBreakpoints(&params, protocoltypes.CacheTTLOptions(options))
 	}
 
+	applyThinkingParams(&params, options)
+
 	return params, nil
+}
+
+func applyThinkingParams(params *anthropic.MessageNewParams, options map[string]interface{}) {
+	reasoning, ok := options["reasoning"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	enabled, ok := reasoning["enabled"].(bool)
+	if !ok {
+		return
+	}
+	if !enabled {
+		disabled := anthropic.NewThinkingConfigDisabledParam()
+		params.Thinking = anthropic.ThinkingConfigParamUnion{OfDisabled: &disabled}
+		return
+	}
+	adaptive := anthropic.NewThinkingConfigAdaptiveParam()
+	params.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive}
+	params.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(thinkingEffort(reasoning))}
+}
+
+func thinkingEffort(reasoning map[string]interface{}) string {
+	if effort, ok := reasoning["effort"].(string); ok && effort != "" {
+		return effort
+	}
+	return "high"
 }
 
 func buildAnthropicContentBlocks(msg Message) []anthropic.ContentBlockParamUnion {

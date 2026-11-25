@@ -515,3 +515,94 @@ func TestTranslateToolsRequiredSurvives(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildParams_ThinkingEnabled(t *testing.T) {
+	params, err := buildParams([]Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4-6", map[string]interface{}{
+		"max_tokens": 1024,
+		"reasoning": map[string]interface{}{
+			"enabled": true,
+			"effort":  "high",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if params.Thinking.OfAdaptive == nil {
+		t.Fatalf("thinking = %#v, want adaptive", params.Thinking)
+	}
+	if params.OutputConfig.Effort != anthropic.OutputConfigEffortHigh {
+		t.Fatalf("output_config.effort = %q, want %q", params.OutputConfig.Effort, anthropic.OutputConfigEffortHigh)
+	}
+
+	wire := marshalParams(t, params)
+	for _, want := range []string{`"thinking":{"type":"adaptive"}`, `"output_config":{"effort":"high"}`} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("request body missing %s: %s", want, wire)
+		}
+	}
+}
+
+func TestBuildParams_ThinkingEnabledDefaultEffort(t *testing.T) {
+	params, err := buildParams([]Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4-6", map[string]interface{}{
+		"reasoning": map[string]interface{}{"enabled": true},
+	})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if params.Thinking.OfAdaptive == nil {
+		t.Fatalf("thinking = %#v, want adaptive", params.Thinking)
+	}
+	if params.OutputConfig.Effort != anthropic.OutputConfigEffortHigh {
+		t.Fatalf("output_config.effort = %q, want the %q default", params.OutputConfig.Effort, anthropic.OutputConfigEffortHigh)
+	}
+}
+
+func TestBuildParams_ThinkingDisabled(t *testing.T) {
+	params, err := buildParams([]Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4-6", map[string]interface{}{
+		"reasoning": map[string]interface{}{"enabled": false, "effort": "high"},
+	})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if params.Thinking.OfDisabled == nil {
+		t.Fatalf("thinking = %#v, want disabled", params.Thinking)
+	}
+	if params.OutputConfig.Effort != "" {
+		t.Fatalf("output_config.effort = %q, want unset when thinking is disabled", params.OutputConfig.Effort)
+	}
+	wire := marshalParams(t, params)
+	if !strings.Contains(wire, `"thinking":{"type":"disabled"}`) {
+		t.Fatalf("request body missing the disable marker: %s", wire)
+	}
+	if strings.Contains(wire, `"output_config"`) {
+		t.Fatalf("request body must not carry output_config when thinking is disabled: %s", wire)
+	}
+}
+
+func TestBuildParams_NoReasoning(t *testing.T) {
+	params, err := buildParams([]Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4-6", map[string]interface{}{
+		"max_tokens": 1024,
+	})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if params.Thinking.OfAdaptive != nil || params.Thinking.OfDisabled != nil || params.Thinking.OfEnabled != nil {
+		t.Fatalf("thinking = %#v, want no thinking config", params.Thinking)
+	}
+	if params.OutputConfig.Effort != "" {
+		t.Fatalf("output_config.effort = %q, want unset", params.OutputConfig.Effort)
+	}
+	wire := marshalParams(t, params)
+	if strings.Contains(wire, `"thinking"`) || strings.Contains(wire, `"output_config"`) {
+		t.Fatalf("request body must omit thinking/output_config without a reasoning option: %s", wire)
+	}
+}
+
+func marshalParams(t *testing.T, params anthropic.MessageNewParams) string {
+	t.Helper()
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	return string(data)
+}
