@@ -264,14 +264,14 @@ the catalog marks them `base_less`; see **Claude Code** below.
 `pkg/catalog` downloads a curated catalog from this repository's `catalog/` directory (not embedded in the binary):
 
 - `catalog/index.json` — provider manifest (id, name, api_base, file, model_count)
-- `catalog/providers/<id>.json` — per-provider models with `context_window`, `max_output`, `vision`, and `thinking_levels`
+- `catalog/providers/<id>.json` — per-provider models with `context_window`, `max_output`, `vision`, `thinking_levels` and, when the model is not served over `chat/completions`, `protocol`
 
 On gateway start (and on demand) lele loads `~/.lele/cache/catalog/` and, if missing or stale, downloads the files in the background from GitHub raw (`LELE_CATALOG_BASE_URL` overrides the base). Only the requested provider file is read when listing models for one provider.
 
 HTTP API:
 
 - `GET /api/v1/catalog/providers` — every known provider (disk index, or the hardcoded offline set) with `id`, `name`, `type`, `api_base`, `model_count` and `base_less`. The `api_base` is always filled when the type has a known endpoint (`catalog.DefaultAPIBaseByType`), so a UI can pre-fill it instead of shipping its own table; `base_less: true` marks the providers whose endpoint cannot be derived (`custom`, `claude-code`, `codex-cli`, `bedrock`, `azure_foundry`). The WebUI's Add-provider screen builds its tile grid from this response, which is what keeps a provider added in Go selectable in the UI (issue #404).
-- `GET /api/v1/catalog/models?provider=<id>&q=<query>`
+- `GET /api/v1/catalog/models?provider=<id>&q=<query>` — the models a picker may offer. Entries whose `protocol` is set to anything other than `chat_completions` are filtered out server-side, because lele's provider transports only speak `chat/completions`: offering them would hand the user an id that fails on the first message (issue #405). An absent/empty `protocol` means `chat/completions`, so catalog files written before the marker existed behave exactly as before.
 - `POST /api/v1/catalog/prefetch`
 - `GET /api/v1/providers/{name}/models` — live `/v1/models` when credentials exist, enriched with catalog metadata, with offline catalog fallback. A name that is not configured yet but is a known catalog provider answers with the catalog list (`source: "catalog"`), so the Add-provider screen can populate its model picker before the provider is saved.
 
@@ -281,6 +281,15 @@ CLI:
 - `lele models providers` / `lele models list [provider]` — inspect the cache
 
 The catalog files are regenerated from [models.dev](https://models.dev) by `scripts/update_model_catalog.py`. A scheduled GitHub Actions workflow (`.github/workflows/update-model-catalog.yml`) runs weekly, and opens a PR when the catalog changes.
+
+Everything the mirror cannot derive lives in that script, never in the JSON — a hand edit is reverted by the next weekly run:
+
+- `PROTOCOL_MARKERS` — per-provider map of ids that the gateway serves over another wire protocol; it is the only source of the `protocol` field (models.dev has no transport data, and its `provider.npm` hints on the same endpoint are not reliable enough to drive it).
+- `EXCLUDED_ID_SUFFIXES` — ids the gateway answers with `400 ModelDeprecated` or `402` upstream-unavailable (`opencode_go`: `-free`).
+- `PINNED_MODEL_IDS` — ids measured live on the gateway that models.dev's mirror does not list yet; they lead the model list, so the picker's default entry is a verified id, and they bypass the deprecation filter.
+- `MODEL_METADATA_SIBLINGS` / `CURATED_MODEL_RECORDS` — where the metadata for a pinned id comes from when the provider itself does not list it.
+
+Regeneration is idempotent: `updated_at` in `index.json` only moves when the generated content actually changes, so rerunning the script on an up-to-date tree is a no-op. `--providers <id>...` limits a run to selected providers (the rest of the catalog and its index entries stay untouched), and `--source <api.json>` regenerates offline from a saved models.dev snapshot.
 
 When adding a model to `providers.*.models` in the WebUI settings or TUI `/add-model`, suggestions come from this catalog and prefill context window, max tokens, vision, and reasoning defaults.
 
@@ -741,14 +750,36 @@ drift as the service changes.
   (measured 2026-10-22): `minimax-m3.1-flash-free` answers `400
   ModelDeprecated` ("Model minimax-m3.1-flash-free has been deprecated.")
   and `longcat-2.5-preview-free` answers `402 Upstream request failed:
-  Endpoint is unavailable.` Both ids still ship in
-  `catalog/providers/opencode_go.json`, so the model picker can offer them —
-  use `minimax-m3.1-flash` instead and expect the next catalog refresh to
-  drop the deprecated ones.
+  Endpoint is unavailable.` Free-tier ids no longer ship: the generator drops
+  every `-free` id for this provider (`EXCLUDED_ID_SUFFIXES` in
+  `scripts/update_model_catalog.py`), and the paid ids they mirror
+  (`minimax-m3.1-flash`, `longcat-2.5`) stay.
 
 `GET /models` is authoritative for *names*, not for protocol compatibility;
 smoke-test a model with one message before making it the default in
 `agents.defaults`.
+
+#### How the catalog encodes this split
+
+`catalog/providers/opencode_go.json` carries the measurement, not just this
+page: every id in the `400 ModelProtocolUnsupported` list above is recorded
+with a `protocol` marker in the generator (`responses` for the
+OpenAI/Grok/Muse ids, `anthropic_messages` for `claude-haiku-5-5` and
+`minimax-m2.7`, `gemini` for `gemini-4-argon-contributor`), and the catalog
+files ship that marker for the ids they still list —
+`gemini-4-argon-contributor` itself is deprecated upstream, so it is no longer
+in the file. `GET /api/v1/catalog/models` drops the marked entries before the
+picker sees them, so the model that tops the Add-provider list is a verified
+`chat/completions` id instead of `gpt-5.6-luna`. The ids measured live but
+missing from models.dev (`glm-5.1`, `grok-4.6`, `kimi-k2.6`, `minimax-m2.5`,
+`minimax-m2.7`, `minimax-m3.1-flash`, `omen-alpha`, `qwen3.6-plus`,
+`qwen3.7-max`) are pinned by the generator and lead the list.
+
+The marker is curated, not mirrored: models.dev has no transport field, so
+behaviour changes (an id starts or stops answering `chat/completions`) must be
+recorded in `PROTOCOL_MARKERS` in `scripts/update_model_catalog.py` — see
+**Model catalog and prefetch**. Ids absent from both this page and the marker
+map are unmeasured; smoke-test them before relying on them.
 
 #### Requirements / troubleshooting
 
@@ -831,7 +862,10 @@ The model list is catalog-backed (`catalog/providers/opencode.json`, 40
 ids), but per-model protocol coverage on `/zen/v1` is unverified — the
 coverage split documented for Go was measured on `/zen/go/v1` only. Smoke
 test a model with one message before making it the default in
-`agents.defaults`.
+`agents.defaults`. For the same reason the Zen catalog carries no `protocol`
+markers yet: the picker filter only hides ids that have been measured as
+non-`chat/completions` on the gateway they are served from, and that has not
+been done for `/zen/v1`.
 
 ## Named Provider Models
 
