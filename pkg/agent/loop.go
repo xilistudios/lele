@@ -328,6 +328,7 @@ type processOptions struct {
 	SessionKey      string
 	Channel         string
 	ChatID          string
+	SenderID        string
 	UserMessage     string
 	Attachments     []bus.FileAttachment
 	DefaultResponse string

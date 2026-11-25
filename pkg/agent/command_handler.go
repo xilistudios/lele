@@ -658,6 +658,8 @@ func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus
 		Rounds:    rounds,
 		Parallel:  parallel,
 		Moderator: moderator,
+
+		OriginSenderID: msg.SenderID,
 	}
 
 	groupID := group.NewGroupID("adhoc")
@@ -728,6 +730,8 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 		StopKeywords:     profile.StopKeywords,
 		MaxTokensPerTurn: profile.MaxTokensPerTurn,
 		TotalTokenBudget: profile.TotalTokenBudget,
+
+		OriginSenderID: msg.SenderID,
 	}
 
 	groupID := group.NewGroupID(profile.ID)

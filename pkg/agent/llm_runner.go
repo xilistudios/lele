@@ -773,6 +773,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				channel:      opts.Channel,
 				chatID:       opts.ChatID,
 				sessionKey:   opts.SessionKey,
+				senderID:     opts.SenderID,
 				iteration:    iteration,
 				sendResponse: opts.SendResponse,
 			})

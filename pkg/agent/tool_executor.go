@@ -22,6 +22,7 @@ type toolExecOptions struct {
 	channel      string
 	chatID       string
 	sessionKey   string
+	senderID     string
 	iteration    int
 	sendResponse bool
 }
@@ -109,6 +110,7 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 	}
 
 	opts.ctx = tools.WithAgentToolContext(opts.ctx, opts.agent.ID, opts.sessionKey)
+	opts.ctx = tools.WithToolSender(opts.ctx, opts.senderID)
 
 	if videoCaps != nil {
 		opts.ctx = tools.WithVideoCaps(opts.ctx, *videoCaps)
@@ -163,6 +165,7 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 		toolResult.ApprovalRequired.Command,
 		toolResult.ApprovalRequired.Reason,
 		chatIDInt,
+		opts.senderID,
 	)
 
 	if opts.channel == channels.ChannelName {
