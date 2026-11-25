@@ -370,3 +370,106 @@ func TestRun_UsageErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestDerivePub_PrintsTheKeyPairPublicKey(t *testing.T) {
+	keys := keygen(t)
+
+	for _, test := range []struct {
+		name  string
+		value []byte
+	}{
+		{name: "full private key", value: keys.privateKey},
+		{name: "seed", value: keys.privateKey.Seed()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			err := run(
+				[]string{subcommandDerivePub, "--key-env", testEnvName},
+				&stdout,
+				envFunc(map[string]string{testEnvName: base64.StdEncoding.EncodeToString(test.value)}),
+			)
+			if err != nil {
+				t.Fatalf("derive-pub: %v", err)
+			}
+
+			output := strings.TrimSpace(stdout.String())
+			if strings.ContainsAny(output, " \n") {
+				t.Fatalf("derive-pub printed %q, want a single bare base64 public key", output)
+			}
+			if got, want := output, base64.StdEncoding.EncodeToString(keys.publicKey); got != want {
+				t.Errorf("derive-pub = %q, want %q", got, want)
+			}
+			if strings.Contains(output, base64.StdEncoding.EncodeToString(keys.privateKey)) {
+				t.Error("derive-pub printed the private key")
+			}
+		})
+	}
+}
+
+func TestDerivePub_KeyProblems(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		wantInErr string
+	}{
+		{name: "empty", value: "", wantInErr: testEnvName},
+		{name: "not base64", value: "not-base64!!", wantInErr: "not valid base64"},
+		{name: "too short", value: base64.StdEncoding.EncodeToString([]byte("short")), wantInErr: "expected 32 (seed) or 64"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			err := run(
+				[]string{subcommandDerivePub, "--key-env", testEnvName},
+				&stdout,
+				envFunc(map[string]string{testEnvName: test.value}),
+			)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), test.wantInErr) {
+				t.Errorf("error = %v, want it to contain %q", err, test.wantInErr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing printed on a bad key", stdout.String())
+			}
+		})
+	}
+}
+
+func TestDerivePub_RejectsArguments(t *testing.T) {
+	keys := keygen(t)
+
+	err := run(
+		[]string{subcommandDerivePub, "--key-env", testEnvName, "extra"},
+		&bytes.Buffer{},
+		envFunc(map[string]string{testEnvName: base64.StdEncoding.EncodeToString(keys.privateKey)}),
+	)
+	if err == nil {
+		t.Fatal("expected an error for a stray argument")
+	}
+	if !strings.Contains(err.Error(), "takes no arguments") {
+		t.Errorf("error = %v, want a usage error", err)
+	}
+}
+
+func TestDerivePub_MatchesThePinnedReleaseKey(t *testing.T) {
+	const pinned = "ybtp/SDuO9p/gqHXUBrdORoVDwmDwUiM8NmsxwbPd5o="
+
+	keys := keygen(t)
+	var stdout bytes.Buffer
+	if err := run(
+		[]string{subcommandDerivePub, "--key-env", testEnvName},
+		&stdout,
+		envFunc(map[string]string{testEnvName: base64.StdEncoding.EncodeToString(keys.privateKey)}),
+	); err != nil {
+		t.Fatalf("derive-pub: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) == pinned {
+		t.Fatal("a freshly generated test key derived the production pinned key")
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(pinned); err != nil || len(decoded) != ed25519.PublicKeySize {
+		t.Fatalf("the production pinned key is not a %d byte base64 ed25519 key: %v", ed25519.PublicKeySize, err)
+	}
+}

@@ -17,14 +17,16 @@ import (
 const (
 	signatureSuffix = ".sig"
 
-	subcommandKeygen = "keygen"
-	subcommandSign   = "sign"
-	subcommandVerify = "verify"
+	subcommandKeygen    = "keygen"
+	subcommandDerivePub = "derive-pub"
+	subcommandSign      = "sign"
+	subcommandVerify    = "verify"
 
 	signingKeyEnv = "LELE_RELEASE_SIGNING_KEY"
 
 	usage = `usage:
   sign-checksums keygen
+  sign-checksums derive-pub [--key-env NAME]
   sign-checksums sign   [--key-env NAME] [--out PATH] CHECKSUMS
   sign-checksums verify [--key-env NAME] CHECKSUMS SIGNATURE`
 )
@@ -44,6 +46,8 @@ func run(args []string, stdout io.Writer, getenv func(string) string) error {
 	switch args[0] {
 	case subcommandKeygen:
 		return runKeygen(args[1:], stdout)
+	case subcommandDerivePub:
+		return runDerivePub(args[1:], stdout, getenv)
 	case subcommandSign:
 		return runSign(args[1:], getenv)
 	case subcommandVerify:
@@ -77,6 +81,33 @@ func runKeygen(args []string, stdout io.Writer) error {
 	)
 	if err != nil {
 		return fmt.Errorf("writing key pair: %w", err)
+	}
+	return nil
+}
+
+func runDerivePub(args []string, stdout io.Writer, getenv func(string) string) error {
+	fs := flag.NewFlagSet(subcommandDerivePub, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	keyEnv := fs.String("key-env", signingKeyEnv, "environment variable holding the base64 ed25519 private key")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, usage)
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("derive-pub takes no arguments\n%s", usage)
+	}
+
+	privateKey, err := loadPrivateKey(getenv(*keyEnv), *keyEnv)
+	if err != nil {
+		return err
+	}
+
+	publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok {
+		return fmt.Errorf("deriving the public key from %s failed", *keyEnv)
+	}
+
+	if _, err := fmt.Fprintf(stdout, "%s\n", base64.StdEncoding.EncodeToString(publicKey)); err != nil {
+		return fmt.Errorf("writing public key: %w", err)
 	}
 	return nil
 }
