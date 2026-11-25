@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"sort"
@@ -869,16 +870,25 @@ func (n *NativeChannel) handleChatApprove(w http.ResponseWriter, r *http.Request
 
 	handledApproval, err := n.approvalManager.HandleApprovalForSession(req.RequestID, req.Approved, sessionKey)
 	if err != nil {
-		if strings.Contains(err.Error(), "approval session mismatch") {
+		switch {
+		case errors.Is(err, ErrApprovalSessionMismatch), errors.Is(err, ErrApprovalRequesterMismatch):
 			logger.WarnCF("native", "Approval session mismatch rejected", map[string]interface{}{
 				"client_id":  clientID,
 				"session":    sessionKey,
 				"request_id": req.RequestID,
 			})
 			writeError(w, http.StatusForbidden, "approval belongs to a different session", "approval_forbidden")
-			return
+		case errors.Is(err, ErrApprovalNotFound):
+			writeError(w, http.StatusNotFound, err.Error(), "approval_not_found")
+		default:
+			logger.ErrorCF("native", "Failed to handle approval", map[string]interface{}{
+				"client_id":  clientID,
+				"session":    sessionKey,
+				"request_id": req.RequestID,
+				"error":      err.Error(),
+			})
+			writeError(w, http.StatusInternalServerError, "approval could not be resolved", "approval_error")
 		}
-		writeError(w, http.StatusNotFound, err.Error(), "approval_not_found")
 		return
 	}
 

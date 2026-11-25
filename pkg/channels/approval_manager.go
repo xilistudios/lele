@@ -43,18 +43,20 @@ func requesterIDPart(requesterID string) string {
 }
 
 func approvalRequesterMatches(approvalRequesterID, callerRequesterID string) bool {
-	if approvalRequesterID == "" {
-		return true
-	}
-	if callerRequesterID == "" {
+	if approvalRequesterID == "" || callerRequesterID == "" {
 		return false
 	}
 	return requesterIDPart(approvalRequesterID) == requesterIDPart(callerRequesterID)
 }
 
 type approvalAuthority struct {
-	sessionKey  string
-	requesterID string
+	sessionKey       string
+	requesterID      string
+	requireRequester bool
+}
+
+func (a *approvalAuthority) requiresRequesterMatch(approval *PendingApproval) bool {
+	return a.requireRequester && approval.RequesterID != ""
 }
 
 type ApprovalManager struct {
@@ -147,9 +149,37 @@ func (am *ApprovalManager) HandleApprovalForSession(approvalID string, approved 
 
 func (am *ApprovalManager) HandleApprovalForRequester(approvalID string, approved bool, callerSessionKey, callerRequesterID string) (*PendingApproval, error) {
 	return am.resolveApproval(approvalID, approved, &approvalAuthority{
-		sessionKey:  callerSessionKey,
-		requesterID: callerRequesterID,
+		sessionKey:       callerSessionKey,
+		requesterID:      callerRequesterID,
+		requireRequester: true,
 	})
+}
+
+func (am *ApprovalManager) CheckApprovalForRequester(approvalID, callerSessionKey, callerRequesterID string) (*PendingApproval, error) {
+	am.mu.RLock()
+	approval, ok := am.pending[approvalID]
+	am.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrApprovalNotFound, approvalID)
+	}
+	authority := &approvalAuthority{sessionKey: callerSessionKey, requesterID: callerRequesterID, requireRequester: true}
+	if err := authorizeApproval(approval, authority); err != nil {
+		return nil, err
+	}
+	return approval, nil
+}
+
+func authorizeApproval(approval *PendingApproval, authority *approvalAuthority) error {
+	if authority == nil {
+		return nil
+	}
+	if !approvalSessionMatches(approval.SessionKey, authority.sessionKey) {
+		return ErrApprovalSessionMismatch
+	}
+	if authority.requiresRequesterMatch(approval) && !approvalRequesterMatches(approval.RequesterID, authority.requesterID) {
+		return ErrApprovalRequesterMismatch
+	}
+	return nil
 }
 
 func (am *ApprovalManager) resolveApproval(approvalID string, approved bool, authority *approvalAuthority) (*PendingApproval, error) {
@@ -159,15 +189,9 @@ func (am *ApprovalManager) resolveApproval(approvalID string, approved bool, aut
 		am.mu.Unlock()
 		return nil, fmt.Errorf("%w: %s", ErrApprovalNotFound, approvalID)
 	}
-	if authority != nil {
-		if !approvalSessionMatches(approval.SessionKey, authority.sessionKey) {
-			am.mu.Unlock()
-			return nil, ErrApprovalSessionMismatch
-		}
-		if !approvalRequesterMatches(approval.RequesterID, authority.requesterID) {
-			am.mu.Unlock()
-			return nil, ErrApprovalRequesterMismatch
-		}
+	if err := authorizeApproval(approval, authority); err != nil {
+		am.mu.Unlock()
+		return nil, err
 	}
 	delete(am.pending, approvalID)
 	am.mu.Unlock()
