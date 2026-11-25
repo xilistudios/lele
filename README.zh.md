@@ -43,7 +43,7 @@ lele agent -m "你能做什么？"
 lele tui
 ```
 
-安装脚本会校验 SHA256，默认安装到 `~/.local/bin`。
+安装脚本会校验 SHA256（必需）以及发布包的 ed25519 签名（在有 OpenSSL 3.0 及以上时），默认安装到 `~/.local/bin` — 参见 `docs/release-signing.md`。
 
 ## 基准测试
 

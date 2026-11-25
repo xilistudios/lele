@@ -43,7 +43,7 @@ lele agent -m "Que peux-tu faire ?"
 lele tui
 ```
 
-Les installateurs vérifient le SHA256 et installent par défaut dans `~/.local/bin`.
+Les installateurs vérifient le SHA256 (obligatoire) et la signature ed25519 de la release (avec OpenSSL ≥ 3.0, si présent) et installent par défaut dans `~/.local/bin` — voir `docs/release-signing.md`.
 
 ## Benchmarks
 

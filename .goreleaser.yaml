@@ -77,6 +77,28 @@ archives:
       - goos: windows
         formats: [zip]
 
+checksum:
+  name_template: 'lele_{{ .Version }}_checksums.txt'
+
+# Detached ed25519 signature over the checksums file: one signature binds every
+# archive in the release. `pkg/update` verifies it against the pinned public key
+# before trusting any checksum, and install.sh verifies it with openssl when
+# available. Key handling: docs/release-signing.md.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    signature: "${artifact}.sig"
+    args:
+      - run
+      - ./scripts/sign-checksums
+      - sign
+      - --key-env
+      - LELE_RELEASE_SIGNING_KEY
+      - --out
+      - "${signature}"
+      - "${artifact}"
+
 changelog:
   sort: asc
   filters:

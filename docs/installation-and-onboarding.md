@@ -36,6 +36,11 @@ Default install path:
 ~/.local/bin/lele
 ```
 
+`install.sh` requires `sha256sum` or `shasum` (the checksum is mandatory) and
+verifies the release's ed25519 signature before downloading the archive when
+`openssl` ≥ 3.0 is available; an older or non-OpenSSL build downgrades to the
+checksum-only path with a loud warning. See `docs/release-signing.md`.
+
 ## First-Time Setup
 
 Run:
@@ -123,4 +128,5 @@ make clean
 - `docs/session-and-workspace.md`
 - `docs/web-ui.md`
 - `docs/client-api.md`
+- `docs/release-signing.md`
 - `docs/troubleshooting.md`

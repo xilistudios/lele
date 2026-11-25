@@ -43,7 +43,7 @@ lele agent -m "何ができますか？"
 lele tui
 ```
 
-インストーラはSHA256を検証し、デフォルトでは `~/.local/bin` にインストールします。
+インストーラはSHA256（必須）とリリースのed25519署名（OpenSSL 3.0以上がある場合）を検証し、デフォルトでは `~/.local/bin` にインストールします — 詳細は `docs/release-signing.md`。
 
 ## ベンチマーク
 

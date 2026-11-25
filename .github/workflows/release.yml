@@ -109,6 +109,23 @@ jobs:
       - name: Install web dependencies
         run: cd web && bun install --frozen-lockfile
 
+      - name: Verify the signing secret matches the pinned public key
+        env:
+          LELE_RELEASE_SIGNING_KEY: ${{ secrets.LELE_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          derived="$(go run ./scripts/sign-checksums derive-pub --key-env LELE_RELEASE_SIGNING_KEY)"
+          pinned="$(sed -n 's/.*ReleaseSigningPublicKeyBase64 = "\([^"]*\)".*/\1/p' pkg/update/release_signing_key.go)"
+          if [ -z "$pinned" ]; then
+            echo "::error::could not read the pinned release signing key from pkg/update/release_signing_key.go"
+            exit 1
+          fi
+          if [ "$derived" != "$pinned" ]; then
+            echo "::error::LELE_RELEASE_SIGNING_KEY does not match the pinned public key; the release would be unverifiable"
+            exit 1
+          fi
+          echo "The signing secret matches the pinned public key."
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -118,6 +135,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GOVERSION: ${{ steps.setup-go.outputs.go-version }}
+          # ed25519 private key (base64) that signs lele_<version>_checksums.txt.
+          # Rotate per docs/release-signing.md; the matching public key is pinned
+          # in pkg/update/release_signing_key.go and install.sh.
+          LELE_RELEASE_SIGNING_KEY: ${{ secrets.LELE_RELEASE_SIGNING_KEY }}
 
   desktop:
     name: Desktop binaries
