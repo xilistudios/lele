@@ -614,6 +614,7 @@ export type ProviderModelInfo = {
   vision?: boolean
   thinking_levels?: string[]
   reasoning?: boolean
+  protocol?: string
 }
 
 export type ProviderModelsResponse = {
@@ -631,6 +632,7 @@ export type CatalogModel = {
   thinking_levels?: string[]
   reasoning?: boolean
   tool_call?: boolean
+  protocol?: string
 }
 
 export type CatalogProvider = {

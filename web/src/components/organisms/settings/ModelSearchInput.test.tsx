@@ -289,6 +289,68 @@ describe('ModelSearchInput', () => {
     )
   })
 
+  test('filters protocol-unsupported live ids without falling back to the catalog', async () => {
+    const providerModels = mock(async () => ({
+      provider: 'opencode_go',
+      source: 'catalog',
+      models: [
+        { id: 'gpt-5.6-luna', object: 'model', created: 1, owned_by: 'opencode', protocol: 'responses' },
+        { id: 'glm-5.1', object: 'model', created: 1, owned_by: 'opencode', context_window: 204800 },
+      ],
+    }))
+    const catalogModels = mock(async () => ({
+      provider: 'opencode_go',
+      models: [
+        { id: 'grok-4.7', protocol: 'responses' },
+        { id: 'kimi-k2.6', context_window: 262144 },
+      ],
+    }))
+    const u = renderSearch({
+      providerName: 'opencode_go',
+      providerType: 'opencode_go',
+      api: makeApi({ providerModels, catalogModels } as Partial<ApiClient>),
+    })
+
+    fireEvent.focus(u.input)
+    await waitFor(() => {
+      expect(u.container.textContent).toContain('glm-5.1')
+    })
+    expect(u.container.textContent).not.toContain('gpt-5.6-luna')
+    expect(catalogModels).not.toHaveBeenCalled()
+  })
+
+  test('falls through to the catalog when every live id is unsupported and filters it too', async () => {
+    const providerModels = mock(async () => ({
+      provider: 'opencode_go',
+      source: 'live',
+      models: [
+        { id: 'gpt-5.6-luna', object: 'model', created: 1, owned_by: 'opencode', protocol: 'responses' },
+      ],
+    }))
+    const catalogModels = mock(async () => ({
+      provider: 'opencode_go',
+      models: [
+        { id: 'grok-4.7', protocol: 'responses' },
+        { id: 'kimi-k2.6', context_window: 262144 },
+      ],
+    }))
+    const u = renderSearch({
+      providerName: 'opencode_go',
+      providerType: 'opencode_go',
+      api: makeApi({ providerModels, catalogModels } as Partial<ApiClient>),
+    })
+
+    fireEvent.focus(u.input)
+    await waitFor(() => {
+      expect(catalogModels).toHaveBeenCalledWith('opencode_go')
+    })
+    await waitFor(() => {
+      expect(u.container.textContent).toContain('kimi-k2.6')
+    })
+    expect(u.container.textContent).not.toContain('gpt-5.6-luna')
+    expect(u.container.textContent).not.toContain('grok-4.7')
+  })
+
   test('existing models are hidden from suggestions', async () => {
     const u = renderSearch({ providerType: 'openai', existingModels: ['gpt-5'] })
     fireEvent.focus(u.input)
