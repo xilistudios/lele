@@ -17,8 +17,14 @@ func (n *NativeChannel) handleGetConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	masked, err := doc.MaskedCopy()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mask config: "+err.Error(), "config_mask_failed")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, ConfigResponse{
-		Config: doc,
+		Config: masked,
 		Metadata: ConfigMetadata{
 			ConfigPath:              meta.ConfigPath,
 			Source:                  meta.Source,
@@ -49,10 +55,12 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to load current config: "+err.Error(), "config_load_failed")
 		return
 	}
+	storedSecrets := doc.SecretValues()
 	if err := json.Unmarshal(body, doc); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid config payload: "+err.Error(), "body_invalid")
 		return
 	}
+	doc.RestoreMaskedSecrets(storedSecrets)
 
 	validationErrors := config.ValidateEditableDocument(doc)
 	if len(validationErrors) > 0 {
@@ -94,8 +102,14 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	masked, err := doc.MaskedCopy()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mask config: "+err.Error(), "config_mask_failed")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, ConfigUpdateResponse{
-		Config: doc,
+		Config: masked,
 		Metadata: ConfigMetadata{
 			ConfigPath:              meta.ConfigPath,
 			Source:                  meta.Source,
@@ -107,6 +121,8 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 }
 
 func (n *NativeChannel) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
+	configPath := n.getConfigPath()
+
 	var req ConfigValidateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error(), "body_invalid")
@@ -123,6 +139,9 @@ func (n *NativeChannel) handleValidateConfig(w http.ResponseWriter, r *http.Requ
 	if err := json.Unmarshal(body, &doc); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid config payload: "+err.Error(), "body_invalid")
 		return
+	}
+	if stored, _, err := config.LoadEditableDocument(configPath); err == nil {
+		doc.RestoreMaskedSecrets(stored.SecretValues())
 	}
 
 	validationErrors := config.ValidateEditableDocument(&doc)

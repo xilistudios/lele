@@ -11,6 +11,10 @@ type Props = {
   autoFocus?: boolean
 }
 
+const MODE_BUTTON_IDLE =
+  'rounded px-2 py-1 text-xs bg-background-tertiary text-text-secondary hover:bg-surface-hover'
+const MODE_BUTTON_ACTIVE = 'rounded px-2 py-1 text-xs bg-accent-primary text-text-on-accent'
+
 export function SecretInput({
   id,
   value,
@@ -21,36 +25,67 @@ export function SecretInput({
 }: Props) {
   const { t } = useTranslation()
   const [showValue, setShowValue] = useState(false)
-  const titleText = showValue ? t('settings.hideSecret') : t('settings.showSecret')
+  const [replacing, setReplacing] = useState(false)
   const [mode, setMode] = useState<SecretMode>(value.mode || 'empty')
   const [literalValue, setLiteralValue] = useState(value.value || '')
   const [envName, setEnvName] = useState(value.env_name || '')
+  const [secretName, setSecretName] = useState(value.secret_name || '')
 
   useEffect(() => {
     setMode(value.mode || 'empty')
     setLiteralValue(value.value || '')
     setEnvName(value.env_name || '')
-  }, [value.mode, value.value, value.env_name])
+    setSecretName(value.secret_name || '')
+  }, [value.mode, value.value, value.env_name, value.secret_name])
+
+  const hasStoredLiteral = !!value.has_value && !value.value
+  const showStoredLiteral = mode === 'literal' && hasStoredLiteral && !replacing
+  const titleText = showValue ? t('settings.hideSecret') : t('settings.showSecret')
+
+  useEffect(() => {
+    if (!hasStoredLiteral) setReplacing(false)
+  }, [hasStoredLiteral])
+
+  const literalPayload = (nextValue: string): SecretValue => ({
+    mode: 'literal',
+    value: nextValue || undefined,
+    env_name: undefined,
+    secret_name: undefined,
+    has_env_var: false,
+    has_value: nextValue === '' && hasStoredLiteral,
+  })
 
   const handleModeChange = (newMode: SecretMode) => {
     setMode(newMode)
-    onChange({
-      mode: newMode,
-      value: newMode === 'literal' ? literalValue : undefined,
-      env_name: newMode === 'env' ? envName : undefined,
-      has_env_var: newMode === 'env' && !!envName,
-    })
+    setReplacing(false)
+    if (newMode === 'literal') {
+      onChange(literalPayload(literalValue))
+      return
+    }
+    if (newMode === 'env') {
+      onChange({
+        mode: 'env',
+        env_name: envName || undefined,
+        has_env_var: !!envName,
+        has_value: false,
+      })
+      return
+    }
+    if (newMode === 'keyring') {
+      onChange({
+        mode: 'keyring',
+        secret_name: secretName || undefined,
+        has_env_var: false,
+        has_value: false,
+      })
+      return
+    }
+    onChange({ mode: 'empty', has_env_var: false, has_value: false })
   }
 
   const handleLiteralChange = (newValue: string) => {
     setLiteralValue(newValue)
-    if (mode === 'literal') {
-      onChange({
-        mode: 'literal',
-        value: newValue,
-        has_env_var: false,
-      })
-    }
+    if (mode === 'literal') onChange(literalPayload(newValue))
   }
 
   const handleEnvChange = (newEnvName: string) => {
@@ -58,15 +93,28 @@ export function SecretInput({
     if (mode === 'env') {
       onChange({
         mode: 'env',
-        env_name: newEnvName,
+        env_name: newEnvName || undefined,
         has_env_var: !!newEnvName,
+        has_value: false,
+      })
+    }
+  }
+
+  const handleSecretNameChange = (newSecretName: string) => {
+    setSecretName(newSecretName)
+    if (mode === 'keyring') {
+      onChange({
+        mode: 'keyring',
+        secret_name: newSecretName || undefined,
+        has_env_var: false,
+        has_value: false,
       })
     }
   }
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => handleModeChange('literal')}
@@ -83,29 +131,45 @@ export function SecretInput({
           type="button"
           onClick={() => handleModeChange('env')}
           disabled={disabled}
-          className={`rounded px-2 py-1 text-xs ${
-            mode === 'env'
-              ? 'bg-accent-primary text-text-on-accent'
-              : 'bg-background-tertiary text-text-secondary hover:bg-surface-hover'
-          }`}
+          className={mode === 'env' ? MODE_BUTTON_ACTIVE : MODE_BUTTON_IDLE}
         >
           {t('settings.envVariable')}
         </button>
         <button
           type="button"
+          onClick={() => handleModeChange('keyring')}
+          disabled={disabled}
+          className={mode === 'keyring' ? MODE_BUTTON_ACTIVE : MODE_BUTTON_IDLE}
+        >
+          {t('settings.keyringSecret')}
+        </button>
+        <button
+          type="button"
           onClick={() => handleModeChange('empty')}
           disabled={disabled}
-          className={`rounded px-2 py-1 text-xs ${
-            mode === 'empty'
-              ? 'bg-accent-primary text-text-on-accent'
-              : 'bg-background-tertiary text-text-secondary hover:bg-surface-hover'
-          }`}
+          className={mode === 'empty' ? MODE_BUTTON_ACTIVE : MODE_BUTTON_IDLE}
         >
           {t('settings.empty')}
         </button>
       </div>
 
-      {mode === 'literal' && (
+      {showStoredLiteral && (
+        <div className="flex items-center gap-2">
+          <span className="flex-1 rounded border border-border bg-background-tertiary px-3 py-2 text-xs text-text-tertiary">
+            {t('settings.storedSecret')}
+          </span>
+          <button
+            type="button"
+            onClick={() => setReplacing(true)}
+            disabled={disabled}
+            className="rounded bg-background-tertiary px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            {t('settings.replaceSecret')}
+          </button>
+        </div>
+      )}
+
+      {mode === 'literal' && !showStoredLiteral && (
         <div className="relative">
           <input
             id={id}
@@ -167,6 +231,20 @@ export function SecretInput({
             onChange={(e) => handleEnvChange(e.target.value)}
             disabled={disabled}
             placeholder="ENV_VAR_NAME"
+            className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background-primary font-mono"
+          />
+        </div>
+      )}
+
+      {mode === 'keyring' && (
+        <div className="flex items-center gap-2">
+          <input
+            id={id}
+            type="text"
+            value={secretName}
+            onChange={(e) => handleSecretNameChange(e.target.value)}
+            disabled={disabled}
+            placeholder="secret.name"
             className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background-primary font-mono"
           />
         </div>

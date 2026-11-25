@@ -41,9 +41,7 @@ export function ToolsSettings() {
             <SecretInput
               id="tools.web.brave.api_key"
               value={config.tools.web.brave.api_key}
-              onChange={(v: SecretValue) =>
-                updateSecretField('tools.web.brave.api_key', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('tools.web.brave.api_key', v)}
             />
           </SettingsField>
         )}
@@ -104,9 +102,7 @@ export function ToolsSettings() {
             <SecretInput
               id="tools.web.perplexity.api_key"
               value={config.tools.web.perplexity.api_key}
-              onChange={(v: SecretValue) =>
-                updateSecretField('tools.web.perplexity.api_key', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('tools.web.perplexity.api_key', v)}
             />
           </SettingsField>
         )}

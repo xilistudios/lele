@@ -85,9 +85,7 @@ export function ProvidersSettings() {
                 <SecretInput
                   id={`providers.${name}.api_key`}
                   value={prov.api_key}
-                  onChange={(v: SecretValue) =>
-                    updateSecretField(`providers.${name}.api_key`, v.mode, v.value, v.env_name)
-                  }
+                  onChange={(v: SecretValue) => updateSecretField(`providers.${name}.api_key`, v)}
                 />
               </SettingsField>
               <SettingsField

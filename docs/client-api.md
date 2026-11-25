@@ -461,6 +461,43 @@ Content-Type: application/json
 GET /api/v1/config
 ```
 
+The config document is the editable view of `config.json`. Every secret-typed
+field (`channels.telegram.token`, `channels.feishu.*`, `channels.discord.token`,
+`channels.qq.*`, `channels.dingtalk.*`, `channels.slack.*`, `channels.line.*`,
+`channels.onebot.access_token`, `providers.<name>.api_key`,
+`tools.web.brave.api_key`, `tools.web.perplexity.api_key`) is a **write-only**
+object, never a plain string:
+
+```json
+"token": { "mode": "literal", "value": "", "has_value": true, "has_env_var": false }
+```
+
+| `mode` | meaning | payload |
+| --- | --- | --- |
+| `literal` | the value is stored verbatim in `config.json` | `value` (empty on read — see below), `has_value` |
+| `env` | the file holds `{{ENV_NAME}}` / `{{ENV_NAME:default}}` | `env_name`, `env_default`, `has_env_var` |
+| `keyring` | the file holds `{{SECRET:name}}` | `secret_name` |
+| `empty` | no value configured | — |
+
+**A read never returns a literal secret.** `GET /api/v1/config` serialises a
+masked copy of the document: a stored literal comes back as
+`{"mode": "literal", "value": "", "has_value": true}`, `env` and `keyring`
+fields were always references and stay reference-only (`env_name` /
+`secret_name`, no resolved value). `has_value` is what lets a client tell a
+saved secret (`has_value: true`, empty `value`) apart from a field with nothing
+configured (`mode: "empty"`). `meta.secrets_by_path` maps each secret path to
+the mode found on disk (`literal` / `env` / `keyring` / `empty`).
+
+**Reading twice is safe; writing a read-back document is a no-op.** The masked
+shape is exactly the shape the write side treats as *keep* (next section), so a
+client that fetches the document, changes one unrelated field and saves it back
+preserves every credential byte-for-byte in `config.json`.
+
+Rationale: the config document used to carry literal secrets in cleartext, so
+any masking client — or anything that could read the document, e.g. a browser
+holding the bearer token — could exfiltrate them, and a client that dropped an
+unknown field could destroy them. See `#465`.
+
 #### Save Editable Config Document
 
 ```http
@@ -471,6 +508,37 @@ Content-Type: application/json
   "config": { ... }
 }
 ```
+
+The body is the whole editable document (the same shape `GET` returns) and is
+applied as a delta over `config.json`: a field the document models takes the
+document's value, and anything the document does not model (unknown keys,
+sections, `{{ENV_…}}` placeholders the client echoed back) is preserved. A field
+omitted from the body keeps its stored value.
+
+**Secret write semantics** — for each secret field above:
+
+| what the client sends | result |
+| --- | --- |
+| omitted | keep the stored value |
+| `{"mode": "literal", "value": ""}` — or `has_value: true` with no value | **keep the stored literal** (contract change, see below) |
+| `{"mode": "literal", "value": "new"}` | replace the stored value with `new` |
+| `{"mode": "env", "env_name": "NAME"}` | store `{{ENV_NAME}}` |
+| `{"mode": "keyring", "secret_name": "name"}` | store `{{SECRET:name}}` |
+| `{"mode": "empty"}` | **clear** the value (the key is removed from the file) |
+
+The keep rule is deliberate: a masked read cannot hand the value back, so a
+client has no way to re-send it, and an empty literal is indistinguishable from
+"unchanged". **`{"mode": "literal", "value": ""}` therefore means keep, not
+clear** — clearing is `{"mode": "empty"}`, which is what the Web UI's *Empty*
+button sends and what any other client must send to delete a credential. Before
+`#465` an empty literal was only ever dropped on write, so a client that meant
+"clear" was already broken; the explicit `empty` mode is the supported way.
+
+Validation (`ValidateEditableDocument` plus the runtime `ToConfig()` check) runs
+on the **restored** document — the one carrying the real values — so a masked
+document cannot fail validation over the secrets it is not allowed to see. The
+response body carries the masked document and the metadata, exactly like `GET`;
+it never contains a literal secret either.
 
 #### Validate Editable Config Document
 
@@ -484,6 +552,10 @@ Content-Type: application/json
 ```
 
 Validation responses include structured errors with `path`, `message`, and `code`.
+The submitted document is restored against the stored config with the same rules
+as a save (empty literal = keep), so validating the document returned by `GET`
+reports the verdict a `PUT` of it would, and the endpoint never reports a missing
+credential the client cannot see.
 
 ### Tools, Models, Skills, Status, Channels
 

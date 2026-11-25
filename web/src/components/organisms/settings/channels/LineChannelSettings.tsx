@@ -44,9 +44,7 @@ export function LineChannelSettings() {
             <SecretInput
               id="channels.line.channel_secret"
               value={ch.line.channel_secret}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.line.channel_secret', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.line.channel_secret', v)}
             />
           </SettingsField>
           <SettingsField
@@ -58,7 +56,7 @@ export function LineChannelSettings() {
               id="channels.line.channel_access_token"
               value={ch.line.channel_access_token}
               onChange={(v: SecretValue) =>
-                updateSecretField('channels.line.channel_access_token', v.mode, v.value, v.env_name)
+                updateSecretField('channels.line.channel_access_token', v)
               }
             />
           </SettingsField>

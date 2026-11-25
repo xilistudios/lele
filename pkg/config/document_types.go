@@ -18,6 +18,7 @@ type SecretValue struct {
 	EnvDefault *string    `json:"env_default,omitempty"`
 	SecretName string     `json:"secret_name,omitempty"`
 	HasEnvVar  bool       `json:"has_env_var"`
+	HasValue   bool       `json:"has_value"`
 }
 
 type EditableDocument struct {

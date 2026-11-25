@@ -42,9 +42,7 @@ export function DingtalkChannelSettings() {
             <SecretInput
               id="channels.dingtalk.client_id"
               value={ch.dingtalk.client_id}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.dingtalk.client_id', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.dingtalk.client_id', v)}
             />
           </SettingsField>
           <SettingsField
@@ -55,9 +53,7 @@ export function DingtalkChannelSettings() {
             <SecretInput
               id="channels.dingtalk.client_secret"
               value={ch.dingtalk.client_secret}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.dingtalk.client_secret', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.dingtalk.client_secret', v)}
             />
           </SettingsField>
           <SettingsField

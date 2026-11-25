@@ -55,9 +55,7 @@ export function OnebotChannelSettings() {
             <SecretInput
               id="channels.onebot.access_token"
               value={ch.onebot.access_token}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.onebot.access_token', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.onebot.access_token', v)}
             />
           </SettingsField>
           <SettingsField

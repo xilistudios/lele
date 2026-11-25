@@ -251,7 +251,9 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
         ? { mode: 'literal', value: apiKey.value, has_env_var: false }
         : apiKey.mode === 'env' && (apiKey.env_name ?? '').trim() !== ''
           ? { mode: 'env', env_name: apiKey.env_name, has_env_var: true }
-          : { mode: 'empty', has_env_var: false }
+          : apiKey.mode === 'keyring' && (apiKey.secret_name ?? '').trim() !== ''
+            ? { mode: 'keyring', secret_name: apiKey.secret_name, has_env_var: false }
+            : { mode: 'empty', has_env_var: false }
 
     const draftName = sanitizeProviderName(nameDraft)
     const name = draftName ? dedupeName(draftName, Object.keys(providersDraft)) : derivedName
