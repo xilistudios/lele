@@ -90,14 +90,10 @@ This page provides concrete configuration snippets for common setups.
   },
   "channels": {
     "web": {
-      "enabled": true,
-      "host": "0.0.0.0",
-      "port": 3005
+      "enabled": true
     },
     "native": {
       "enabled": true,
-      "host": "127.0.0.1",
-      "port": 18793,
       "max_clients": 5,
       "token_expiry_days": 30,
       "pin_expiry_minutes": 5,
@@ -115,6 +111,12 @@ This page provides concrete configuration snippets for common setups.
   }
 }
 ```
+
+The Web UI and the native API share the unified server, so the bind address and
+port come from `gateway.host`/`gateway.port` (loopback on `18790` here).
+`channels.web.host` and `channels.web.port` are ignored, and the
+`channels.native.host`/`channels.native.port` keys only apply when `server.*` and
+`gateway.*` are unset — they never override this block.
 
 Run:
 

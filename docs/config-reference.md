@@ -372,10 +372,13 @@ overrides: `LELE_GATEWAY_HOST`, `LELE_GATEWAY_PORT` (plus `LELE_SERVER_HOST` and
 **Migration:** `gateway.host` used to default to `0.0.0.0`, so a `config.json`
 that never named a host only accepts loopback clients after the upgrade.  Set
 `"host": "0.0.0.0"` (here or under `server`) to restore LAN access — an explicit
-value is preserved exactly as written, and only an unset host falls back to the
-loopback default.  `lele gateway` logs a warning on every start when an existing
-config file names no host and the effective bind is loopback, and it also warns
-on any non-loopback bind.
+value is preserved exactly as written (it also survives a save from the settings
+UI, which never deletes a host the file names), and only an unset host falls back
+to the loopback default.  `lele gateway` logs a notice on every start when a
+config file names no host and the effective bind is loopback — the same line
+appears for a fresh install created by onboarding, so it states the posture
+rather than claiming something changed — and it also warns on any non-loopback
+bind with `channels.native.enabled`.
 
 ## `updates`
 

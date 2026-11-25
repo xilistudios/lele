@@ -35,6 +35,12 @@ All HTTP services run on a single port:
 }
 ```
 
+`host: "0.0.0.0"` is a **non-default, explicit opt-in**: `gateway.host` and
+`server.host` default to `127.0.0.1` (loopback), so nothing outside the host is
+reachable unless a host is named (`gateway.host`, `server.host`,
+`LELE_GATEWAY_HOST`/`LELE_SERVER_HOST`).  Reachability from other machines
+always requires an explicit non-loopback bind.
+
 Services served:
 - `/` - Web UI
 - `/api/v1/*` - Native channel API
@@ -77,10 +83,20 @@ services:
     image: lele:latest
     ports:
       - "8080:8080"
+    environment:
+      - LELE_GATEWAY_HOST=0.0.0.0
     volumes:
       - ~/.lele:/root/.lele
     command: lele gateway
 ```
+
+**The bind host must be explicit in a container.**  A fresh volume has no
+`config.json`, so `gateway.host` resolves to the loopback default: the process
+binds `127.0.0.1`, the published port answers nothing from outside the
+container, and — because no config file exists — no warning is logged either.
+`LELE_GATEWAY_HOST=0.0.0.0` (or `"gateway": {"host": "0.0.0.0"}` in the mounted
+config) opts into the container's own network namespace; the published port is
+the boundary that decides who reaches it.
 
 ## Kubernetes Deployment
 
@@ -106,6 +122,9 @@ spec:
         image: lele:latest
         ports:
         - containerPort: 8080
+        env:
+        - name: LELE_GATEWAY_HOST
+          value: "0.0.0.0"
         volumeMounts:
         - name: lele-data
           mountPath: /root/.lele
@@ -126,6 +145,13 @@ spec:
         persistentVolumeClaim:
           claimName: lele-pvc
 ```
+
+`LELE_GATEWAY_HOST` is required here for the same reason as in the compose
+recipe: the `httpGet` probes connect to the **pod IP**, which only answers when
+the process binds `0.0.0.0`, and an empty `persistentVolumeClaim` carries no
+config file to say so.  Without it both probes fail (the image's `HEALTHCHECK`
+uses `localhost`, so the container can still look healthy while every probe and
+client connection is refused).
 
 ## Configuration Reloading
 

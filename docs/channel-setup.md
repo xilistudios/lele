@@ -183,10 +183,13 @@ Notes:
   `gateway.host` default used to be `0.0.0.0`, so a config that never named a
   host stops answering LAN clients after upgrading.  Set `gateway.host` (or
   `server.host`) to `0.0.0.0` to restore LAN access; an explicit value is
-  preserved exactly as written, and `--desktop` keeps forcing loopback.  A
-  gateway started from an existing config file that names no host logs a
-  per-startup warning about the change, and any non-loopback bind with the
-  native channel enabled logs a warning whether rate limiting is on or not,
+  preserved exactly as written (the settings UI keeps a host the file names,
+  even when it equals the default), and `--desktop` keeps forcing loopback.  A
+  gateway started from a config file that names no host logs a per-startup
+  notice that the bind is loopback-only and how to opt into LAN access — fresh
+  installs included, because onboarding writes no host either — and any
+  non-loopback bind with the native channel enabled logs a warning whether rate
+  limiting is on or not,
   because the unauthenticated `POST /api/v1/auth/pair` endpoint (6-digit PIN,
   5-minute expiry) is then reachable from the network.  **Keep rate limiting
   enabled on any machine reachable from an untrusted network.**
@@ -196,12 +199,14 @@ Notes:
 Fields:
 
 - `enabled`
-- `host`
-- `port`
 
 Notes:
 
-- the web UI is served by `lele gateway`
+- the web UI is served by `lele gateway` on the unified server, so the port and
+  bind address come from `server.port`/`server.host` (then
+  `gateway.port`/`gateway.host`)
+- `channels.web.host` and `channels.web.port` are not configuration keys: they
+  are ignored, and the gateway logs nothing about them
 - enabling Web usually implies using the native channel as the local API backend
 
 ## Which Services To Run
