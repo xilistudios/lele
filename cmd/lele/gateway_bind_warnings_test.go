@@ -64,8 +64,8 @@ func TestGatewayStartup_NonLoopbackWarns(t *testing.T) {
 	if !strings.Contains(exposure.message, "rate limiting enabled") {
 		t.Errorf("warning message = %q, want it to say rate limiting is enabled", exposure.message)
 	}
-	if defaultChanged := findWarningContaining(warnings, "defaults to 127.0.0.1"); defaultChanged != nil {
-		t.Errorf("a non-loopback bind also emitted the default-changed warning: %q", defaultChanged.message)
+	if unsetHost := findWarningContaining(warnings, unsetHostWarningFragment); unsetHost != nil {
+		t.Errorf("a non-loopback bind also emitted the unset-host notice: %q", unsetHost.message)
 	}
 }
 
@@ -84,7 +84,9 @@ func TestGatewayStartup_NonLoopbackWarnsWithRateLimitDisabled(t *testing.T) {
 	}
 }
 
-func TestGatewayStartup_DefaultChangedWarnsWhenHostUnset(t *testing.T) {
+const unsetHostWarningFragment = "gateway.host is unset"
+
+func TestGatewayStartup_UnsetHostWarns(t *testing.T) {
 	cfg := loadGatewayWarningConfig(t, `{"language":"en"}`)
 	serverHost := cfg.EffectiveServerHost()
 	if serverHost != config.DefaultGatewayHost {
@@ -93,21 +95,82 @@ func TestGatewayStartup_DefaultChangedWarnsWhenHostUnset(t *testing.T) {
 
 	warnings := gatewayBindWarnings(cfg, serverHost, 18790, false, true)
 
-	defaultChanged := findWarningContaining(warnings, "defaults to 127.0.0.1")
-	if defaultChanged == nil {
-		t.Fatalf("no default-changed warning for an unset host with an existing config file; warnings = %v", warningMessages(warnings))
+	unsetHost := findWarningContaining(warnings, unsetHostWarningFragment)
+	if unsetHost == nil {
+		t.Fatalf("no unset-host notice for a config file that names no host; warnings = %v", warningMessages(warnings))
 	}
-	if defaultChanged.component != "server" {
-		t.Errorf("warning component = %q, want %q", defaultChanged.component, "server")
+	if unsetHost.component != "server" {
+		t.Errorf("warning component = %q, want %q", unsetHost.component, "server")
 	}
-	if !strings.Contains(defaultChanged.message, "0.0.0.0") {
-		t.Errorf("warning message = %q, want the opt-back-in instruction", defaultChanged.message)
+	want := "gateway.host is unset; lele binds loopback (127.0.0.1) by default. Set gateway.host explicitly (e.g. \"0.0.0.0\") for LAN access."
+	if unsetHost.message != want {
+		t.Errorf("warning message = %q, want %q", unsetHost.message, want)
 	}
 	if exposure := findWarningContaining(warnings, "reachable from the network"); exposure != nil {
 		t.Errorf("loopback bind also emitted the network-exposure warning: %q", exposure.message)
 	}
 	if len(warnings) != 1 {
 		t.Errorf("warnings = %v, want exactly one", warningMessages(warnings))
+	}
+}
+
+func TestGatewayStartup_UnsetHostWarnsOnFreshInstallFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := config.DefaultConfig()
+	if err := config.SaveMinimalConfig(path, cfg); err != nil {
+		t.Fatalf("SaveMinimalConfig: %v", err)
+	}
+
+	loaded, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.HostExplicitlyConfigured() {
+		t.Fatal("the onboarding writer materialized a host; the notice would never fire for a fresh install")
+	}
+	if host := loaded.EffectiveServerHost(); host != config.DefaultGatewayHost {
+		t.Fatalf("EffectiveServerHost() = %q, want the loopback default", host)
+	}
+
+	warnings := gatewayBindWarnings(loaded, loaded.EffectiveServerHost(), 18790, false, configFilePresent(path))
+
+	unsetHost := findWarningContaining(warnings, unsetHostWarningFragment)
+	if unsetHost == nil {
+		t.Fatalf("no unset-host notice for an onboarding-written config; warnings = %v", warningMessages(warnings))
+	}
+	if strings.Contains(unsetHost.message, "changed") {
+		t.Errorf("warning message = %q, want no claim that anything changed (a fresh install sees it too)", unsetHost.message)
+	}
+	if exposure := findWarningContaining(warnings, "reachable from the network"); exposure != nil {
+		t.Errorf("loopback bind also emitted the network-exposure warning: %q", exposure.message)
+	}
+}
+
+func TestGatewayStartup_NoWarningAfterEditableSaveOfExplicitLoopback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"gateway":{"host":"0.0.0.0"}}`), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	doc, _, err := config.LoadEditableDocument(path)
+	if err != nil {
+		t.Fatalf("LoadEditableDocument: %v", err)
+	}
+	doc.Gateway.Host = config.DefaultGatewayHost
+	if err := config.SaveEditableDocument(path, doc); err != nil {
+		t.Fatalf("SaveEditableDocument: %v", err)
+	}
+
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	cfg.Channels.Native.Enabled = true
+
+	warnings := gatewayBindWarnings(cfg, cfg.EffectiveServerHost(), 18790, false, configFilePresent(path))
+
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none: the operator explicitly chose loopback in the settings UI", warningMessages(warnings))
 	}
 }
 

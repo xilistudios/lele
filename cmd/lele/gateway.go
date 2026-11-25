@@ -98,8 +98,8 @@ func gatewayBindWarnings(cfg *config.Config, serverHost string, serverPort int, 
 	if configFileExists && !cfg.HostExplicitlyConfigured() && channels.IsLoopbackHost(serverHost) {
 		warnings = append(warnings, gatewayBindWarning{
 			component: "server",
-			message: "gateway.host now defaults to 127.0.0.1 (was 0.0.0.0) and this config does not set a host, so the gateway only listens on loopback and LAN clients can no longer connect " +
-				"— set gateway.host: \"0.0.0.0\" (or server.host) to restore LAN access",
+			message: fmt.Sprintf("gateway.host is unset; lele binds loopback (%s) by default. "+
+				"Set gateway.host explicitly (e.g. \"0.0.0.0\") for LAN access.", config.DefaultGatewayHost),
 			fields: map[string]interface{}{"host": serverHost, "port": serverPort, "default": config.DefaultGatewayHost},
 		})
 	}
