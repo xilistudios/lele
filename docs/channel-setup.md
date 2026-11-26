@@ -28,6 +28,31 @@ After configuring one or more channels, start:
 lele gateway
 ```
 
+## Allowlists: an empty `allow_from` authorizes everyone
+
+Every channel that takes `allow_from` treats an **empty or missing** list as "no restriction": every sender
+that can reach the bot is served. That behaviour is deliberate — a channel is only reachable through a bot
+token you supplied, and forcing an allowlist would break the first-run flow on a fresh install — but it is
+also the single easiest way to expose an agent to strangers, so it is announced. The first message a channel
+evaluates logs
+
+```text
+WARN <channel>: Channel allowlist is empty: every sender is authorized {channel=<channel>}
+```
+
+once per channel per process. Nothing else changes: no sender is refused, and setting `allow_from` at any
+point (config edit + gateway reload/restart) removes the warning and starts enforcing the list.
+
+Set `allow_from` explicitly on any bot a third party can find:
+
+```json
+{
+  "channels": {
+    "telegram": { "enabled": true, "token": "…", "allow_from": ["123456789"] }
+  }
+}
+```
+
 ## Telegram
 
 Required fields:

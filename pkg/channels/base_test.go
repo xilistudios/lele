@@ -1,11 +1,41 @@
 package channels
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/bus"
 )
+
+func TestIsAllowed_EmptyWarns(t *testing.T) {
+	empty := NewBaseChannel("telegram", nil, nil, nil)
+	out := captureLogs(t, func() {
+		for i := 0; i < 5; i++ {
+			if !empty.IsAllowed("123456789") {
+				t.Fatal("an empty allowlist still allows every sender: the behavior is kept on purpose")
+			}
+		}
+	})
+	if !strings.Contains(out, "allowlist is empty") {
+		t.Fatalf("an empty allowlist must be announced in the log, got %q", out)
+	}
+	if got := strings.Count(out, "allowlist is empty"); got != 1 {
+		t.Fatalf("the empty-allowlist warning must be emitted once per channel, got %d: %q", got, out)
+	}
+	if !strings.Contains(out, "telegram") {
+		t.Fatalf("the warning must name the channel, got %q", out)
+	}
+
+	restricted := NewBaseChannel("telegram", nil, nil, []string{"123456789"})
+	out = captureLogs(t, func() {
+		restricted.IsAllowed("123456789")
+		restricted.IsAllowed("999")
+	})
+	if strings.Contains(out, "allowlist is empty") {
+		t.Fatalf("a configured allowlist must not warn, got %q", out)
+	}
+}
 
 func TestBaseChannelIsAllowed(t *testing.T) {
 	tests := []struct {

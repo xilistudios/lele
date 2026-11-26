@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/logger"
@@ -26,6 +27,7 @@ type BaseChannel struct {
 	allowList          []string
 	InboundDroppedHook func(msg bus.InboundMessage)
 	InboundSpooler     InboundSpooler
+	emptyAllowWarn     sync.Once
 }
 
 type InboundSpooler interface {
@@ -57,6 +59,10 @@ func (c *BaseChannel) IsRunning() bool {
 
 func (c *BaseChannel) IsAllowed(senderID string) bool {
 	if len(c.allowList) == 0 {
+		c.emptyAllowWarn.Do(func() {
+			logger.WarnCF(c.name, "Channel allowlist is empty: every sender is authorized",
+				map[string]interface{}{"channel": c.name})
+		})
 		return true
 	}
 
