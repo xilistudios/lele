@@ -34,7 +34,6 @@ type ExecTool struct {
 	feedbackCallback    func(channel, chatID, message string)
 	verboseLevel        session.VerboseLevel
 	backgroundManager   *BackgroundProcessManager
-	backgroundThreshold time.Duration
 	keyringSvc          *keyring.Service
 	secretSubstitution  bool
 
@@ -482,7 +481,6 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		denyPatterns:        denyPatterns,
 		allowPatterns:       nil,
 		restrictToWorkspace: restrict,
-		backgroundThreshold: 60 * time.Second,
 		secretSubstitution:  true,
 		whitelistCmds:       make(map[string]struct{}),
 	}
@@ -556,11 +554,23 @@ func (t *ExecTool) Parameters() map[string]interface{} {
 			},
 			"background": map[string]interface{}{
 				"type":        "boolean",
-				"description": "If true, run the command in the background immediately. Returns a process ID that can be used with list_background_execs, get_background_exec_output, and stop_background_exec. Default: false (command auto-backgrounds after 60 seconds if still running).",
+				"description": "If true, run the command in the background immediately. Returns a process ID that can be used with list_background_execs, get_background_exec_output, and stop_background_exec. Default: false (command auto-backgrounds 5 seconds before the exec timeout if still running, or after 60 seconds when no timeout is configured).",
 			},
 		},
 		"required": []string{"command"},
 	}
+}
+
+const autoBackgroundMargin = 5 * time.Second
+
+func autoBackgroundDelay(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return 60 * time.Second
+	}
+	if timeout <= autoBackgroundMargin {
+		return 0
+	}
+	return timeout - autoBackgroundMargin
 }
 
 func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
@@ -724,6 +734,14 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	feedbackSent := false
 	heartbeatInterval := 5 * time.Second
 
+	autoBgDelay := autoBackgroundDelay(t.timeout)
+	var autoBgC <-chan time.Time
+	if t.backgroundManager != nil && autoBgDelay > 0 {
+		autoBgTimer := time.NewTimer(autoBgDelay)
+		defer autoBgTimer.Stop()
+		autoBgC = autoBgTimer.C
+	}
+
 	for {
 		select {
 		case execErr = <-done:
@@ -731,30 +749,29 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		case <-cmdCtx.Done():
 			bgCancel()
 			execErr = cmdCtx.Err()
-		case <-time.After(heartbeatInterval):
-			if t.backgroundManager != nil && t.backgroundThreshold > 0 && time.Since(startTime) >= t.backgroundThreshold {
-				_, ownerSessionKey := AgentToolContextFromCtx(ctx)
-				proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
-				go func() {
-					err := <-done
-					exitCode := 0
-					if err != nil {
-						if exitErr, ok := err.(*exec.ExitError); ok {
-							exitCode = exitErr.ExitCode()
-						} else if errors.Is(err, exec.ErrWaitDelay) {
-						} else {
-							exitCode = 1
-						}
+		case <-autoBgC:
+			_, ownerSessionKey := AgentToolContextFromCtx(ctx)
+			proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
+			go func() {
+				err := <-done
+				exitCode := 0
+				if err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						exitCode = exitErr.ExitCode()
+					} else if errors.Is(err, exec.ErrWaitDelay) {
+					} else {
+						exitCode = 1
 					}
-					t.backgroundManager.MarkCompleted(proc.ID, exitCode)
-				}()
-				msg := fmt.Sprintf("Command is still running after %v. Moved to background.\nProcess ID: %s\nUse list_background_execs to check status, get_background_exec_output to view output, stop_background_exec to stop it.", t.backgroundThreshold.Round(time.Second), proc.ID)
-				return &ToolResult{
-					ForLLM:  msg,
-					ForUser: msg,
-					IsError: false,
 				}
+				t.backgroundManager.MarkCompleted(proc.ID, exitCode)
+			}()
+			msg := fmt.Sprintf("Command is still running after %v. Moved to background.\nProcess ID: %s\nUse list_background_execs to check status, get_background_exec_output to view output, stop_background_exec to stop it.", autoBgDelay.Round(time.Second), proc.ID)
+			return &ToolResult{
+				ForLLM:  msg,
+				ForUser: msg,
+				IsError: false,
 			}
+		case <-time.After(heartbeatInterval):
 			if verboseLevel == session.VerboseFull && feedbackCallback != nil && channel != "" && chatID != "" {
 				elapsedSoFar := time.Since(startTime).Round(time.Second)
 				feedbackMsg := fmt.Sprintf("🧰 Process: %s (running for %v)", processName, elapsedSoFar)
@@ -964,8 +981,4 @@ func (t *ExecTool) SetBypassGuard(_ bool) {
 
 func (t *ExecTool) SetBackgroundManager(m *BackgroundProcessManager) {
 	t.backgroundManager = m
-}
-
-func (t *ExecTool) SetBackgroundThreshold(d time.Duration) {
-	t.backgroundThreshold = d
 }
