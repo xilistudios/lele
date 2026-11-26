@@ -54,6 +54,24 @@ This is especially relevant for:
 
 The native channel emits `approval.request` and expects an `approve` response event from clients.
 
+### Who may resolve a request
+
+An approval is owned by the peer that requested it, and the two kinds of surface state that ownership
+differently:
+
+- **Requester surfaces** (`telegram`) record the requesting user, as `<numeric user id>` or
+  `<numeric user id>|<username>`. Only that user may approve, reject or view the request, in any chat of the
+  session — the callbacks carry the user id, so the username part is never what grants authority and a
+  username change does not lock the requester out. Anything else gets a requester-mismatch notice and the
+  request stays pending for its owner.
+- **Session surfaces** (native/WebUI, REST, WebSocket, TUI, CLI) have no per-user requester: the client that
+  owns the session key approves its own tool calls. Such a turn records an **empty** requester, so the
+  requester check cannot lock the card out; the session-ownership check is the whole authority.
+
+A callback also has to match the approval's session: the key is built with the same route builder the turn
+used, and a key that is empty on either side matches nothing (fail closed). Anonymous group admins all arrive
+as Telegram's `GroupAnonymousBot`, so for them per-requester authority degrades to "any anonymous admin".
+
 ## Native Channel Security
 
 The native channel includes:
