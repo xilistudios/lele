@@ -334,6 +334,11 @@ func expandHome(path string) string {
 	return path
 }
 
+// migratedFileMode is the mode every migrated file is written with. The files
+// this copies are OpenClaw's config/credential store, so the source mode is
+// never trusted: a world-readable source must not produce a world-readable copy.
+const migratedFileMode os.FileMode = 0o600
+
 func copyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
@@ -341,19 +346,22 @@ func copyFile(src, dst string) error {
 	}
 	defer srcFile.Close()
 
-	info, err := srcFile.Stat()
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, migratedFileMode)
 	if err != nil {
 		return err
 	}
 
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
-	if err != nil {
+	if err := dstFile.Chmod(migratedFileMode); err != nil {
+		dstFile.Close()
 		return err
 	}
-	defer dstFile.Close()
 
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		dstFile.Close()
+		return err
+	}
+
+	return dstFile.Close()
 }
 
 func relPath(path, base string) string {

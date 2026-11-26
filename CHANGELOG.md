@@ -105,6 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Migrate
+- **Migrated files are written `0600`, never with the source's mode** (D-12) — `copyFile` opened the destination with `info.Mode()` from the source, so an OpenClaw home whose `config.json` (or any file carrying an API key, OAuth credential or webhook secret) happened to be `0644` produced a `0644` copy in the lele home — the migration silently published the exact secrets it was moving. The destination is now created `0600` and `chmod`ed to `0600` afterwards (the create mode alone is not enough: an existing destination keeps its old permissions through `O_TRUNC`), and the copy closes both handles explicitly so a write failure cannot leave a half-written file with the descriptors still open. The executable bit is not preserved either — nothing the migration copies is meant to be executed.
+
+### Fixed
+
 #### Config
 - **The config watcher no longer leaks its inotify descriptor** (D-10) — `ConfigWatcher.Start` created an `fsnotify.Watcher` and never closed it: neither the `ctx.Done()` nor the `Stop()` return path called `Close`, and a failing `Add` returned the error with the watcher already allocated, so every reload-enabled start (and every failed one) left an inotify descriptor alive for the life of the process — a long-running gateway that reloads configuration exhausts the descriptor budget. `Start` now closes the watcher on **every** exit path (deferred close plus the `Add` error), and the debounce timer is stopped on the same defer instead of only on the paths that happened to reach it. Closed `Events`/`Errors` channels now end the loop instead of spinning on their zero value. To make that observable, the fsnotify handle sits behind a tiny `configFileWatcher` interface (production implementation is a plain adapter); fsnotify exposes no "closed" state, so the tests inject a fake that records `Close` and the real-watcher test only asserts `Start` returns. The other half of D-10 — `RLock` held across the fsync — was already correct (`config.go` snapshots under the lock, releases at :1588 and only then merges and writes at :1618) and needs no change.
 

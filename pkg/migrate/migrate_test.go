@@ -983,3 +983,64 @@ func TestMergeConfigKeySurvivesAKeylessNamedEntry(t *testing.T) {
 		t.Errorf("saved anthropic.models = %v, want the existing model list kept", anthropic.Models)
 	}
 }
+
+func TestCopyFile_Forces0600(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "config.json")
+	dst := filepath.Join(dir, "dest", "config.json")
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(src, []byte(`{"a":1}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chmod(src, 0o644); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("destination mode = %o, want 600: migrated config files carry credentials and must not inherit a world-readable source mode", got)
+	}
+
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != `{"a":1}` {
+		t.Fatalf("destination content = %q, want the source bytes", data)
+	}
+}
+
+func TestCopyFile_KeepsExecutableBitOff(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "run.sh")
+	dst := filepath.Join(dir, "run-copy.sh")
+
+	if err := os.WriteFile(src, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chmod(src, 0o755); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("destination mode = %o, want 600 even for an executable source", got)
+	}
+}
