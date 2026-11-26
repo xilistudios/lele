@@ -38,6 +38,8 @@ const TAB_ICONS: Record<SettingsTab, typeof SettingsIcon> = {
   logs: FileTextIcon,
 }
 
+const inset = (value: string): number => Number.parseFloat(value) || 0
+
 type Props = {
   activeTab: SettingsTab
   onTabChange: (tab: SettingsTab) => void
@@ -53,12 +55,13 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     const scroller = navRef.current
     const button = tabRefs.current[activeTab]
     if (!scroller || !button) return
+    const style = window.getComputedStyle(scroller)
     const viewRect = scroller.getBoundingClientRect()
     const buttonRect = button.getBoundingClientRect()
-    const viewTop = viewRect.top
-    const viewBottom = viewRect.bottom
-    const viewLeft = viewRect.left
-    const viewRight = viewRect.right
+    const viewTop = viewRect.top + inset(style.paddingTop)
+    const viewBottom = viewRect.bottom - inset(style.paddingBottom)
+    const viewLeft = viewRect.left + inset(style.paddingLeft)
+    const viewRight = viewRect.right - inset(style.paddingRight)
     const overflowTop = buttonRect.top - viewTop
     const overflowBottom = buttonRect.bottom - viewBottom
     const overflowLeft = buttonRect.left - viewLeft

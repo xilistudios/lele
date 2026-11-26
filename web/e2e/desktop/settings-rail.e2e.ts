@@ -5,12 +5,16 @@
  * settings row. Below ~771px of viewport height the 15 tabs (Groups enabled) are
  * taller than the row, and because the rail had no vertical overflow the clipped
  * bottom tabs were mouse-unreachable — there was no scrollbar anywhere. This spec
- * pins the contract on the heights the issue measured:
+ * pins the contract on the heights the issue measured (1280x720, 1366x768) plus
+ * the 1440x900 height where the rail has nothing to scroll:
  *
  *   1. the bottom tab is reachable: the rail scrolls, `logs` is fully visible,
  *      the click lands, the panel switches and the footer stays flush;
  *   2. the fix is rail-only: the settings row never scrolls and the document
- *      never scrolls sideways/downwards (that was the footer-detachment symptom).
+ *      never scrolls sideways/downwards (that was the footer-detachment symptom);
+ *   3. a deep link to a bottom tab reveals it by itself — no wheel, no click —
+ *      and leaves the rail's own padding visible below the pill;
+ *   4. when every tab fits, the rail is inert: nothing scrolls, nothing shifts.
  */
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
@@ -23,6 +27,7 @@ const LOGS_TAB = `${TAB_PREFIX}logs`
 const SCROLL_AREA = 'settings-scroll-area'
 const TAB_COUNT_WITH_GROUPS = 15
 const LOGS_EMPTY = 'No log entries found for this date.'
+const PADDING_TOLERANCE = 1
 
 const AGENT = {
   id: AGENT_ID,
@@ -95,6 +100,8 @@ const respond = (url: string): unknown => {
 /**
  * Seed the session and stub the socket. The `groups` tab only exists when the
  * welcome event says so, and 15 tabs is the configuration the issue measured.
+ * The welcome is emitted asynchronously on purpose: it is the late arrival of
+ * that tab which a stale reveal cannot see.
  */
 const STUB_INIT = ({ apiUrl }: { apiUrl: string }) => {
   localStorage.setItem(
@@ -182,7 +189,10 @@ type Geometry = {
     scrollHeight: number
     clientHeight: number
     overflowX: number
+    paddingBottom: number
+    overflows: boolean
     logsInView: boolean
+    bottomGap: number
   }
   rowOverflowY: string
   rowScrollTop: number
@@ -217,7 +227,11 @@ const measure = (page: Page): Promise<Geometry> =>
           scrollHeight: rail.scrollHeight,
           clientHeight: rail.clientHeight,
           overflowX: rail.scrollWidth - rail.clientWidth,
-          logsInView: logsRect.top >= viewRect.top - 0.5 && logsRect.bottom <= viewRect.bottom + 0.5,
+          paddingBottom: Number.parseFloat(getComputedStyle(rail).paddingBottom) || 0,
+          overflows: rail.scrollHeight > rail.clientHeight,
+          logsInView:
+            logsRect.top >= viewRect.top - 0.5 && logsRect.bottom <= viewRect.bottom + 0.5,
+          bottomGap: viewRect.bottom - logsRect.bottom,
         },
         rowOverflowY: getComputedStyle(row).overflowY,
         rowScrollTop: row.scrollTop,
@@ -239,16 +253,16 @@ const scrollRailToBottom = async (page: Page) => {
   await expect.poll(async () => (await measure(page)).rail.scrollTop).toBeGreaterThan(0)
 }
 
-test('bottom settings tab is reachable on a short desktop viewport', async ({ page }) => {
+test('bottom settings tab is reachable on a desktop viewport', async ({ page }) => {
   await openSettings(page, '/settings/general')
 
   const before = await measure(page)
-  expect(before.rail.scrollHeight).toBeGreaterThan(before.rail.clientHeight)
-  expect(before.rail.logsInView).toBe(false)
-
-  await scrollRailToBottom(page)
-  const scrolled = await measure(page)
-  expect(scrolled.rail.logsInView).toBe(true)
+  expect(before.rail.scrollHeight).toBeGreaterThanOrEqual(before.rail.clientHeight)
+  if (before.rail.overflows) {
+    expect(before.rail.logsInView).toBe(false)
+    await scrollRailToBottom(page)
+    expect((await measure(page)).rail.logsInView).toBe(true)
+  }
 
   await page.getByTestId(LOGS_TAB).click()
 
@@ -262,21 +276,21 @@ test('bottom settings tab is reachable on a short desktop viewport', async ({ pa
   expect(Math.abs(settled.footerTop - settled.scrollAreaBottom)).toBeLessThanOrEqual(1)
 })
 
-test('settings row stays put and the footer stays flush while the rail scrolls', async ({
-  page,
-}) => {
+test('focusing the clipped tab reveals it without moving the row or footer', async ({ page }) => {
   await openSettings(page, '/settings/general')
 
   const before = await measure(page)
+  test.skip(!before.rail.overflows, 'rail has nothing to scroll at this height')
+  expect(before.rail.logsInView).toBe(false)
   expect(before.rowOverflowY).toBe('hidden')
   expect(before.rowScrollTop).toBe(0)
   expect(Math.abs(before.footerBottom - before.viewportHeight)).toBeLessThanOrEqual(1)
 
-  await scrollRailToBottom(page)
   await page.getByTestId(LOGS_TAB).focus()
 
   const after = await measure(page)
   expect(after.rail.scrollTop).toBeGreaterThan(0)
+  expect(after.rail.logsInView).toBe(true)
   expect(after.rail.overflowX).toBeLessThanOrEqual(0)
   expect(after.rowOverflowY).toBe('hidden')
   expect(after.rowScrollTop).toBe(0)
@@ -285,4 +299,34 @@ test('settings row stays put and the footer stays flush while the rail scrolls',
   expect(after.documentScrollLeft).toBe(0)
   expect(after.footerBottom).toBe(before.footerBottom)
   expect(Math.abs(after.footerBottom - after.viewportHeight)).toBeLessThanOrEqual(1)
+})
+
+test('deep link to a bottom tab reveals it without any user scrolling', async ({ page }) => {
+  await openSettings(page, '/settings/logs')
+
+  const revealed = await measure(page)
+  expect(revealed.rail.logsInView).toBe(true)
+  expect(revealed.rail.bottomGap).toBeGreaterThanOrEqual(
+    revealed.rail.paddingBottom - PADDING_TOLERANCE,
+  )
+  if (revealed.rail.overflows) expect(revealed.rail.scrollTop).toBeGreaterThan(0)
+
+  await expect(page.getByTestId(LOGS_TAB)).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByTestId(SCROLL_AREA)).toContainText(LOGS_EMPTY, { timeout: 15_000 })
+  expect(revealed.rowScrollTop).toBe(0)
+  expect(revealed.documentScrollTop).toBe(0)
+  expect(Math.abs(revealed.footerBottom - revealed.viewportHeight)).toBeLessThanOrEqual(1)
+})
+
+test('rail is inert on a viewport where every tab fits', async ({ page }) => {
+  await openSettings(page, '/settings/general')
+
+  const idle = await measure(page)
+  test.skip(idle.rail.overflows, 'rail overflows at this height')
+  expect(idle.rail.scrollHeight).toBe(idle.rail.clientHeight)
+  expect(idle.rail.scrollTop).toBe(0)
+  expect(idle.rail.logsInView).toBe(true)
+  expect(idle.rail.overflowX).toBeLessThanOrEqual(0)
+  expect(idle.rowScrollTop).toBe(0)
+  expect(Math.abs(idle.footerBottom - idle.viewportHeight)).toBeLessThanOrEqual(1)
 })
