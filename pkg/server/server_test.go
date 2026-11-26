@@ -190,7 +190,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	}{
 		{"X-Content-Type-Options", "nosniff"},
 		{"X-Frame-Options", "DENY"},
-		{"X-Xss-Protection", "1; mode=block"},
+		{"X-Xss-Protection", "0"},
 		{"Referrer-Policy", "strict-origin-when-cross-origin"},
 	}
 

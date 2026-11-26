@@ -420,7 +420,12 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 }
 
 type WebFetchTool struct {
-	maxChars     int
+	maxChars int
+
+	// allowPrivate is a test-only seam: it exists so in-package tests can point
+	// the tool at an httptest server on loopback. It is deliberately not a config
+	// key and has no setter — production always blocks private, loopback and
+	// link-local targets.
 	allowPrivate bool
 }
 
