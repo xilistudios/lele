@@ -150,7 +150,7 @@ export function AgentSettingsTabs({
               onKeyDown={(event) => handleKeyDown(event, tab)}
               className={`flex flex-shrink-0 items-center whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors lg:py-2.5 lg:text-left lg:text-sm ${
                 selected
-                  ? 'border-accent-primary/30 bg-surface-selected text-accent-primary'
+                  ? 'border-accent-primary/30 bg-surface-selected text-accent-text'
                   : 'border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary'
               }`}
             >

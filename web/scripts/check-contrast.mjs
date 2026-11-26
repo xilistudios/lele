@@ -257,6 +257,12 @@ function buildMatrix() {
   addRows(['text-tertiary', 'text-muted'], L3HovSelTint, 3.0)
   addRows(['accent-text'], L3HovSelTint, 3.0)
 
+  // §7.2 #443: active pills/chips paint accent-text on surface-selected at 13/11px
+  // (NORMAL text ⇒ 4.5, not the 3.0 large-text floor above). Measured 4.51 dark /
+  // 5.20 light. accent-primary/sel stays out of the matrix on purpose: that pair is
+  // 2.40 in dark, and it is banned by usage in scripts/check-active-pill.mjs.
+  rows.push({ fg: 'accent-text', bgs: ['sel'], min: 4.5 })
+
   // on-accent (min 4.5): over accent-primary and state-error-fill
   rows.push({
     fg: 'text-on-accent',
@@ -325,6 +331,37 @@ function buildMatrix() {
   })
 
   return rows
+}
+
+/**
+ * Collapse the matrix into `fg → bgLabel → { min, only }`, the shape the report
+ * and the self-test both read. A later row for the same pair overrides an
+ * earlier one (that is how the 4.5 accent-text/sel row tightens the 3.0
+ * large-text row above it).
+ *
+ * @param {Array<{fg: string, bgs: string[], min: number, only?: string[]}>} matrix
+ * @returns {Map<string, Map<string, {min: number, only?: string[]}>>}
+ */
+function buildRequirements(matrix) {
+  const req = new Map()
+  for (const row of matrix) {
+    if (!req.has(row.fg)) req.set(row.fg, new Map())
+    for (const bgLabel of row.bgs) {
+      req.get(row.fg).set(bgLabel, { min: row.min, only: row.only })
+    }
+  }
+  return req
+}
+
+/**
+ * Minimum contrast a theme must meet for one pair, or undefined when the pair
+ * is not gated for that theme.
+ */
+function requiredMin(matrix, fg, bgLabel, theme) {
+  const pair = buildRequirements(matrix).get(fg)?.get(bgLabel)
+  if (!pair) return undefined
+  if (pair.only && !pair.only.includes(theme)) return undefined
+  return pair.min
 }
 
 // ── Formatting helpers ─────────────────────────────────────────────
@@ -438,6 +475,54 @@ function selfTestCheck(raw, matrix) {
     console.log('  [4] SKIP: missing text-on-accent or accent-primary')
     allOk = false
   }
+
+  // ── Test 5: accent-text / surface-selected is gated at the 4.5 normal-text
+  // floor in BOTH themes (issue #443: active pill/chip at 13px/11px) ──
+  total++
+  const pillFloor = {
+    dark: requiredMin(matrix, 'accent-text', 'sel', 'dark'),
+    light: requiredMin(matrix, 'accent-text', 'sel', 'light'),
+  }
+  const origAccentTextDark = dark.get('accent-text')
+  const origAccentTextLight = light.get('accent-text')
+  const selBgDark = dark.get('surface-selected')
+  const selBgLight = light.get('surface-selected')
+  const pillRatio = {
+    dark: origAccentTextDark && selBgDark ? effectiveRatio(origAccentTextDark, selBgDark) : 0,
+    light: origAccentTextLight && selBgLight ? effectiveRatio(origAccentTextLight, selBgLight) : 0,
+  }
+  const floorsOk =
+    pillFloor.dark !== undefined &&
+    pillFloor.light !== undefined &&
+    pillFloor.dark >= 4.5 &&
+    pillFloor.light >= 4.5
+  const tokensOk =
+    pillFloor.dark !== undefined &&
+    pillFloor.light !== undefined &&
+    pillRatio.dark >= pillFloor.dark &&
+    pillRatio.light >= pillFloor.light
+  const t5ok = floorsOk && tokensOk
+  console.log(
+    `  [5] accent-text / sel floor D=${pillFloor.dark} L=${pillFloor.light} (must be >=4.5 both) · measured D=${pillRatio.dark.toFixed(2)} L=${pillRatio.light.toFixed(2)} → ${t5ok ? 'PASS' : 'FAIL'}`,
+  )
+  if (t5ok) passed++
+  else allOk = false
+
+  // ── Test 6: degrading accent-text to accent-primary must break the pill floor
+  // (proves the floor above is load-bearing, i.e. the 2.40 recipe cannot pass) ──
+  total++
+  const accentPrimaryDark = dark.get('accent-primary')
+  const degraded =
+    accentPrimaryDark && selBgDark ? effectiveRatio(accentPrimaryDark, selBgDark) : Number.NaN
+  const t6ok = pillFloor.dark !== undefined && degraded < pillFloor.dark
+  console.log(
+    `  [6] accent-primary / sel dark = ${degraded.toFixed(2)} (must fall below the ${pillFloor.dark} floor) → ${t6ok ? 'PASS' : 'FAIL'}`,
+  )
+  if (t6ok) passed++
+  else allOk = false
+
+  if (origAccentTextDark) dark.set('accent-text', origAccentTextDark)
+  if (origAccentTextLight) light.set('accent-text', origAccentTextLight)
 
   console.log(`\nself-test: ${total} checks, ${passed} passed`)
   return allOk
@@ -573,14 +658,8 @@ function main() {
     // ── Build quick-lookup for this theme's requirements ──────────
     // fg → { bgLabel → { min, exempt } }
     // Rows may carry `only: ['dark'|'light']` to scope an exception per theme.
-    const req = new Map()
-    for (const row of matrix) {
-      if (row.only && !row.only.includes(themeName.toLowerCase())) continue
-      for (const bgLabel of row.bgs) {
-        if (!req.has(row.fg)) req.set(row.fg, new Map())
-        req.get(row.fg).set(bgLabel, { min: row.min })
-      }
-    }
+    const req = buildRequirements(matrix)
+    const themeKey = themeName.toLowerCase()
 
     // border-default: exempt
     req.set('border-default', new Map())
@@ -616,7 +695,8 @@ function main() {
 
         // Check if this fg/bg pair is in the matrix
         const fgReqs = req.get(fgName)
-        const pairReq = fgReqs?.get(bgLabel)
+        const pair = fgReqs?.get(bgLabel)
+        const pairReq = pair && (!pair.only || pair.only.includes(themeKey)) ? pair : undefined
 
         if (!pairReq) {
           // Not in matrix — skip (don't count)

@@ -17,6 +17,11 @@ import type {
 import type { EditableAgentConfig } from '../../../lib/types'
 import type { ApiClient } from '../../../services/http/client'
 import { ApiError } from '../../../services/http/errors'
+import {
+  INADEQUATE_ACCENT_CLASS,
+  SELECTED_BACKGROUND_CLASS,
+  expectSelectedAccentRecipe,
+} from '../../../test/accentRecipe'
 import { type Write, makeState, tr } from '../../../test/agentsHarness'
 import { AgentMCPSection } from './AgentMCPSection'
 
@@ -569,5 +574,22 @@ describe('AgentMCPSection — loading / empty / error', () => {
     failing = false
     u.clickTestId('mcp-retry')
     await waitFor(() => expect(u.byTestId('mcp-rows')).toBeTruthy(), { timeout: 4000 })
+  })
+})
+describe('AgentMCPSection — filter chip recipe', () => {
+  test('the active chip paints accent-text on surface-selected (AA in both themes)', async () => {
+    const u = await ready(setup())
+    expect(u.byTestId('mcp-filter-all')?.getAttribute('aria-pressed')).toBe('true')
+    expectSelectedAccentRecipe(u.byTestId('mcp-filter-all'))
+  })
+
+  test('inactive chips keep the border recipe', async () => {
+    const u = await ready(setup())
+    for (const pressed of ['global', 'agent', 'project']) {
+      const chip = u.byTestId(`mcp-filter-${pressed}`)
+      const tokens = (chip?.getAttribute('class') ?? '').split(/\s+/)
+      expect(tokens).not.toContain(SELECTED_BACKGROUND_CLASS)
+      expect(tokens).not.toContain(INADEQUATE_ACCENT_CLASS)
+    }
   })
 })

@@ -100,7 +100,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
               aria-current={activeTab === tab.id ? 'page' : undefined}
               className={`flex items-center rounded-md border px-3 py-1.5 md:py-2.5 text-center md:text-left text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === tab.id
-                  ? 'border-accent-primary/30 bg-surface-selected text-accent-primary'
+                  ? 'border-accent-primary/30 bg-surface-selected text-accent-text'
                   : 'border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary'
               }`}
             >
