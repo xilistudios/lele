@@ -202,14 +202,40 @@ func ModelsForProvider(provider string) []Model {
 	return p.Models
 }
 
+func cachedModelsForProvider(provider string) []Model {
+	key := normalizeType(provider)
+
+	mu.RLock()
+	if p, ok := liveProviders[key]; ok && len(p.Models) > 0 {
+		mu.RUnlock()
+		return p.Models
+	}
+	mu.RUnlock()
+
+	if p := loadProviderFromDisk(key); p != nil {
+		return p.Models
+	}
+	return nil
+}
+
 func offlineMode() bool {
 	return envOr("LELE_CATALOG_OFFLINE", "") == "1" ||
 		envOr("LELE_CATALOG_OFFLINE", "") == "true"
 }
 
 func FindModel(provider, modelID string) (Model, bool) {
+	return findModelIn(ModelsForProvider(provider), modelID)
+}
+
+// FindCachedModel looks a model up without triggering a background catalog
+// refresh, so callers on a hot path never turn a miss into network traffic.
+func FindCachedModel(provider, modelID string) (Model, bool) {
+	return findModelIn(cachedModelsForProvider(provider), modelID)
+}
+
+func findModelIn(models []Model, modelID string) (Model, bool) {
 	want := strings.ToLower(strings.TrimSpace(modelID))
-	for _, m := range ModelsForProvider(provider) {
+	for _, m := range models {
 		if strings.EqualFold(m.ID, modelID) || strings.EqualFold(m.Name, modelID) {
 			return m, true
 		}
