@@ -390,7 +390,7 @@ func TestExecBackgroundStoresPlaceholderCommand(t *testing.T) {
 	}
 }
 
-func TestExecAutoBackgroundStoresPlaceholderCommand(t *testing.T) {
+func TestExec_AutoBackgroundStoresPlaceholderCommand(t *testing.T) {
 	const secretValue = "autobg-s3cr3t-42"
 
 	svc := newTestKeyring(t)

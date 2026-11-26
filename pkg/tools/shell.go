@@ -554,23 +554,38 @@ func (t *ExecTool) Parameters() map[string]interface{} {
 			},
 			"background": map[string]interface{}{
 				"type":        "boolean",
-				"description": "If true, run the command in the background immediately. Returns a process ID that can be used with list_background_execs, get_background_exec_output, and stop_background_exec. Default: false (command auto-backgrounds 5 seconds before the exec timeout if still running, or after 60 seconds when no timeout is configured).",
+				"description": "If true, run the command in the background immediately. Returns a process ID that can be used with list_background_execs, get_background_exec_output, and stop_background_exec. Default: false (a still-running command auto-backgrounds 5 seconds before its deadline and at most 60 seconds after it starts; auto-backgrounding is disabled when the deadline is 5 seconds away or less).",
 			},
 		},
 		"required": []string{"command"},
 	}
 }
 
-const autoBackgroundMargin = 5 * time.Second
+const (
+	autoBackgroundMargin = 5 * time.Second
+	autoBackgroundCap    = 60 * time.Second
+)
 
 func autoBackgroundDelay(timeout time.Duration) time.Duration {
 	if timeout <= 0 {
-		return 60 * time.Second
+		return autoBackgroundCap
 	}
 	if timeout <= autoBackgroundMargin {
 		return 0
 	}
-	return timeout - autoBackgroundMargin
+	return min(autoBackgroundCap, timeout-autoBackgroundMargin)
+}
+
+func autoBackgroundDelayFor(cmdCtx context.Context) time.Duration {
+	deadline, ok := cmdCtx.Deadline()
+	if !ok {
+		return autoBackgroundDelay(0)
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	return autoBackgroundDelay(remaining)
 }
 
 func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
@@ -734,7 +749,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	feedbackSent := false
 	heartbeatInterval := 5 * time.Second
 
-	autoBgDelay := autoBackgroundDelay(t.timeout)
+	autoBgDelay := autoBackgroundDelayFor(cmdCtx)
 	var autoBgC <-chan time.Time
 	if t.backgroundManager != nil && autoBgDelay > 0 {
 		autoBgTimer := time.NewTimer(autoBgDelay)
