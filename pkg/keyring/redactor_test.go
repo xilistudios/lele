@@ -397,3 +397,42 @@ func TestRedact_Concurrent(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+type unreadableSecretStore struct {
+	Store
+	name string
+}
+
+func (s unreadableSecretStore) Get(name string) (*Secret, error) {
+	if name == s.name {
+		return nil, errors.New("decrypt failed")
+	}
+	return s.Store.Get(name)
+}
+
+func TestRedact_UnreadableSecretIsReported(t *testing.T) {
+	resetRedactorWarnings()
+	svc := newRedactorTestService(t)
+	mustSet(t, svc, "a.readable", "alpha-secret-value-123")
+	mustSet(t, svc, "b.unreadable", "beta-secret-value-4567")
+	svc.store = unreadableSecretStore{Store: svc.store, name: "b.unreadable"}
+	r := NewRedactor(svc)
+
+	var out string
+	logs := captureRedactorLogs(t, func() {
+		out = r.Redact("A:alpha-secret-value-123 B:beta-secret-value-4567")
+	})
+
+	if strings.Contains(out, "alpha-secret-value-123") {
+		t.Fatalf("a secret that could be read must still be redacted, got %q", out)
+	}
+	if !strings.Contains(out, "a.readable") {
+		t.Fatalf("the readable secret was not replaced, got %q", out)
+	}
+	if !strings.Contains(logs, "b.unreadable") {
+		t.Fatalf("a secret whose value could not be read leaks unredacted and must be named in a warning, got %q", logs)
+	}
+	if strings.Contains(logs, "beta-secret-value-4567") {
+		t.Fatalf("the warning must name the secret, never its value: %q", logs)
+	}
+}

@@ -40,7 +40,7 @@ evaluates logs
 WARN <channel>: Channel allowlist is empty: every sender is authorized {channel=<channel>}
 ```
 
-once per channel per process. Nothing else changes: no sender is refused, and setting `allow_from` at any
+once per channel instance. Nothing else changes: no sender is refused, and setting `allow_from` at any
 point (config edit + gateway reload/restart) removes the warning and starts enforcing the list.
 
 Set `allow_from` explicitly on any bot a third party can find:

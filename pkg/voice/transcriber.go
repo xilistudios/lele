@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -156,7 +157,7 @@ func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) 
 			"status_code":  resp.StatusCode,
 			"response":     preview,
 			"body_bytes":   len(body),
-			"body_omitted": len(body) > maxErrorBodyRunes,
+			"body_omitted": utf8.RuneCount(body) > maxErrorBodyRunes,
 		})
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, preview)
 	}

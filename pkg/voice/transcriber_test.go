@@ -104,6 +104,40 @@ func TestTranscriber_ErrorBodyTruncated(t *testing.T) {
 	}
 }
 
+func TestTranscriber_ErrorBodyOmittedIsCountedInRunes(t *testing.T) {
+	cases := []struct {
+		name    string
+		repeat  int
+		omitted bool
+	}{
+		{"200 emoji are 800 bytes but only 200 runes", 200, false},
+		{"600 emoji clearly exceed the rune budget", 600, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			detail := strings.Repeat("🤖", tc.repeat)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"` + detail + `"}}`))
+			}))
+			defer server.Close()
+
+			tr := NewGroqTranscriber("key", server.URL)
+			logs := captureVoiceLogs(t)
+
+			if _, err := tr.Transcribe(context.Background(), writeAudioFixture(t)); err == nil {
+				t.Fatal("a 400 response was treated as success")
+			}
+
+			out := logs()
+			if got := !strings.Contains(out, "body_omitted=false"); got != tc.omitted {
+				t.Fatalf("body_omitted = %v, want %v for a body of %d multi-byte runes (the flag must compare the rune count against the rune budget, not the byte length): %q", got, tc.omitted, tc.repeat, out)
+			}
+		})
+	}
+}
+
 func TestTranscriber_LogsPreviewNotFullTranscript(t *testing.T) {
 	fullTranscript := strings.TrimSpace(strings.Repeat("palabra ", 400))
 

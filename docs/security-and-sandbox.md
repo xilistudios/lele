@@ -111,6 +111,11 @@ mitigation, not a guarantee — know its limits:
   set).
 - **The placeholder form is not proof of absence.** A model shown `{{SECRET:<name>}}` can still be asked to
   print it, and code that resolves placeholders (the `exec` tool, provider credentials) expands it again.
+- **Tool results, and nothing else.** The redactor runs on the content of a tool result on its way to the
+  model. A harness template command (`!shell`, `@path`) is a different surface: its output is expanded into
+  the *user* message before the turn starts, so it never passes through this redactor and a secret printed
+  there reaches the model and the session in the clear — this change hardens tool output only. Treat harness
+  output as a paste, not as a tool result.
 
 Availability is handled the other way round from the matching: redaction **fails closed**. If the redactor
 cannot do its job — no keyring service wired, the vault cannot be opened, the master key is unreadable, the
@@ -127,9 +132,21 @@ only its content is withheld. Two cases are deliberately *not* errors:
 - **an empty vault** (a keyring that is open, listable, and holds no secrets) passes the content through
   unchanged — there is nothing to redact, so nothing is withheld;
 - **`keyring.enabled: false`** is an explicit opt-out, not an availability failure: content passes through
-  unredacted, announced once per process with
+  unredacted, announced once per redactor instance (the gateway builds one for the agent loop and one
+  for the subagent manager) with
   `Secret redaction is disabled by config (keyring.enabled=false); tool output is not redacted`. Withholding
   there would blank every tool result on an install that deliberately runs without a keyring.
+
+The same fail-closed rule is not applied to one narrower case, on purpose and visibly: a **secret that the
+store refuses to decrypt** while the rest of the list reads fine. That secret is skipped, so its value is
+not redacted while every other value still is; a WARN naming the secrets (never the values) is emitted at
+most once a minute. Withholding every message because one entry is unreadable would make the keyring a
+denial-of-service on the agent. With the only production store (`FileStore`, which decrypts all-or-nothing)
+this is unreachable; it is a seam for other `Service` implementations.
+
+A **nil `*Redactor`** passes content through as well: it means redaction was not wired into that component
+at all, which is a wiring state, not a keyring that went down — which is why `Redact` on a nil redactor
+returns the content while a wired redactor with no service withholds it.
 
 ### The master key sits beside the vault
 

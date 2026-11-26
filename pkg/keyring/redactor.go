@@ -37,6 +37,8 @@ func (l *warnLimiter) allow(now time.Time) bool {
 
 var redactorWarnLimiter = &warnLimiter{interval: redactorWarnInterval}
 
+var redactorUnreadableWarnLimiter = &warnLimiter{interval: redactorWarnInterval}
+
 func withholdContent(reason string) string {
 	if redactorWarnLimiter.allow(time.Now()) {
 		logger.WarnCF("keyring", "Secret redaction unavailable; withholding log message content",
@@ -116,15 +118,38 @@ func (r *Redactor) Redact(content string) string {
 func (r *Redactor) rebuild(metas []SecretMeta) {
 	r.svc.mu.RLock()
 	vals := make(map[string]string, len(metas))
+	var unreadable []string
 	for _, m := range metas {
 		sec, err := r.svc.store.Get(m.Name)
-		if err != nil || sec == nil || len(sec.Value) < MinRedactLength {
+		if err != nil || sec == nil {
+			unreadable = append(unreadable, m.Name)
+			continue
+		}
+		if len(sec.Value) < MinRedactLength {
 			continue
 		}
 		vals[m.Name] = sec.Value
 	}
 	r.svc.mu.RUnlock()
 	r.values = vals
+
+	if len(unreadable) > 0 {
+		warnUnreadableSecrets(unreadable)
+	}
+}
+
+// warnUnreadableSecrets reports the secrets a rebuild could not read. They are
+// skipped, so their values reach the model unredacted while every other secret
+// is still replaced: a narrower fail-open than the ones that withhold the whole
+// message, and one that has to be visible rather than silent. Only names, never
+// values, and at most once a minute.
+func warnUnreadableSecrets(names []string) {
+	if !redactorUnreadableWarnLimiter.allow(time.Now()) {
+		return
+	}
+	sort.Strings(names)
+	logger.WarnCF("keyring", "Secret redaction is incomplete: stored secrets could not be read and are not redacted",
+		map[string]interface{}{"secrets": strings.Join(names, ",")})
 }
 
 func fingerprint(metas []SecretMeta) string {
