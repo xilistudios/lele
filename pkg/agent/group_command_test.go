@@ -482,6 +482,9 @@ func TestGroupCommand_Start_AdHoc_Success(t *testing.T) {
 	if len(groups) != 1 {
 		t.Fatalf("Expected 1 active group, got %d", len(groups))
 	}
+	if groups[0].OriginSenderID != "user1" {
+		t.Errorf("Expected the triggering sender as group origin, got %q", groups[0].OriginSenderID)
+	}
 }
 
 func TestGroupCommand_Start_Profile_Success(t *testing.T) {
@@ -539,6 +542,9 @@ func TestGroupCommand_Start_Profile_Success(t *testing.T) {
 	}
 	if groups[0].Strategy != config.StrategyRoundRobin {
 		t.Errorf("Expected strategy round_robin, got %s", groups[0].Strategy)
+	}
+	if groups[0].OriginSenderID != "user1" {
+		t.Errorf("Expected the triggering sender as group origin, got %q", groups[0].OriginSenderID)
 	}
 }
 

@@ -66,8 +66,9 @@ type GroupState struct {
 
 	NextTurnIndex int `json:"next_turn_index,omitempty"`
 
-	OriginChannel string `json:"origin_channel,omitempty"`
-	OriginChatID  string `json:"origin_chat_id,omitempty"`
+	OriginChannel  string `json:"origin_channel,omitempty"`
+	OriginChatID   string `json:"origin_chat_id,omitempty"`
+	OriginSenderID string `json:"origin_sender_id,omitempty"`
 }
 
 func (g *GroupState) AddTurn(t Turn) {

@@ -170,15 +170,16 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 	var toolCalls []GroupToolCall
 
 	req := TurnRequest{
-		GroupID:       state.ID,
-		Speaker:       speaker,
-		SystemPrompt:  inputs.sysPrompt,
-		Transcript:    inputs.transcript,
-		Instruction:   inputs.instruction,
-		MaxTokens:     state.MaxTokensPerTurn,
-		EnableTools:   true,
-		OriginChannel: mg.originCh,
-		OriginChatID:  mg.originChat,
+		GroupID:        state.ID,
+		Speaker:        speaker,
+		SystemPrompt:   inputs.sysPrompt,
+		Transcript:     inputs.transcript,
+		Instruction:    inputs.instruction,
+		MaxTokens:      state.MaxTokensPerTurn,
+		EnableTools:    true,
+		OriginChannel:  mg.originCh,
+		OriginChatID:   mg.originChat,
+		OriginSenderID: mg.originSender,
 		OnToolCall: func(toolCallID, toolName, args, status, result string) {
 			gm.publish(bus.OutboundMessage{
 				Channel:        mg.originCh,

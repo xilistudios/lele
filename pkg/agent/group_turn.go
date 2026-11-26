@@ -198,6 +198,7 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 				channel:    req.OriginChannel,
 				chatID:     req.OriginChatID,
 				sessionKey: sessionKey,
+				senderID:   req.OriginSenderID,
 				iteration:  iteration,
 			})
 

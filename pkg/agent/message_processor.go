@@ -155,6 +155,7 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		SessionKey:      sessionKey,
 		Channel:         msg.Channel,
 		ChatID:          msg.ChatID,
+		SenderID:        msg.SenderID,
 		UserMessage:     msg.Content,
 		Attachments:     msg.Attachments,
 		DefaultResponse: "I've completed processing but have no response to give.",
@@ -181,6 +182,7 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		SessionKey: sessionKey,
 		Channel:    msg.Channel,
 		ChatID:     msg.ChatID,
+		SenderID:   msg.SenderID,
 	}, lastAssistantResponse(agent, sessionKey))
 	if ephemeralNotice == "" {
 		return response, nil
@@ -302,6 +304,7 @@ func (mp *messageProcessorImpl) ContinueTurn(ctx context.Context, marker TurnMar
 		SessionKey:      sessionKey,
 		Channel:         marker.Channel,
 		ChatID:          marker.ChatID,
+		SenderID:        msg.SenderID,
 		DefaultResponse: "I've completed processing but have no response to give.",
 		EnableSummary:   true,
 		SendResponse:    true,
@@ -542,6 +545,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
 		ChatID:          originChatID,
+		SenderID:        msg.SenderID,
 		UserMessage:     fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   true,

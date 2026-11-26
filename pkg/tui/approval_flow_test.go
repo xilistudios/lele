@@ -32,7 +32,7 @@ func TestApproval_FullFlowWithAgent(t *testing.T) {
 		t.Fatal("approval manager is nil")
 	}
 
-	approval := am.CreateApproval(key, "rm -rf /tmp/danger", "deny pattern matched", 0)
+	approval := am.CreateApproval(key, "rm -rf /tmp/danger", "deny pattern matched", 0, "")
 
 	m.agentLoop.MessageBus().PublishOutbound(bus.OutboundMessage{
 		Channel: "native",
@@ -107,7 +107,7 @@ func TestApproval_RejectFlow(t *testing.T) {
 	m.viewport.Width = 118
 
 	am := m.agentLoop.GetApprovalManager()
-	approval := am.CreateApproval(key, "sudo rm -rf /", "sudo command", 0)
+	approval := am.CreateApproval(key, "sudo rm -rf /", "sudo command", 0, "")
 
 	m.agentLoop.MessageBus().PublishOutbound(bus.OutboundMessage{
 		Channel: "native",

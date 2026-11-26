@@ -44,7 +44,7 @@ func createAndPublish(t *testing.T, m *Model, chatID, command, reason string) st
 	if am == nil {
 		t.Fatal("approval manager is nil")
 	}
-	approval := am.CreateApproval(chatID, command, reason, 0)
+	approval := am.CreateApproval(chatID, command, reason, 0, "")
 	m.agentLoop.MessageBus().PublishOutbound(bus.OutboundMessage{
 		Channel: "native",
 		ChatID:  chatID,
@@ -230,7 +230,7 @@ func TestInvertedAuditRepro(t *testing.T) {
 	m.showWelcome = false
 
 	am := m.agentLoop.GetApprovalManager()
-	approval := am.CreateApproval(other, "rm -rf /", "dangerous", 0)
+	approval := am.CreateApproval(other, "rm -rf /", "dangerous", 0, "")
 
 	m.agentLoop.MessageBus().PublishOutbound(bus.OutboundMessage{
 		Channel: "native", ChatID: other, Event: "approval.request",

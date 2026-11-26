@@ -187,6 +187,7 @@ func (t *GroupChatTool) Execute(ctx context.Context, args map[string]interface{}
 	if chatID == "" {
 		chatID = "direct"
 	}
+	opts.OriginSenderID = ToolSenderFromCtx(ctx)
 
 	groupID := group.NewGroupID("tool")
 	_, err := t.manager.Start(ctx, groupID, "", task, strategy, participants, opts, channel, chatID)

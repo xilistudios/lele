@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -392,20 +393,23 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 	if n.approvalManager != nil {
 		handledApproval, err := n.approvalManager.HandleApprovalForSession(payload.RequestID, payload.Approved, client.SessionKey)
 		if err != nil {
-			if strings.Contains(err.Error(), "approval session mismatch") {
+			switch {
+			case errors.Is(err, ErrApprovalSessionMismatch), errors.Is(err, ErrApprovalRequesterMismatch):
 				logger.WarnCF("native", "Approval session mismatch rejected", map[string]interface{}{
 					"client_id":  client.ID,
 					"session":    client.SessionKey,
 					"request_id": payload.RequestID,
 				})
 				n.sendError(client, "approval_forbidden", "approval belongs to a different session")
-				return
+			case errors.Is(err, ErrApprovalNotFound):
+				n.sendError(client, "approval_error", "approval request expired or not found")
+			default:
+				logger.ErrorCF("native", "Failed to handle approval", map[string]interface{}{
+					"error":      err.Error(),
+					"request_id": payload.RequestID,
+				})
+				n.sendError(client, "approval_error", "approval could not be resolved")
 			}
-			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
-				"error":      err.Error(),
-				"request_id": payload.RequestID,
-			})
-			n.sendError(client, "approval_error", "approval request expired or not found")
 			return
 		}
 		command = handledApproval.Command

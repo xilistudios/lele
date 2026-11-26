@@ -28,17 +28,19 @@ type GroupOptions struct {
 	StopKeywords     []string
 	MaxTokensPerTurn int
 	TotalTokenBudget int
+	OriginSenderID   string
 }
 
 type managedGroup struct {
-	state      *GroupState
-	originCh   string
-	originChat string
-	cancel     context.CancelFunc
-	result     string
-	done       chan struct{}
-	err        error
-	finishedAt time.Time
+	state        *GroupState
+	originCh     string
+	originChat   string
+	originSender string
+	cancel       context.CancelFunc
+	result       string
+	done         chan struct{}
+	err          error
+	finishedAt   time.Time
 
 	finalizeOnce sync.Once
 
@@ -156,13 +158,14 @@ func (gm *GroupManager) LoadHistorical() (int, error) {
 		}
 
 		mg := &managedGroup{
-			state:      st,
-			originCh:   st.OriginChannel,
-			originChat: st.OriginChatID,
-			cancel:     func() {},
-			done:       make(chan struct{}),
-			err:        rehydratedErr,
-			finishedAt: st.UpdatedAt,
+			state:        st,
+			originCh:     st.OriginChannel,
+			originChat:   st.OriginChatID,
+			originSender: st.OriginSenderID,
+			cancel:       func() {},
+			done:         make(chan struct{}),
+			err:          rehydratedErr,
+			finishedAt:   st.UpdatedAt,
 		}
 		if mg.finishedAt.IsZero() {
 			mg.finishedAt = now
@@ -280,16 +283,18 @@ func (gm *GroupManager) Start(
 		TotalTokenBudget: opts.TotalTokenBudget,
 		OriginChannel:    originChannel,
 		OriginChatID:     originChatID,
+		OriginSenderID:   opts.OriginSenderID,
 	}
 
 	gctx, cancel := context.WithCancel(ctx)
 
 	mg := &managedGroup{
-		state:      state,
-		originCh:   originChannel,
-		originChat: originChatID,
-		cancel:     cancel,
-		done:       make(chan struct{}),
+		state:        state,
+		originCh:     originChannel,
+		originChat:   originChatID,
+		originSender: opts.OriginSenderID,
+		cancel:       cancel,
+		done:         make(chan struct{}),
 	}
 
 	gm.mu.Lock()

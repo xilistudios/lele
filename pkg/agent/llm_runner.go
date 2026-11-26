@@ -397,6 +397,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			SessionKey:      opts.SessionKey,
 			Channel:         opts.Channel,
 			ChatID:          opts.ChatID,
+			SenderID:        opts.SenderID,
 			UserMessage:     continuationPrompt,
 			DefaultResponse: "Continuing to work on the goal...",
 			EnableSummary:   true,
@@ -773,6 +774,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				channel:      opts.Channel,
 				chatID:       opts.ChatID,
 				sessionKey:   opts.SessionKey,
+				senderID:     opts.SenderID,
 				iteration:    iteration,
 				sendResponse: opts.SendResponse,
 			})
