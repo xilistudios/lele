@@ -74,8 +74,11 @@ func (p *BackgroundProcess) VisibleTo(callerSessionKey string) bool {
 	owner := p.OwnerSessionKey
 	p.mu.RUnlock()
 
-	if owner == "" || callerSessionKey == "" {
+	if owner == "" {
 		return true
+	}
+	if callerSessionKey == "" {
+		return false
 	}
 	return SessionKeysRelated(owner, callerSessionKey)
 }

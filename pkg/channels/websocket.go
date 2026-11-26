@@ -27,25 +27,103 @@ const (
 
 var wsQueueSendTimeout = 5 * time.Second
 
+// wsTokenSubprotocol is the offer browsers make so the credential can travel in
+// the Sec-WebSocket-Protocol header, the only handshake field a browser page can
+// set on a WebSocket handshake.
+const wsTokenSubprotocol = "bearer"
+
+// wsTokenCandidate is one credential offered by a WebSocket handshake. fromQuery
+// marks the legacy ?token= transport, which the caller reports as deprecated
+// because query strings leak into access logs and proxies.
+type wsTokenCandidate struct {
+	token     string
+	fromQuery bool
+}
+
+// wsTokenCandidates lists every credential a handshake offers, in preference
+// order: the bearer subprotocol (the only field a browser page can set), then
+// the Authorization header (non-browser clients), then the legacy ?token= query
+// parameter. They are candidates, not a decision: the caller authenticates them
+// in order and takes the first one that validates, so a stale header or
+// subprotocol never costs a client that also carries a working ?token=.
+func wsTokenCandidates(r *http.Request) []wsTokenCandidate {
+	candidates := make([]wsTokenCandidate, 0, 3)
+
+	offered := websocket.Subprotocols(r)
+	for i, protocol := range offered {
+		if strings.EqualFold(protocol, wsTokenSubprotocol) && i+1 < len(offered) {
+			if candidate := strings.TrimSpace(offered[i+1]); candidate != "" {
+				candidates = append(candidates, wsTokenCandidate{token: candidate})
+			}
+		}
+	}
+
+	if candidate := bearerToken(r.Header.Get("Authorization")); candidate != "" {
+		candidates = append(candidates, wsTokenCandidate{token: candidate})
+	}
+
+	if candidate := getQueryParam(r, "token"); candidate != "" {
+		candidates = append(candidates, wsTokenCandidate{token: candidate, fromQuery: true})
+	}
+
+	return candidates
+}
+
+// bearerToken reads the token out of an Authorization header. The documented
+// form is "Bearer <token>"; the bare "<token>" that predates the prefix is still
+// accepted so a handshake that worked before keeps working.
+func bearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+}
+
+// authenticateWSToken tries the handshake's credentials in preference order.
+// A candidate that fails to validate falls through to the next one, so an
+// expired Authorization header (or a stale subprotocol token) does not reject a
+// client that also sends a valid ?token=; the deprecation warning fires only
+// when the query token is the one that authenticated the handshake.
+func (n *NativeChannel) authenticateWSToken(r *http.Request, candidates []wsTokenCandidate) (*ClientInfo, bool) {
+	for _, candidate := range candidates {
+		clientInfo, valid := n.auth.ValidateToken(candidate.token)
+		if !valid {
+			continue
+		}
+		if candidate.fromQuery {
+			n.warnDeprecatedQueryToken(r)
+		}
+		return clientInfo, true
+	}
+	return nil, false
+}
+
+// warnDeprecatedQueryToken reports the legacy ?token= handshake once per hour.
+// The token itself is never logged: that is the whole reason the transport is
+// being retired.
+func (n *NativeChannel) warnDeprecatedQueryToken(r *http.Request) {
+	if !n.wsTokenLimiter.sample("ws|query-token") {
+		return
+	}
+	logger.WarnCF("native", "WebSocket token in the query string is deprecated; use the bearer subprotocol or the Authorization header", map[string]interface{}{
+		"remote_addr": r.RemoteAddr,
+	})
+}
+
 func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
 		return
 	}
 
-	token := getQueryParam(r, "token")
-	if token == "" {
-		hdr := r.Header.Get("Authorization")
-		token = strings.TrimPrefix(hdr, "Bearer ")
-	}
-
-	if token == "" {
+	candidates := wsTokenCandidates(r)
+	if len(candidates) == 0 {
 		writeError(w, http.StatusUnauthorized, "missing token", "token_missing")
 		return
 	}
 
-	clientInfo, valid := n.auth.ValidateToken(token)
-	if !valid {
+	clientInfo, authenticated := n.authenticateWSToken(r, candidates)
+	if !authenticated {
 		writeError(w, http.StatusUnauthorized, "invalid token", "token_invalid")
 		return
 	}
@@ -71,6 +149,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		WriteBufferSize:   wsWriteBufferSize,
 		CheckOrigin:       n.checkOrigin,
 		EnableCompression: true,
+		Subprotocols:      []string{wsTokenSubprotocol},
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

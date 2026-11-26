@@ -16,7 +16,7 @@ import (
 const (
 	StaleClaimTimeout  = 30 * time.Second
 	ClaimLimit         = 64
-	PumpInterval       = 250 * time.Millisecond
+	PumpInterval       = time.Second
 	PruneInterval      = 10 * time.Minute
 	ProcessedRetention = 7 * 24 * time.Hour
 )

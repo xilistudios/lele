@@ -334,6 +334,22 @@ func expandHome(path string) string {
 	return path
 }
 
+// migratedFileMode is the mode every migrated file is written with: the source
+// mode is never trusted, so a world- or group-readable source must not produce
+// a world- or group-readable copy of the user's memory notes.
+const migratedFileMode os.FileMode = 0o600
+
+// migratedOwnerExecBit is the only bit of the source mode copyFile carries over.
+// The migration copies skills/ next to the context files, and a skill's helpers
+// (workspace/skills/tmux/scripts/*.sh) are invoked as {baseDir}/scripts/*.sh by
+// their SKILL.md, so dropping the exec bit would break the migrated skill in
+// silence. Group and other never survive.
+const migratedOwnerExecBit os.FileMode = 0o100
+
+func migratedDestinationMode(src os.FileMode) os.FileMode {
+	return migratedFileMode | src.Perm()&migratedOwnerExecBit
+}
+
 func copyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
@@ -341,19 +357,29 @@ func copyFile(src, dst string) error {
 	}
 	defer srcFile.Close()
 
-	info, err := srcFile.Stat()
+	mode := migratedFileMode
+	if info, err := srcFile.Stat(); err == nil {
+		mode = migratedDestinationMode(info.Mode())
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
 
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
-	if err != nil {
+	// The create mode only applies to a new file: an existing destination keeps
+	// its old permissions through O_TRUNC, so the copy has to tighten it here.
+	if err := dstFile.Chmod(mode); err != nil {
+		dstFile.Close()
 		return err
 	}
-	defer dstFile.Close()
 
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		dstFile.Close()
+		return err
+	}
+
+	return dstFile.Close()
 }
 
 func relPath(path, base string) string {

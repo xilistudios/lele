@@ -1123,18 +1123,42 @@ and `502 mcp_auth_failed` when the store refuses to clear the record.
 
 ## WebSocket API
 
-Connect with bearer auth:
+Authenticate the handshake with one of three mechanisms, in order of
+preference:
 
-```text
-ws://127.0.0.1:18793/api/v1/ws
-Authorization: Bearer <token>
-```
+1. **Bearer subprotocol** (the only one a browser page can use). The client
+   offers the `bearer` subprotocol followed by the token, and the server echoes
+   `bearer` so the handshake completes:
 
-Or via query parameter (legacy):
+   ```text
+   ws://127.0.0.1:18793/api/v1/ws
+   Sec-WebSocket-Protocol: bearer, <token>
+   ```
 
-```text
-ws://127.0.0.1:18793/api/v1/ws?token=<token>
-```
+2. **Authorization header** (non-browser clients):
+
+   ```text
+   ws://127.0.0.1:18793/api/v1/ws
+   Authorization: Bearer <token>
+   ```
+
+3. **Query parameter** (deprecated, still accepted for old clients):
+
+   ```text
+   ws://127.0.0.1:18793/api/v1/ws?token=<token>
+   ```
+
+   The first query-string handshake within an hour logs a single WARN naming
+   the deprecation — never the token. Query strings are copied into access logs,
+   proxy logs and shell histories, which is why this form is on its way out.
+
+Every credential the handshake carries is tried in that order, and the first one
+that **validates** authenticates it: a stale `Authorization` header or an expired
+subprotocol token falls through to the legacy `?token=` instead of rejecting a
+handshake that used to succeed. The documented header form is
+`Authorization: Bearer <token>`; the bare `Authorization: <token>` that predates
+the prefix is still accepted. The deprecation warning is emitted only when the
+query token is the credential that actually authenticated the handshake.
 
 Optional query parameter:
 

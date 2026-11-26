@@ -8,6 +8,8 @@ const MAX_QUEUE_SIZE = 50
 const PING_INTERVAL_MS = 15000
 const PONG_TIMEOUT_MS = 10000
 
+const WS_BEARER_SUBPROTOCOL = 'bearer'
+
 type ConnectionState = 'disconnected' | 'connecting' | 'connected'
 
 type SocketEventMap = {
@@ -253,14 +255,15 @@ export class LeleSocket {
     this.setState('connecting')
     this.emit('connecting')
     this.reconnectAttempts++
-    const params = new URLSearchParams({ token: this.token })
+    const params = new URLSearchParams()
     const sessionForKey = this.confirmedSessionKey ?? this.pendingSessionKey
     if (sessionForKey) {
       params.set('session_key', sessionForKey)
     }
 
-    const url = `${this.baseUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/api/v1/ws?${params.toString()}`
-    const socket = new WebSocket(url)
+    const query = params.toString()
+    const url = `${this.baseUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/api/v1/ws${query ? `?${query}` : ''}`
+    const socket = new WebSocket(url, [WS_BEARER_SUBPROTOCOL, this.token])
     this.socket = socket
 
     socket.addEventListener('open', () => {

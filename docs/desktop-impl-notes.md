@@ -67,7 +67,7 @@ Bugs found & fixed during independent review (never trust subagent reports alone
 - Bearer auth with injected token → `/api/v1/chat/sessions` 200 ✓
 - `/api/v1/auth/clients` shows `desktop-local`, expires 2036 (10y) ✓
 - Second instance → `LELE_ERROR {"code":"already_running","pid":...}` ✓
-- SIGTERM → graceful shutdown, `gateway.lock` removed ✓
+- SIGTERM → graceful shutdown, `gateway.lock` released (the file stays on disk by design; see `pkg/lockfile` Release) ✓
 - Web UI served at `/` → 200 ✓
 - Frontend rebuilt + re-embedded into Go binary after desktop changes.
 

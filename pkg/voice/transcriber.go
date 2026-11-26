@@ -10,10 +10,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/utils"
+)
+
+const (
+	defaultGroqAPIBase = "https://api.groq.com/openai/v1"
+	maxResponseBytes   = 10 << 20
+	maxErrorBodyRunes  = 512
 )
 
 type GroqTranscriber struct {
@@ -28,10 +36,16 @@ type TranscriptionResponse struct {
 	Duration float64 `json:"duration,omitempty"`
 }
 
-func NewGroqTranscriber(apiKey string) *GroqTranscriber {
+// NewGroqTranscriber builds a transcriber for the Groq transcription API. A
+// non-blank apiBase overrides the endpoint (a self-hosted or proxied OpenAI
+// compatible Whisper server), which is what providers.groq.api_base feeds.
+func NewGroqTranscriber(apiKey, apiBase string) *GroqTranscriber {
 	logger.DebugCF("voice", "Creating Groq transcriber", map[string]interface{}{"has_api_key": apiKey != ""})
 
-	apiBase := "https://api.groq.com/openai/v1"
+	apiBase = strings.TrimRight(strings.TrimSpace(apiBase), "/")
+	if apiBase == "" {
+		apiBase = defaultGroqAPIBase
+	}
 	return &GroqTranscriber{
 		apiKey:  apiKey,
 		apiBase: apiBase,
@@ -39,6 +53,20 @@ func NewGroqTranscriber(apiKey string) *GroqTranscriber {
 			Timeout: 60 * time.Second,
 		},
 	}
+}
+
+// readCappedBody reads an HTTP body while refusing to grow past
+// maxResponseBytes: the read stops one byte over the cap instead of buffering
+// whatever a broken or hostile endpoint decided to send.
+func readCappedBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("response too large: more than %d bytes", maxResponseBytes)
+	}
+	return body, nil
 }
 
 func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) (*TranscriptionResponse, error) {
@@ -117,18 +145,21 @@ func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readCappedBody(resp.Body)
 	if err != nil {
 		logger.ErrorCF("voice", "Failed to read response", map[string]interface{}{"error": err})
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		preview := utils.Truncate(string(body), maxErrorBodyRunes)
 		logger.ErrorCF("voice", "API error", map[string]interface{}{
-			"status_code": resp.StatusCode,
-			"response":    string(body),
+			"status_code":  resp.StatusCode,
+			"response":     preview,
+			"body_bytes":   len(body),
+			"body_omitted": utf8.RuneCount(body) > maxErrorBodyRunes,
 		})
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, preview)
 	}
 
 	logger.DebugCF("voice", "Received response from Groq API", map[string]interface{}{

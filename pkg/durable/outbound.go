@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	OutboundPumpInterval = 250 * time.Millisecond
+	OutboundPumpInterval = time.Second
 	MaxOutboundAttempts  = 5
 	MaxOutboundAge       = time.Hour
 	kickBuffer           = 1

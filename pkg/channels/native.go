@@ -61,6 +61,7 @@ type NativeChannel struct {
 	apiLimiter         *rateLimiter
 	wsMessageLimiter   *rateLimiter
 	authLogLimiter     *rateLimiter
+	wsTokenLimiter     *rateLimiter
 	skillsLoader       *skills.SkillsLoader
 	skillInstaller     *skills.SkillInstaller
 	workspacePath      string
@@ -191,6 +192,7 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		wsMessageLimiter = newRateLimiter(rateOr(rl.WSMessagesPerMinute, config.DefaultNativeRateLimitWSMessagesPerMinute), time.Minute)
 	}
 	authLogLimiter := newRateLimiter(6, time.Minute)
+	wsTokenLimiter := newRateLimiter(1, time.Hour)
 
 	workspacePath := cfg.WorkspacePath()
 	globalSkillsDir := filepath.Join(leleDir, "skills")
@@ -221,6 +223,7 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		apiLimiter:       apiLimiter,
 		wsMessageLimiter: wsMessageLimiter,
 		authLogLimiter:   authLogLimiter,
+		wsTokenLimiter:   wsTokenLimiter,
 		skillsLoader:     skillsLoader,
 		skillInstaller:   skillInstaller,
 		workspacePath:    workspacePath,
@@ -381,6 +384,7 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 	n.apiLimiter.Stop()
 	n.wsMessageLimiter.Stop()
 	n.authLogLimiter.Stop()
+	n.wsTokenLimiter.Stop()
 
 	n.running = false
 	n.base.setRunning(false)

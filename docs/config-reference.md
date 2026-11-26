@@ -162,6 +162,17 @@ All three flags are opt-in (default off) and live under `session` in
   **Prerequisite:** requires `durable_inbound` — the replay is the resume
   trigger, so without the inbound spool there is nothing to resume from.
 
+Both spools are drained by a poll loop that ticks **once a second** at rest
+(`durable.PumpInterval` / `durable.OutboundPumpInterval`), which is the only
+periodic work they do when nothing is queued — a sub-second ticker meant four
+`Stats` + claim passes per second per spool on an idle gateway. The latency this
+trades away is bounded and only visible when a row is enqueued by something that
+cannot wake the pump: an **outbound** row enqueued through the normal path kicks
+the pump immediately (`FlushPeer`), so a reply is still delivered without waiting
+for the tick, and an **inbound** row published right after a live enqueue is
+processed on the next tick, i.e. within one second. Retries keep their own
+backoff schedule and are not delayed by the ticker beyond that one second.
+
 ## `channels`
 
 Contains all channel configs such as:

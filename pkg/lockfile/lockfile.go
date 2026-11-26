@@ -66,13 +66,16 @@ func Acquire(path string) (*Lock, error) {
 	return &Lock{path: path, file: f}, nil
 }
 
+// Release drops the advisory lock. The lock file is deliberately NOT unlinked:
+// unlinking a lock file races with another process that already opened the same
+// path — that process can take the lock on the now-orphaned inode while a third
+// creates a fresh file at the same path and takes "the same" lock there, leaving
+// two instances convinced they are exclusive. The file stays on disk with the
+// last PID; only a held flock means anything.
 func (l *Lock) Release() error {
 	var firstErr error
 
 	if l.file != nil {
-		if err := l.file.Truncate(0); err != nil && firstErr == nil {
-			firstErr = err
-		}
 		if err := unlockFile(l.file); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -80,10 +83,6 @@ func (l *Lock) Release() error {
 			firstErr = err
 		}
 		l.file = nil
-	}
-
-	if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) && firstErr == nil {
-		firstErr = err
 	}
 
 	return firstErr

@@ -75,6 +75,16 @@ func TestMiddlewareSetsCanonicalHeaders(t *testing.T) {
 	}
 }
 
+func TestSecurityHeaders_XSSProtectionZero(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18790/", nil)
+	SecurityHeaders(rec, req)
+
+	if got := rec.Header().Get("X-XSS-Protection"); got != "0" {
+		t.Fatalf("X-XSS-Protection = %q, want %q: the legacy XSS auditor must be disabled, not put in block mode", got, "0")
+	}
+}
+
 func TestBuildCSPBareIPv6HostNoMalformedToken(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Host = "::1"

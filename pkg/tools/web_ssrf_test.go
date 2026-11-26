@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -114,6 +116,38 @@ func redirectHops(t *testing.T, n int) []*http.Request {
 		via[i] = redirectRequest(t, "https://example.com/previous")
 	}
 	return via
+}
+
+func TestWebFetch_DefaultBlocksPrivateAndTestSeamAllowsIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("loopback body"))
+	}))
+	defer server.Close()
+
+	production := NewWebFetchTool(50000)
+	if production.allowPrivate {
+		t.Fatal("NewWebFetchTool must not enable the private-address seam: production blocks non-public targets")
+	}
+
+	res := production.Execute(context.Background(), map[string]interface{}{"url": server.URL})
+	if !res.IsError || !strings.Contains(res.ForLLM, "access denied") {
+		t.Fatalf("production tool reached a loopback target: error=%v result=%q", res.IsError, res.ForLLM)
+	}
+
+	seam := NewWebFetchTool(50000)
+	seam.allowPrivate = true
+	res = seam.Execute(context.Background(), map[string]interface{}{"url": server.URL})
+	if res.IsError {
+		t.Fatalf("the test-only allowPrivate seam must let a loopback httptest server answer, got: %s", res.ForLLM)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(res.ForUser), &payload); err != nil {
+		t.Fatalf("seam fetch returned an unreadable payload (%v): %q", err, res.ForUser)
+	}
+	if text, _ := payload["text"].(string); text != "loopback body" {
+		t.Fatalf("seam fetch text = %q, want the loopback body: %q", text, res.ForUser)
+	}
 }
 
 func TestWebFetchRedirectRevalidation(t *testing.T) {

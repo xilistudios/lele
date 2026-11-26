@@ -1,7 +1,10 @@
 package channels
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/devices/events"
 )
 
 func TestRenderTelegramText_MarkdownMode(t *testing.T) {
@@ -279,5 +282,27 @@ func TestMarkdownToTelegramHTML_ComplexCases(t *testing.T) {
 				t.Errorf("markdownToTelegramHTML(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestDeviceNotificationRendersAsPlainText(t *testing.T) {
+	ev := &events.DeviceEvent{
+		Action:       events.ActionAdd,
+		Kind:         events.KindUSB,
+		Vendor:       "Acme [Update firmware](https://evil.example/x)",
+		Product:      "**URGENT** plug-in `reboot` now",
+		Serial:       "~~sn~~",
+		Capabilities: "_keyboard_",
+	}
+
+	rendered := renderTelegramText(ev.FormatMessage(), TextModeMarkdown)
+
+	for _, markup := range []string{"<a ", "<b>", "<code>", "<pre>", "<i>", "<s>"} {
+		if strings.Contains(rendered, markup) {
+			t.Fatalf("a device descriptor produced %q in the rendered message, so a device can author markup in the user's chat: %s", markup, rendered)
+		}
+	}
+	if !strings.Contains(rendered, "Acme Update firmware(https://evil.example/x) URGENT plug-in reboot now") {
+		t.Fatalf("rendered message lost the descriptor text it should still show: %s", rendered)
 	}
 }
