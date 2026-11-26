@@ -390,7 +390,7 @@ func TestExecBackgroundStoresPlaceholderCommand(t *testing.T) {
 	}
 }
 
-func TestExecAutoBackgroundStoresPlaceholderCommand(t *testing.T) {
+func TestExec_AutoBackgroundStoresPlaceholderCommand(t *testing.T) {
 	const secretValue = "autobg-s3cr3t-42"
 
 	svc := newTestKeyring(t)
@@ -402,12 +402,11 @@ func TestExecAutoBackgroundStoresPlaceholderCommand(t *testing.T) {
 	tool := NewExecTool("", false)
 	tool.SetKeyringService(svc)
 	tool.SetBackgroundManager(mgr)
-	tool.SetBackgroundThreshold(200 * time.Millisecond)
-	tool.SetTimeout(30 * time.Second)
+	tool.SetTimeout(6 * time.Second)
 
 	ctx := WithAgentToolContext(context.Background(), "tester", "s")
 	result := tool.Execute(ctx, map[string]interface{}{
-		"command": "sleep 5.5; echo {{SECRET:tok}}",
+		"command": "sleep 2; echo {{SECRET:tok}}",
 	})
 	if result.IsError {
 		t.Fatalf("auto-background exec failed: %s", result.ForLLM)
