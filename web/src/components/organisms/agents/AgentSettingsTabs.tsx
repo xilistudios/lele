@@ -128,7 +128,7 @@ export function AgentSettingsTabs({
       role="tablist"
       aria-orientation={isHorizontalBar ? 'horizontal' : 'vertical'}
       aria-label={t('settings.agentPage.tablistLabel')}
-      className="w-full flex-shrink-0 overflow-x-auto border-b border-border bg-background-secondary p-2 no-scrollbar lg:min-w-0 lg:w-[200px] lg:overflow-x-visible lg:border-b-0 lg:border-r lg:p-4"
+      className="w-full flex-shrink-0 overflow-x-auto border-b border-border bg-background-secondary p-2 lg:min-w-0 lg:w-[200px] lg:overflow-x-visible lg:border-b-0 lg:border-r lg:p-4"
     >
       <div className="flex min-w-max gap-1 lg:min-w-0 lg:flex-col lg:space-y-1">
         {AGENT_TAB_ORDER.map((tab) => {

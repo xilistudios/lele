@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import type { SettingsTab } from '../../lib/settingsTabs'
@@ -38,6 +38,8 @@ const TAB_ICONS: Record<SettingsTab, typeof SettingsIcon> = {
   logs: FileTextIcon,
 }
 
+const inset = (value: string): number => Number.parseFloat(value) || 0
+
 type Props = {
   activeTab: SettingsTab
   onTabChange: (tab: SettingsTab) => void
@@ -49,17 +51,33 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
   const navRef = useRef<HTMLElement | null>(null)
   const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({})
 
-  useEffect(() => {
+  const revealActiveTab = useCallback(() => {
     const scroller = navRef.current
     const button = tabRefs.current[activeTab]
     if (!scroller || !button) return
+    const style = window.getComputedStyle(scroller)
     const viewRect = scroller.getBoundingClientRect()
     const buttonRect = button.getBoundingClientRect()
-    const overflowLeft = buttonRect.left - viewRect.left
-    const overflowRight = buttonRect.right - viewRect.right
+    const viewTop = viewRect.top + inset(style.paddingTop)
+    const viewBottom = viewRect.bottom - inset(style.paddingBottom)
+    const viewLeft = viewRect.left + inset(style.paddingLeft)
+    const viewRight = viewRect.right - inset(style.paddingRight)
+    const overflowTop = buttonRect.top - viewTop
+    const overflowBottom = buttonRect.bottom - viewBottom
+    const overflowLeft = buttonRect.left - viewLeft
+    const overflowRight = buttonRect.right - viewRight
+    if (overflowTop < 0) scroller.scrollTop += overflowTop
+    else if (overflowBottom > 0) scroller.scrollTop += overflowBottom
     if (overflowLeft < 0) scroller.scrollLeft += overflowLeft
     else if (overflowRight > 0) scroller.scrollLeft += overflowRight
   }, [activeTab])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: groupsEnabled is the TRIGGER, not a read — the groups tab arrives after mount and moves every later tab, so the reveal must re-measure against the new rail height
+  useEffect(() => {
+    revealActiveTab()
+    window.addEventListener('resize', revealActiveTab)
+    return () => window.removeEventListener('resize', revealActiveTab)
+  }, [revealActiveTab, groupsEnabled])
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
@@ -83,7 +101,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     <nav
       ref={navRef}
       data-testid="settings-tabs"
-      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
+      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible md:overflow-y-auto"
     >
       <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
         {tabs.map((tab) => {
