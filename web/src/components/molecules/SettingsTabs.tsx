@@ -55,8 +55,12 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     if (!scroller || !button) return
     const viewRect = scroller.getBoundingClientRect()
     const buttonRect = button.getBoundingClientRect()
+    const overflowTop = buttonRect.top - viewRect.top
+    const overflowBottom = buttonRect.bottom - viewRect.bottom
     const overflowLeft = buttonRect.left - viewRect.left
     const overflowRight = buttonRect.right - viewRect.right
+    if (overflowTop < 0) scroller.scrollTop += overflowTop
+    else if (overflowBottom > 0) scroller.scrollTop += overflowBottom
     if (overflowLeft < 0) scroller.scrollLeft += overflowLeft
     else if (overflowRight > 0) scroller.scrollLeft += overflowRight
   }, [activeTab])
@@ -83,7 +87,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     <nav
       ref={navRef}
       data-testid="settings-tabs"
-      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
+      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible md:overflow-y-auto md:min-h-0"
     >
       <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
         {tabs.map((tab) => {
