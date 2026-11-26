@@ -217,7 +217,6 @@ describe('SettingsTabs — rail scroll contract', () => {
       const tokens = (tabScroller(view.container).getAttribute('class') ?? '').split(/\s+/)
 
       expect(tokens).toContain('md:overflow-y-auto')
-      expect(tokens).toContain('md:min-h-0')
       expect(tokens).toContain('md:overflow-x-visible')
     },
     TEST_TIMEOUT_MS,

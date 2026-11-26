@@ -101,7 +101,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     <nav
       ref={navRef}
       data-testid="settings-tabs"
-      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible md:overflow-y-auto md:min-h-0"
+      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible md:overflow-y-auto"
     >
       <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
         {tabs.map((tab) => {
