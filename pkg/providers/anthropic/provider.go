@@ -21,6 +21,8 @@ type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 
 const defaultBaseURL = "https://api.anthropic.com"
 
+const defaultThinkingEffort = "high"
+
 const oauthBetaHeaders = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24"
 
 const claudeCLIUserAgent = "claude-cli/2.1.280 (external, sdk-cli)"
@@ -221,10 +223,18 @@ func applyThinkingParams(params *anthropic.MessageNewParams, options map[string]
 }
 
 func thinkingEffort(reasoning map[string]interface{}) string {
-	if effort, ok := reasoning["effort"].(string); ok && effort != "" {
-		return effort
+	effort, ok := reasoning["effort"].(string)
+	if !ok || effort == "" {
+		effort = defaultThinkingEffort
 	}
-	return "high"
+	return clampNativeThinkingEffort(effort)
+}
+
+func clampNativeThinkingEffort(effort string) string {
+	if strings.EqualFold(strings.TrimSpace(effort), "xhigh") {
+		return defaultThinkingEffort
+	}
+	return effort
 }
 
 func buildAnthropicContentBlocks(msg Message) []anthropic.ContentBlockParamUnion {

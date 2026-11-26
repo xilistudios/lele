@@ -606,3 +606,33 @@ func marshalParams(t *testing.T, params anthropic.MessageNewParams) string {
 	}
 	return string(data)
 }
+func TestBuildParams_ThinkingFloorsXhighEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		effort string
+		want   anthropic.OutputConfigEffort
+	}{
+		{name: "xhigh floors to high", effort: "xhigh", want: anthropic.OutputConfigEffortHigh},
+		{name: "max stays max", effort: "max", want: anthropic.OutputConfigEffortMax},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			params, err := buildParams([]Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4-6", map[string]interface{}{
+				"reasoning": map[string]interface{}{"enabled": true, "effort": tc.effort},
+			})
+			if err != nil {
+				t.Fatalf("buildParams() error: %v", err)
+			}
+			if params.Thinking.OfAdaptive == nil {
+				t.Fatalf("thinking = %#v, want adaptive", params.Thinking)
+			}
+			if params.OutputConfig.Effort != tc.want {
+				t.Fatalf("output_config.effort = %q, want %q", params.OutputConfig.Effort, tc.want)
+			}
+			wire := marshalParams(t, params)
+			if !strings.Contains(wire, `"output_config":{"effort":"`+string(tc.want)+`"}`) {
+				t.Fatalf("request body missing output_config.effort=%s: %s", tc.want, wire)
+			}
+		})
+	}
+}
