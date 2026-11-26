@@ -243,7 +243,7 @@ export function AgentMCPSection({ agentId }: Props) {
               onClick={() => setFilter(value)}
               className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
                 filter === value
-                  ? 'border-accent-primary/30 bg-surface-selected text-accent-primary'
+                  ? 'border-accent-primary/30 bg-surface-selected text-accent-text'
                   : 'border-border text-text-secondary hover:bg-surface-hover hover:text-text-primary'
               }`}
             >

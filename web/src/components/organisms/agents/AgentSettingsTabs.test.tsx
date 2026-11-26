@@ -5,6 +5,11 @@ import '../../../test/i18n'
 import { AGENT_TABS, type AgentTab, isSectionDirty } from '../../../lib/agentDirty'
 import type { ConfigError } from '../../../lib/types'
 import {
+  INADEQUATE_ACCENT_CLASS,
+  SELECTED_BACKGROUND_CLASS,
+  expectSelectedAccentRecipe,
+} from '../../../test/accentRecipe'
+import {
   AGENT_TAB_ORDER,
   AGENT_TAB_PANEL_ID,
   AgentSettingsTabs,
@@ -291,5 +296,24 @@ describe('AgentSettingsTabs', () => {
     const expected = AGENT_TAB_ORDER.filter((tab) => isSectionDirty(dirty, 2, tab))
     expect(dotted(tabs, 'dirty')).toEqual(expected.map((tab) => `agent-tab-${tab}`))
     expect(expected).toEqual(['general', 'model', 'skills'])
+  })
+})
+describe('AgentSettingsTabs — active pill recipe', () => {
+  test('the selected tab paints accent-text on surface-selected (AA in both themes)', () => {
+    const { tabs } = setup({ activeTab: 'mcp' })
+    const selected = tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true')
+    expect(selected).toHaveLength(1)
+    expectSelectedAccentRecipe(selected[0] ?? null)
+  })
+
+  test('unselected tabs keep the secondary recipe', () => {
+    const { tabs } = setup({ activeTab: 'mcp' })
+    const unselected = tabs.filter((tab) => tab.getAttribute('aria-selected') !== 'true')
+    expect(unselected.length).toBeGreaterThan(0)
+    for (const tab of unselected) {
+      const tokens = (tab.getAttribute('class') ?? '').split(/\s+/)
+      expect(tokens).not.toContain(SELECTED_BACKGROUND_CLASS)
+      expect(tokens).not.toContain(INADEQUATE_ACCENT_CLASS)
+    }
   })
 })

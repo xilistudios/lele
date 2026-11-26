@@ -17,7 +17,7 @@
     "format": "biome format src/",
     "format:fix": "biome format --write src/",
     "check": "biome check --apply src/ && tsc --noEmit",
-    "lint:design": "node scripts/check-contrast.mjs --self-test && node scripts/check-ghost-classes.mjs && node scripts/check-double-slash.mjs && node scripts/check-contrast.mjs && node scripts/tokens-report.mjs && node scripts/check-bare-var.mjs --self-test && node scripts/check-bare-var.mjs"
+    "lint:design": "node scripts/check-contrast.mjs --self-test && node scripts/check-active-pill.mjs --self-test && node scripts/check-active-pill.mjs && node scripts/check-ghost-classes.mjs && node scripts/check-double-slash.mjs && node scripts/check-contrast.mjs && node scripts/tokens-report.mjs && node scripts/check-bare-var.mjs --self-test && node scripts/check-bare-var.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.3",

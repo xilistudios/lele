@@ -5,6 +5,11 @@ import { MemoryRouter } from 'react-router-dom'
 import '../../test/i18n'
 import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
 import type { SettingsTab } from '../../lib/settingsTabs'
+import {
+  INADEQUATE_ACCENT_CLASS,
+  SELECTED_BACKGROUND_CLASS,
+  expectSelectedAccentRecipe,
+} from '../../test/accentRecipe'
 import { SettingsTabs } from './SettingsTabs'
 
 const TEST_TIMEOUT_MS = 20_000
@@ -192,6 +197,33 @@ describe('SettingsTabs — active tab visibility', () => {
         expect(tabScroller(view.container).scrollLeft).toBe(0)
       } finally {
         restore()
+      }
+    },
+    TEST_TIMEOUT_MS,
+  )
+})
+describe('SettingsTabs — active pill recipe', () => {
+  test(
+    'active tab paints accent-text on surface-selected (AA in both themes)',
+    () => {
+      const view = render(tree('mcp'))
+      expectSelectedAccentRecipe(tabButton(view.container, 'mcp'))
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  test(
+    'inactive tabs never take the selected background',
+    () => {
+      const view = render(tree('mcp'))
+      const inactive = view.container.querySelectorAll(
+        `[data-testid^="${TAB_TESTID_PREFIX}"]:not([aria-current="page"])`,
+      )
+      expect(inactive.length).toBeGreaterThan(0)
+      for (const tab of inactive) {
+        const tokens = (tab.getAttribute('class') ?? '').split(/\s+/)
+        expect(tokens).not.toContain(SELECTED_BACKGROUND_CLASS)
+        expect(tokens).not.toContain(INADEQUATE_ACCENT_CLASS)
       }
     },
     TEST_TIMEOUT_MS,

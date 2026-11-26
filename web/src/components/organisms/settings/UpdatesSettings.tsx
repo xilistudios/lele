@@ -176,7 +176,7 @@ export function UpdatesSettings() {
                 <button
                   type="button"
                   onClick={() => setShowChangelog(!showChangelog)}
-                  className="text-xs text-accent-primary hover:underline"
+                  className="text-xs text-accent-text hover:underline"
                 >
                   {showChangelog
                     ? t('settings.updates.hideChangelog')
