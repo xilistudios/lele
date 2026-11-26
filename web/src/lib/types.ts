@@ -202,14 +202,17 @@ export type AgentCommandDeleteResponse = {
   ok: boolean
 }
 
-export type SecretMode = 'literal' | 'env' | 'empty'
+export type SecretMode = 'literal' | 'env' | 'keyring' | 'empty'
 
 export type SecretValue = {
   mode: SecretMode
   value?: string
   env_name?: string
   env_default?: string
+  secret_name?: string
   has_env_var: boolean
+  has_value?: boolean
+  has_default?: boolean
 }
 
 export type EditableAgentDefaults = {

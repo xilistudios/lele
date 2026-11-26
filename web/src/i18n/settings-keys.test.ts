@@ -74,6 +74,18 @@ const NEW_TAB_KEYS = [
   'settings.mcpPage.implicitMain',
 ]
 
+const SECRET_INPUT_KEYS = [
+  'settings.literalValue',
+  'settings.envVariable',
+  'settings.keyringSecret',
+  'settings.empty',
+  'settings.emptySecretDescription',
+  'settings.storedSecret',
+  'settings.replaceSecret',
+  'settings.showSecret',
+  'settings.hideSecret',
+]
+
 describe('settings.* i18n key parity', () => {
   test('the three locales carry at least one settings.* key', () => {
     expect(enKeys.length).toBeGreaterThan(0)
@@ -102,6 +114,18 @@ describe('settings.* i18n key parity', () => {
     for (const keys of [enKeys, esKeys, ptKeys]) {
       for (const key of NEW_TAB_KEYS) expect(keys).toContain(key)
     }
+  })
+
+  test('every secret-input key is a non-empty string in all three locales', () => {
+    const problems: string[] = []
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      const values = settingsValues(locale)
+      for (const key of SECRET_INPUT_KEYS) {
+        const value = values.get(key)
+        if (typeof value !== 'string' || value.trim() === '') problems.push(`${name}: ${key}`)
+      }
+    }
+    expect(problems.join('\n')).toBe('')
   })
 
   test('every key the new settings pages render is a non-empty string in all three locales', () => {

@@ -42,9 +42,7 @@ export function FeishuChannelSettings() {
             <SecretInput
               id="channels.feishu.app_id"
               value={ch.feishu.app_id}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.feishu.app_id', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.feishu.app_id', v)}
             />
           </SettingsField>
           <SettingsField
@@ -55,9 +53,7 @@ export function FeishuChannelSettings() {
             <SecretInput
               id="channels.feishu.app_secret"
               value={ch.feishu.app_secret}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.feishu.app_secret', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.feishu.app_secret', v)}
             />
           </SettingsField>
           <SettingsField
@@ -68,9 +64,7 @@ export function FeishuChannelSettings() {
             <SecretInput
               id="channels.feishu.encrypt_key"
               value={ch.feishu.encrypt_key}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.feishu.encrypt_key', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.feishu.encrypt_key', v)}
             />
           </SettingsField>
           <SettingsField
@@ -82,7 +76,7 @@ export function FeishuChannelSettings() {
               id="channels.feishu.verification_token"
               value={ch.feishu.verification_token}
               onChange={(v: SecretValue) =>
-                updateSecretField('channels.feishu.verification_token', v.mode, v.value, v.env_name)
+                updateSecretField('channels.feishu.verification_token', v)
               }
             />
           </SettingsField>

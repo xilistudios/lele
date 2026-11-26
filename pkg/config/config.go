@@ -1344,6 +1344,43 @@ func expandEnvString(value string) string {
 	})
 }
 
+func expandSecretString(value string) string {
+	if !strings.Contains(value, "{{SECRET:") {
+		return value
+	}
+	matches := secretPlaceholderRegex.FindStringSubmatch(value)
+	if len(matches) < 2 {
+		return value
+	}
+	resolver := keyringResolver
+	if resolver == nil {
+		return value
+	}
+	resolved, err := resolver(matches[1])
+	if err != nil || resolved == "" {
+		return value
+	}
+	return resolved
+}
+
+func expandSecretTree(node interface{}) interface{} {
+	switch value := node.(type) {
+	case string:
+		return expandSecretString(value)
+	case map[string]interface{}:
+		for key, item := range value {
+			value[key] = expandSecretTree(item)
+		}
+		return value
+	case []interface{}:
+		for i, item := range value {
+			value[i] = expandSecretTree(item)
+		}
+		return value
+	}
+	return node
+}
+
 func expandEnvTree(node interface{}) interface{} {
 	switch value := node.(type) {
 	case string:
@@ -1470,7 +1507,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, configParseError(path, data, err)
 	}
 
-	expanded, err := json.Marshal(expandEnvTree(tree))
+	expanded, err := json.Marshal(expandSecretTree(expandEnvTree(tree)))
 	if err != nil {
 		return nil, err
 	}

@@ -42,9 +42,7 @@ export function QqChannelSettings() {
             <SecretInput
               id="channels.qq.app_id"
               value={ch.qq.app_id}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.qq.app_id', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.qq.app_id', v)}
             />
           </SettingsField>
           <SettingsField
@@ -55,9 +53,7 @@ export function QqChannelSettings() {
             <SecretInput
               id="channels.qq.app_secret"
               value={ch.qq.app_secret}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.qq.app_secret', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.qq.app_secret', v)}
             />
           </SettingsField>
           <SettingsField

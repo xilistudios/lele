@@ -409,6 +409,35 @@ Controls:
 - retention window
 - rotation mode
 
+## Secret placeholders
+
+Any JSON string value in `config.json` may hold a placeholder instead of a
+credential, so the file itself never carries the secret — with one exception,
+spelled out below:
+
+- `{{ENV_NAME}}` / `{{ENV_NAME:default}}` — replaced by the environment
+  variable of that name when the config is loaded (the default is used when the
+  variable is unset or empty). The bare `{{ENV_NAME}}` form keeps the file
+  credential-free; the `{{ENV_NAME:default}}` fallback **is** a credential stored
+  in the file, so the API treats it as a literal secret: `GET
+  /api/v1/config` masks it behind `has_default: true`, and a save that does not
+  resend it keeps the stored fallback (see `docs/client-api.md`, **Config**).
+- `{{SECRET:NAME}}` — replaced by the value stored in the keyring under `NAME` (the
+  same names `/secrets` and the `secret` tool manage, e.g.
+  `{{SECRET:openai.api_key}}`). The whole string must be the placeholder —
+  unlike the env form it is not substituted inside a larger value — and it is
+  resolved at config load, after env expansion, only when the keyring is
+  available: if the keyring is disabled, the vault cannot be opened, or the name
+  does not exist, the placeholder is left verbatim and the affected
+  channel/provider sees the placeholder text (lele still starts — a broken
+  keyring never blocks startup).
+
+Expansion is in-memory only. Nothing resolves a placeholder back into the file:
+load → modify → save diffs the runtime object against the file, so an untouched
+`{{ENV_…}}` / `{{SECRET:…}}` stays a placeholder on disk, and the Web UI settings
+document round-trips the reference (see `docs/client-api.md`, **Config**), never
+the resolved value.
+
 ## Environment Variables
 
 Many config keys can be overridden via environment variables.

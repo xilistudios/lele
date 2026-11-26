@@ -42,9 +42,7 @@ export function DiscordChannelSettings() {
             <SecretInput
               id="channels.discord.token"
               value={ch.discord.token}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.discord.token', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.discord.token', v)}
             />
           </SettingsField>
           <SettingsField

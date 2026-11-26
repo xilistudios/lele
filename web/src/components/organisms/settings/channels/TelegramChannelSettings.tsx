@@ -44,9 +44,7 @@ export function TelegramChannelSettings() {
             <SecretInput
               id="channels.telegram.token"
               value={ch.telegram.token}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.telegram.token', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.telegram.token', v)}
             />
           </SettingsField>
           <SettingsField

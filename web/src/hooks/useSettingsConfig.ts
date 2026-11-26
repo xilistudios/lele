@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { useCallback, useEffect, useState } from 'react'
-import type { ConfigError, ConfigMetadata, EditableConfig } from '../lib/types'
+import type { ConfigError, ConfigMetadata, EditableConfig, SecretValue } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 import { ApiError } from '../services/http/errors'
 
@@ -18,12 +18,7 @@ export type SettingsConfigState = {
   saveError: string | null
 
   updateField: <T>(path: string, value: T) => void
-  updateSecretField: (
-    path: string,
-    mode: 'literal' | 'env' | 'empty',
-    value?: string,
-    envName?: string,
-  ) => void
+  updateSecretField: (path: string, secret: SecretValue) => void
   replaceDraft: (nextConfig: EditableConfig) => void
   reset: () => void
   validate: () => Promise<boolean>
@@ -112,18 +107,11 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
   )
 
   const updateSecretField = useCallback(
-    (path: string, mode: 'literal' | 'env' | 'empty', value?: string, envName?: string) => {
+    (path: string, secret: SecretValue) => {
       if (!draftConfig) return
 
       const newDraft = deepClone(draftConfig)
-      const secretValue = {
-        mode,
-        value: mode === 'literal' ? value : undefined,
-        env_name: mode === 'env' ? envName : undefined,
-        env_default: undefined,
-        has_env_var: mode === 'env' ? !!envName && envName.length > 0 : false,
-      }
-      const updated = setValueAtPath(newDraft as Record<string, unknown>, path, secretValue)
+      const updated = setValueAtPath(newDraft as Record<string, unknown>, path, secret)
       setDraftConfig(updated as EditableConfig)
       setDirtyPaths((prev) => new Set(prev).add(path))
       setSaveState('idle')

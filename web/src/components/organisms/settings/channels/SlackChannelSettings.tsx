@@ -42,9 +42,7 @@ export function SlackChannelSettings() {
             <SecretInput
               id="channels.slack.bot_token"
               value={ch.slack.bot_token}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.slack.bot_token', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.slack.bot_token', v)}
             />
           </SettingsField>
           <SettingsField
@@ -55,9 +53,7 @@ export function SlackChannelSettings() {
             <SecretInput
               id="channels.slack.app_token"
               value={ch.slack.app_token}
-              onChange={(v: SecretValue) =>
-                updateSecretField('channels.slack.app_token', v.mode, v.value, v.env_name)
-              }
+              onChange={(v: SecretValue) => updateSecretField('channels.slack.app_token', v)}
             />
           </SettingsField>
           <SettingsField
