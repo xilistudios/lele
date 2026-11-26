@@ -45,11 +45,22 @@ type DeviceEvent struct {
 // chose to report, so nothing bounds them upstream.
 const maxDescriptorLength = 128
 
+// markdownMetas are the characters the channel renderers turn into markup
+// anywhere in a line: a backtick opens a code span, * and _ open bold or
+// italics, ~ opens strikethrough, and [ ] open link text (which only needs the
+// parenthesis that follows to become a clickable anchor). A USB descriptor is
+// fully attacker-controlled, so they are removed instead of escaped: escaping
+// leaves visible backslashes and the renderer's pair-matching ignores them.
+// Parentheses, #, > and | cannot form markup without those characters or a line
+// start, and a sanitized descriptor never carries a newline.
+const markdownMetas = "`*_~[]"
+
 // sanitizeDescriptor makes a device descriptor safe to interpolate into an
-// outbound message: control characters are dropped, every whitespace run
-// collapses to one space (so a descriptor cannot forge message lines), markdown
-// backticks are escaped (so it cannot open a code span someone else closes), and
-// an over-long value is truncated with a visible mark.
+// outbound message: control characters and Unicode format controls (RLO, ZWSP,
+// isolates — they reorder or hide text without being control characters) are
+// dropped, every whitespace run collapses to one space so a descriptor cannot
+// forge message lines, markdown metas are removed so the rendered message stays
+// plain text, and an over-long value is truncated with a visible mark.
 func sanitizeDescriptor(value string) string {
 	cleaned := strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -58,15 +69,24 @@ func sanitizeDescriptor(value string) string {
 			}
 			return -1
 		}
+		if unicode.In(r, unicode.Cf) {
+			return -1
+		}
 		return r
 	}, value)
+	cleaned = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(markdownMetas, r) {
+			return -1
+		}
+		return r
+	}, cleaned)
 	cleaned = strings.Join(strings.Fields(cleaned), " ")
 
 	if runes := []rune(cleaned); len(runes) > maxDescriptorLength {
 		cleaned = string(runes[:maxDescriptorLength]) + "…"
 	}
 
-	return strings.ReplaceAll(cleaned, "`", "\\`")
+	return cleaned
 }
 
 func (e *DeviceEvent) FormatMessage() string {

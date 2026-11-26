@@ -18,9 +18,9 @@ func fieldValue(t *testing.T, message, field string) string {
 	return ""
 }
 
-func hasUnescapedBacktick(s string) bool {
-	for i, r := range s {
-		if r == '`' && (i == 0 || s[i-1] != '\\') {
+func hasMarkdownMeta(s string) bool {
+	for _, r := range s {
+		if strings.ContainsRune("`*_~[]", r) {
 			return true
 		}
 	}
@@ -48,14 +48,14 @@ func TestFormatMessage_SanitizesDescriptors(t *testing.T) {
 			t.Fatalf("message still carries control character %q: %q", bad, msg)
 		}
 	}
-	if hasUnescapedBacktick(msg) {
-		t.Fatalf("an unescaped backtick survived sanitization: %q", msg)
+	if hasMarkdownMeta(msg) {
+		t.Fatalf("a markdown meta character survived sanitization: %q", msg)
 	}
 
 	deviceLine := fieldValue(t, msg, "Device")
-	const vendorPrefix = "Evil Type: phishing Vendor\\`*bold* "
+	const vendorPrefix = "Evil Type: phishing Vendorbold "
 	if !strings.HasPrefix(deviceLine, vendorPrefix) {
-		t.Fatalf("Device line = %q, want it to start with %q (injected newlines collapsed into single spaces, backtick escaped)", deviceLine, vendorPrefix)
+		t.Fatalf("Device line = %q, want it to start with %q (injected newlines collapsed into single spaces, markdown metas stripped)", deviceLine, vendorPrefix)
 	}
 
 	product := strings.TrimPrefix(deviceLine, vendorPrefix)
@@ -67,13 +67,58 @@ func TestFormatMessage_SanitizesDescriptors(t *testing.T) {
 	}
 
 	serial := fieldValue(t, msg, "Serial")
-	if serial != "sn [2Jbad" {
-		t.Fatalf("Serial = %q, want the control characters stripped and the newline collapsed to one space", serial)
+	if serial != "sn 2Jbad" {
+		t.Fatalf("Serial = %q, want the control characters and the bracket stripped and the newline collapsed to one space", serial)
 	}
 
 	caps := fieldValue(t, msg, "Capabilities")
-	if caps != "keyboard \\`tick\\`" {
-		t.Fatalf("Capabilities = %q, want the tab collapsed and both backticks escaped", caps)
+	if caps != "keyboard tick" {
+		t.Fatalf("Capabilities = %q, want the tab collapsed and both backticks stripped", caps)
+	}
+}
+
+func TestFormatMessage_NeutralizesInlineMarkdown(t *testing.T) {
+	ev := &DeviceEvent{
+		Action:       ActionAdd,
+		Kind:         KindUSB,
+		Vendor:       "Acme [Update firmware](https://evil.example/x)",
+		Product:      "**URGENT** plug-in `reboot` now",
+		Serial:       "sn~~strike~~",
+		Capabilities: "_keyboard_",
+	}
+
+	msg := ev.FormatMessage()
+
+	if hasMarkdownMeta(msg) {
+		t.Fatalf("a markdown meta character reached the message, so the channel renderer can turn a descriptor into a live link, bold or code span: %q", msg)
+	}
+	for _, want := range []string{
+		"Device: Acme Update firmware(https://evil.example/x) URGENT plug-in reboot now",
+		"Serial: snstrike",
+		"Capabilities: keyboard",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message does not contain %q: %q", want, msg)
+		}
+	}
+	if strings.Contains(msg, "](http") {
+		t.Fatalf("a descriptor still carries link syntax: %q", msg)
+	}
+}
+
+func TestSanitizeDescriptor_StripsFormatControls(t *testing.T) {
+	cases := map[string]string{
+		"Logitech\u202Eevil":      "Logitechevil",
+		"zero\u200Bwidth":         "zerowidth",
+		"left\u200Eto\u200Fright": "lefttoright",
+		"isolate\u2066d\u2069":    "isolated",
+		"\u202Aembed\u202C":       "embed",
+	}
+
+	for in, want := range cases {
+		if got := sanitizeDescriptor(in); got != want {
+			t.Errorf("sanitizeDescriptor(%q) = %q, want %q: Unicode format controls (RLO, ZWSP, isolates) must not survive into the notification", in, got, want)
+		}
 	}
 }
 
@@ -115,10 +160,10 @@ func TestSanitizeDescriptor_CollapsesWhitespaceRuns(t *testing.T) {
 		"  padded  ":              "padded",
 		"two\t\ttabs":             "two tabs",
 		"line\nbreak":             "line break",
-		"esc\x1b[31mred":          "esc[31mred",
+		"esc\x1b[31mred":          "esc31mred",
 		"":                        "",
 		"\n\n":                    "",
-		"a`b":                     `a\` + "`b",
+		"a`b":                     "ab",
 		"ünïcode — keeps accents": "ünïcode — keeps accents",
 	}
 
