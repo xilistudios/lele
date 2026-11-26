@@ -1,6 +1,6 @@
 import '../../test/setup'
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import '../../test/i18n'
 import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
@@ -101,9 +101,10 @@ function withoutScrollIntoView(): () => void {
   }
 }
 
-function tree(activeTab: SettingsTab) {
+function tree(activeTab: SettingsTab, groupsEnabled = false) {
+  const value = { ...logicValue, groupsEnabled } as unknown as AppLogicContextValue
   return (
-    <AppLogicContext.Provider value={logicValue}>
+    <AppLogicContext.Provider value={value}>
       <MemoryRouter initialEntries={[`/settings/${activeTab}`]}>
         <SettingsTabs activeTab={activeTab} onTabChange={() => undefined} />
       </MemoryRouter>
@@ -210,7 +211,7 @@ describe('SettingsTabs — active tab visibility', () => {
 
 describe('SettingsTabs — rail scroll contract', () => {
   test(
-    'desktop rail scrolls vertically and can shrink inside the settings row',
+    'desktop rail scrolls vertically while the mobile row stays horizontal',
     () => {
       const view = render(tree('general'))
       const tokens = (tabScroller(view.container).getAttribute('class') ?? '').split(/\s+/)
@@ -218,6 +219,58 @@ describe('SettingsTabs — rail scroll contract', () => {
       expect(tokens).toContain('md:overflow-y-auto')
       expect(tokens).toContain('md:min-h-0')
       expect(tokens).toContain('md:overflow-x-visible')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  test(
+    'reveals the active tab when the groups tab arrives after mount',
+    () => {
+      const layout: StripLayout = {
+        view: { left: 0, right: 200, top: 100, bottom: 500 },
+        tabs: {
+          general: { left: 8, right: 150, top: 100, bottom: 140 },
+          logs: { left: 8, right: 150, top: 448, bottom: 488 },
+        },
+      }
+      const restoreLayout = stubLayout(layout)
+      try {
+        const view = render(tree('logs'))
+        expect(tabScroller(view.container).scrollTop).toBe(0)
+
+        layout.tabs.logs = { left: 8, right: 150, top: 560, bottom: 600 }
+        view.rerender(tree('logs', true))
+
+        expect(tabButton(view.container, 'logs').getAttribute('aria-current')).toBe('page')
+        expect(tabScroller(view.container).scrollTop).toBe(100)
+      } finally {
+        restoreLayout()
+      }
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  test(
+    'reveals the active tab again when the rail shrinks under it',
+    () => {
+      const layout: StripLayout = {
+        view: { left: 0, right: 200, top: 100, bottom: 500 },
+        tabs: { logs: { left: 8, right: 150, top: 448, bottom: 488 } },
+      }
+      const restoreLayout = stubLayout(layout)
+      try {
+        const view = render(tree('logs'))
+        expect(tabScroller(view.container).scrollTop).toBe(0)
+
+        layout.view = { left: 0, right: 200, top: 100, bottom: 460 }
+        act(() => {
+          window.dispatchEvent(new window.Event('resize'))
+        })
+
+        expect(tabScroller(view.container).scrollTop).toBe(28)
+      } finally {
+        restoreLayout()
+      }
     },
     TEST_TIMEOUT_MS,
   )

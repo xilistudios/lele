@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import type { SettingsTab } from '../../lib/settingsTabs'
@@ -49,21 +49,32 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
   const navRef = useRef<HTMLElement | null>(null)
   const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({})
 
-  useEffect(() => {
+  const revealActiveTab = useCallback(() => {
     const scroller = navRef.current
     const button = tabRefs.current[activeTab]
     if (!scroller || !button) return
     const viewRect = scroller.getBoundingClientRect()
     const buttonRect = button.getBoundingClientRect()
-    const overflowTop = buttonRect.top - viewRect.top
-    const overflowBottom = buttonRect.bottom - viewRect.bottom
-    const overflowLeft = buttonRect.left - viewRect.left
-    const overflowRight = buttonRect.right - viewRect.right
+    const viewTop = viewRect.top
+    const viewBottom = viewRect.bottom
+    const viewLeft = viewRect.left
+    const viewRight = viewRect.right
+    const overflowTop = buttonRect.top - viewTop
+    const overflowBottom = buttonRect.bottom - viewBottom
+    const overflowLeft = buttonRect.left - viewLeft
+    const overflowRight = buttonRect.right - viewRight
     if (overflowTop < 0) scroller.scrollTop += overflowTop
     else if (overflowBottom > 0) scroller.scrollTop += overflowBottom
     if (overflowLeft < 0) scroller.scrollLeft += overflowLeft
     else if (overflowRight > 0) scroller.scrollLeft += overflowRight
   }, [activeTab])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: groupsEnabled is the TRIGGER, not a read — the groups tab arrives after mount and moves every later tab, so the reveal must re-measure against the new rail height
+  useEffect(() => {
+    revealActiveTab()
+    window.addEventListener('resize', revealActiveTab)
+    return () => window.removeEventListener('resize', revealActiveTab)
+  }, [revealActiveTab, groupsEnabled])
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
