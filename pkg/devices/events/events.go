@@ -1,6 +1,10 @@
 package events
 
-import "context"
+import (
+	"context"
+	"strings"
+	"unicode"
+)
 
 type EventSource interface {
 	Kind() Kind
@@ -36,6 +40,35 @@ type DeviceEvent struct {
 	Raw          map[string]string
 }
 
+// maxDescriptorLength caps a descriptor after sanitization. Descriptors come
+// from udev properties, i.e. from whatever the device (or a local udev rule)
+// chose to report, so nothing bounds them upstream.
+const maxDescriptorLength = 128
+
+// sanitizeDescriptor makes a device descriptor safe to interpolate into an
+// outbound message: control characters are dropped, every whitespace run
+// collapses to one space (so a descriptor cannot forge message lines), markdown
+// backticks are escaped (so it cannot open a code span someone else closes), and
+// an over-long value is truncated with a visible mark.
+func sanitizeDescriptor(value string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			if unicode.IsSpace(r) {
+				return ' '
+			}
+			return -1
+		}
+		return r
+	}, value)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	if runes := []rune(cleaned); len(runes) > maxDescriptorLength {
+		cleaned = string(runes[:maxDescriptorLength]) + "…"
+	}
+
+	return strings.ReplaceAll(cleaned, "`", "\\`")
+}
+
 func (e *DeviceEvent) FormatMessage() string {
 	actionEmoji := "🔌"
 	actionText := "Connected"
@@ -46,12 +79,12 @@ func (e *DeviceEvent) FormatMessage() string {
 
 	msg := actionEmoji + " Device " + actionText + "\n\n"
 	msg += "Type: " + string(e.Kind) + "\n"
-	msg += "Device: " + e.Vendor + " " + e.Product + "\n"
+	msg += "Device: " + sanitizeDescriptor(e.Vendor) + " " + sanitizeDescriptor(e.Product) + "\n"
 	if e.Capabilities != "" {
-		msg += "Capabilities: " + e.Capabilities + "\n"
+		msg += "Capabilities: " + sanitizeDescriptor(e.Capabilities) + "\n"
 	}
 	if e.Serial != "" {
-		msg += "Serial: " + e.Serial + "\n"
+		msg += "Serial: " + sanitizeDescriptor(e.Serial) + "\n"
 	}
 	return msg
 }
