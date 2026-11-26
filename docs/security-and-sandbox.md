@@ -241,8 +241,8 @@ that started them, and the `list_background_execs` / `get_background_exec_output
 tools refuse to touch a process from another session:
 
 - a process whose owner key matches the caller, or whose owner is a **descendant** of the caller
-  (`telegram:chat-1:subagent-2` is visible to `telegram:chat-1`), is visible — the `:`-separated hierarchy is
-  what lets a parent session reach its subagents;
+  (`telegram:chat-1:subagent-2` is visible to `telegram:chat-1`), is visible — the `:`-separated
+  hierarchy is what lets a parent session reach its subagents;
 - sibling subagents are separate sessions and cannot see each other;
 - a process with **no** owner key is system-global (started by a cron job that names no session, for example)
   and is visible to every caller;
@@ -341,8 +341,8 @@ Hardening that needs no migration:
   ever read the key as compromised.
 
 > **Follow-up note (not part of this change):** relocating the master key to the OS keychain for the *file*
-> backend — or moving it out of `LeleDir` — cannot be done without a migration for existing vaults, so it is
-> deliberately left out of the hardening backlog. Such a migration must (1) detect `keyring.enc` +
+> backend — or moving it out of `LeleDir` — cannot be done without a migration for existing vaults, so it
+> is deliberately left out of the hardening backlog. Such a migration must (1) detect `keyring.enc` +
 > `keyring.key`, (2) re-wrap or move the key, (3) keep the old location readable for one release so a
 > rollback cannot lose the vault, and (4) only then refuse to open a vault whose key still sits beside it.
 > Until then, the layout above is the contract.
