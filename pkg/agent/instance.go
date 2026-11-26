@@ -197,7 +197,7 @@ func NewAgentInstance(
 	}
 	var transcribe tools.TranscribeFunc
 	if cfg != nil && cfg.Providers != nil && cfg.Providers.Groq.APIKey != "" {
-		groqTranscriber := voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
+		groqTranscriber := voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey, cfg.Providers.Groq.APIBase)
 		transcribe = func(ctx context.Context, audioPath string) (string, error) {
 			resp, err := groqTranscriber.Transcribe(ctx, audioPath)
 			if err != nil {

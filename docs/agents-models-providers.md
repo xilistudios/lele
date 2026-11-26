@@ -1059,7 +1059,11 @@ Exposure and gating:
 - Extracts the audio track (16 kHz mono WAV) and transcribes it when a Groq
   API key is configured (`providers.groq.apiKey` — the same signal the
   gateway uses for channel voice transcription); the transcript is injected
-  as a trailing text part.
+  as a trailing text part. The endpoint is `providers.groq.api_base`
+  (default `https://api.groq.com/openai/v1`), so a self-hosted or proxied
+  OpenAI-compatible Whisper server works by pointing that key at it; the
+  transcription response is capped at 10 MiB and a failing endpoint's error
+  body is logged truncated to 512 characters.
 - Graceful degradation: a missing or failed transcript never aborts the
   read. When transcription is configured, the model sees a placeholder text
   part explaining the gap — `no audio track detected`, `no speech

@@ -265,7 +265,7 @@ func gatewayCmd() {
 
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {
-		transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
+		transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey, cfg.Providers.Groq.APIBase)
 	}
 
 	if transcriber != nil {

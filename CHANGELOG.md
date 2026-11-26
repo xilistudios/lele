@@ -100,6 +100,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Voice
+- **The transcriber can be pointed at another endpoint, caps the response and stops logging a whole error body** (D-08) — three independent defects in `pkg/voice/transcriber.go`. The endpoint was hardcoded to `https://api.groq.com/openai/v1`, so a self-hosted or proxied OpenAI-compatible Whisper server was unreachable even though `providers.groq.api_base` already existed; `NewGroqTranscriber` now takes that base and trims/normalizes it (blank ⇒ the Groq default), wired from `providers.groq.api_base` in both the gateway and the agent's `transcribe` tool. `io.ReadAll(resp.Body)` buffered whatever the endpoint sent — a broken or hostile server could have driven the gateway out of memory — and is now `readCappedBody`: at most 10 MiB is read (one byte over the cap is enough to refuse it) and an oversized response fails with `response too large`. And an error response was logged and returned **whole** (`string(body)` in the log fields and in the error), so a 400 with a multi-megabyte body wrote all of it to the log and pushed it into the channel; both are now truncated to 512 characters with the byte count and an `body_omitted` flag in the log line. The transcript-preview logging (`utils.Truncate(text, 50)`) was already correct and is now pinned by a test that fails if the full transcript ever reaches the log.
+
+### Fixed
+
 #### CLI
 - **The instance lock no longer unlinks its own file on release** (D-06) — `Release` truncated the PID file, unlocked, closed and then `os.Remove`d it. Unlinking a lock file is a classic race: process B can open the path *before* A unlinks it, A unlinks and exits, B takes the flock on the now-orphaned inode, and process C creates a fresh file at the same path and takes "the same" lock on it — two gateways, each convinced it is the only instance, which is exactly what this lock exists to prevent. `Release` now only unlocks and closes; the file stays on disk with the last PID, and only a held `flock` means anything (`ReadPID` on a released lock reports who held it last, not who holds it now). Re-acquiring over a stale file was already supported, so nothing else changes.
 
