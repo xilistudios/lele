@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -58,27 +59,60 @@ func loadFixtureDocument(t *testing.T, content string) *EditableDocument {
 	return doc
 }
 
-func expectedSecretPaths() []string {
-	return []string{
-		"channels.dingtalk.client_id",
-		"channels.dingtalk.client_secret",
-		"channels.discord.token",
-		"channels.feishu.app_id",
-		"channels.feishu.app_secret",
-		"channels.feishu.encrypt_key",
-		"channels.feishu.verification_token",
-		"channels.line.channel_access_token",
-		"channels.line.channel_secret",
-		"channels.onebot.access_token",
-		"channels.qq.app_id",
-		"channels.qq.app_secret",
-		"channels.slack.app_token",
-		"channels.slack.bot_token",
-		"channels.telegram.token",
-		"providers.openai.api_key",
-		"tools.web.brave.api_key",
-		"tools.web.perplexity.api_key",
+func reflectedSecretPaths(t *testing.T) []string {
+	t.Helper()
+	var paths []string
+	var walk func(v reflect.Value, path string, depth int)
+	walk = func(v reflect.Value, path string, depth int) {
+		if depth > 24 {
+			t.Fatalf("reflection walk did not terminate at %q", path)
+		}
+		switch v.Kind() {
+		case reflect.Struct:
+			if v.Type() == reflect.TypeOf(SecretValue{}) {
+				paths = append(paths, path)
+				return
+			}
+			for i := 0; i < v.NumField(); i++ {
+				field := v.Type().Field(i)
+				if field.PkgPath != "" {
+					continue
+				}
+				name := strings.Split(field.Tag.Get("json"), ",")[0]
+				if name == "" || name == "-" {
+					continue
+				}
+				next := name
+				if path != "" {
+					next = path + "." + name
+				}
+				walk(v.Field(i), next, depth+1)
+			}
+		case reflect.Ptr:
+			walk(reflect.New(v.Type().Elem()).Elem(), path, depth+1)
+		case reflect.Slice:
+			walk(reflect.New(v.Type().Elem()).Elem(), path+".<index>", depth+1)
+		case reflect.Map:
+			if v.Type().Elem().Kind() == reflect.Struct {
+				walk(reflect.New(v.Type().Elem()).Elem(), path+".<name>", depth+1)
+			}
+		}
 	}
+	walk(reflect.ValueOf(EditableDocument{}), "", 0)
+	sort.Strings(paths)
+	return paths
+}
+
+func normalizedSecretPaths(paths []string) []string {
+	normalized := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if parts := strings.Split(path, "."); len(parts) == 3 && parts[0] == "providers" && parts[2] == "api_key" {
+			path = "providers.<name>.api_key"
+		}
+		normalized = append(normalized, path)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 func enumeratedSecretPaths(doc *EditableDocument) []string {
@@ -90,19 +124,22 @@ func enumeratedSecretPaths(doc *EditableDocument) []string {
 	return paths
 }
 
-func TestForEachSecret_EnumeratesEverySecretField(t *testing.T) {
+func TestForEachSecret_MatchesTheTypes(t *testing.T) {
 	doc := loadFixtureDocument(t, literalSecretsFixture)
 
-	for _, path := range expectedSecretPaths() {
+	for _, path := range reflectedSecretPaths(t) {
+		if strings.Contains(path, "<") {
+			continue
+		}
 		if value, ok := doc.SecretValues()[path]; !ok || value.Mode != SecretModeLiteral {
 			t.Fatalf("%s missing from SecretValues: %#v (ok=%v)", path, value, ok)
 		}
 	}
 
-	got := enumeratedSecretPaths(doc)
-	want := expectedSecretPaths()
+	got := normalizedSecretPaths(enumeratedSecretPaths(doc))
+	want := reflectedSecretPaths(t)
 	if len(got) != len(want) {
-		t.Fatalf("enumerated %d secret paths, want %d:\n got %v\nwant %v", len(got), len(want), got, want)
+		t.Fatalf("forEachSecret visits %d secret paths, the document types hold %d:\n got %v\nwant %v", len(got), len(want), got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
@@ -259,6 +296,120 @@ func TestRestoreMaskedSecrets_KeepsEnvAndKeyringReferences(t *testing.T) {
 	token := incoming.Channels.Telegram.Token
 	if token.Mode != SecretModeKeyring || token.SecretName != "telegram.token" || token.Value != "" {
 		t.Fatalf("token = %#v, want the keyring reference untouched", token)
+	}
+}
+
+const envDefaultFixture = `{
+	"agents": {"defaults": {"workspace": "/ws", "provider": "openai", "model": "gpt-4", "max_tokens": 4096}},
+	"channels": {
+		"telegram": {"enabled": true, "token": "{{ENV_LELE_TEST_TG_TOKEN:tg-fallback-credential}}"},
+		"discord": {"enabled": true, "token": "{{ENV_LELE_TEST_DISCORD_TOKEN}}"}
+	}
+}`
+
+func TestMaskedCopy_MasksEnvDefault(t *testing.T) {
+	doc := loadFixtureDocument(t, envDefaultFixture)
+
+	masked, err := doc.MaskedCopy()
+	if err != nil {
+		t.Fatalf("MaskedCopy: %v", err)
+	}
+
+	telegram := masked.Channels.Telegram.Token
+	if telegram.Mode != SecretModeEnv || telegram.EnvName != "LELE_TEST_TG_TOKEN" {
+		t.Fatalf("telegram token = %#v, want the env reference", telegram)
+	}
+	if telegram.EnvDefault != nil {
+		t.Fatalf("masked env fallback = %q, want it cleared", *telegram.EnvDefault)
+	}
+	if !telegram.HasDefault {
+		t.Fatalf("masked env fallback did not report has_default: %#v", telegram)
+	}
+
+	discord := masked.Channels.Discord.Token
+	if discord.EnvDefault != nil || discord.HasDefault {
+		t.Fatalf("discord token = %#v, want no fallback reported", discord)
+	}
+
+	encoded, err := json.Marshal(masked)
+	if err != nil {
+		t.Fatalf("marshal masked doc: %v", err)
+	}
+	if strings.Contains(string(encoded), "tg-fallback-credential") {
+		t.Fatalf("masked document still contains the env fallback: %s", encoded)
+	}
+	if doc.Channels.Telegram.Token.EnvDefault == nil {
+		t.Fatal("MaskedCopy mutated the source document: the env fallback is gone")
+	}
+}
+
+func TestRestoreMaskedSecrets_KeepsEnvDefault(t *testing.T) {
+	doc := loadFixtureDocument(t, envDefaultFixture)
+
+	masked, err := doc.MaskedCopy()
+	if err != nil {
+		t.Fatalf("MaskedCopy: %v", err)
+	}
+	roundTripped := roundTripDocument(t, masked)
+	roundTripped.RestoreMaskedSecrets(doc.SecretValues())
+
+	token := roundTripped.Channels.Telegram.Token
+	if token.EnvDefault == nil || *token.EnvDefault != "tg-fallback-credential" {
+		t.Fatalf("telegram env fallback = %#v, want the stored fallback back", token.EnvDefault)
+	}
+	if !token.HasDefault {
+		t.Fatalf("restored env fallback did not report has_default: %#v", token)
+	}
+	if got := envPlaceholderString(token); got != "{{ENV_LELE_TEST_TG_TOKEN:tg-fallback-credential}}" {
+		t.Fatalf("restored placeholder = %q, want it byte-identical", got)
+	}
+
+	discord := roundTripped.Channels.Discord.Token
+	if discord.EnvDefault != nil || discord.HasDefault {
+		t.Fatalf("discord token = %#v, want no invented fallback", discord)
+	}
+}
+
+func TestRestoreMaskedSecrets_ReplacesEnvDefault(t *testing.T) {
+	doc := loadFixtureDocument(t, envDefaultFixture)
+	stored := doc.SecretValues()
+
+	rotated := "tg-rotated-fallback"
+	incoming := roundTripDocument(t, doc)
+	incoming.Channels.Telegram.Token = SecretValue{Mode: SecretModeEnv, EnvName: "LELE_TEST_TG_TOKEN", EnvDefault: &rotated}
+	incoming.RestoreMaskedSecrets(stored)
+
+	token := incoming.Channels.Telegram.Token
+	if token.EnvDefault == nil || *token.EnvDefault != rotated {
+		t.Fatalf("telegram env fallback = %#v, want the incoming replacement %q", token.EnvDefault, rotated)
+	}
+}
+
+func TestRestoreMaskedSecrets_EmptyModeClearsEnvDefault(t *testing.T) {
+	doc := loadFixtureDocument(t, envDefaultFixture)
+	stored := doc.SecretValues()
+
+	incoming := roundTripDocument(t, doc)
+	incoming.Channels.Telegram.Token = SecretValue{Mode: SecretModeEmpty}
+	incoming.RestoreMaskedSecrets(stored)
+
+	token := incoming.Channels.Telegram.Token
+	if token.Mode != SecretModeEmpty || token.EnvDefault != nil || token.HasDefault {
+		t.Fatalf("telegram token = %#v, want it cleared", token)
+	}
+}
+
+func TestRestoreMaskedSecrets_EnvNameChangeKeepsStoredFallback(t *testing.T) {
+	doc := loadFixtureDocument(t, envDefaultFixture)
+	stored := doc.SecretValues()
+
+	incoming := roundTripDocument(t, doc)
+	incoming.Channels.Telegram.Token = SecretValue{Mode: SecretModeEnv, EnvName: "LELE_TEST_TG_TOKEN_V2"}
+	incoming.RestoreMaskedSecrets(stored)
+
+	token := incoming.Channels.Telegram.Token
+	if got := envPlaceholderString(token); got != "{{ENV_LELE_TEST_TG_TOKEN_V2:tg-fallback-credential}}" {
+		t.Fatalf("placeholder = %q, want the stored fallback kept across an env name change", got)
 	}
 }
 

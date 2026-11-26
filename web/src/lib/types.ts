@@ -212,6 +212,7 @@ export type SecretValue = {
   secret_name?: string
   has_env_var: boolean
   has_value?: boolean
+  has_default?: boolean
 }
 
 export type EditableAgentDefaults = {

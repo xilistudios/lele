@@ -35,6 +35,7 @@ func (doc *EditableDocument) forEachSecret(fn func(path string, sv *SecretValue)
 	}
 	for name, provider := range doc.Providers {
 		fn("providers."+name+".api_key", &provider.APIKey)
+		// the callback writes through a pointer into the range copy, so the entry must be stored back
 		doc.Providers[name] = provider
 	}
 }
@@ -53,6 +54,10 @@ func (doc *EditableDocument) MaskedCopy() (*EditableDocument, error) {
 		return nil, err
 	}
 	masked.forEachSecret(func(_ string, sv *SecretValue) {
+		if sv.EnvDefault != nil {
+			sv.HasDefault = true
+			sv.EnvDefault = nil
+		}
 		if sv.Mode != SecretModeLiteral || sv.Value == "" {
 			return
 		}
@@ -64,15 +69,18 @@ func (doc *EditableDocument) MaskedCopy() (*EditableDocument, error) {
 
 func (doc *EditableDocument) RestoreMaskedSecrets(stored map[string]SecretValue) {
 	doc.forEachSecret(func(path string, sv *SecretValue) {
-		if sv.Mode != SecretModeLiteral || sv.Value != "" {
-			return
-		}
 		kept, ok := stored[path]
-		if !ok || kept.Mode != SecretModeLiteral {
+		if !ok {
 			return
 		}
-		sv.Value = kept.Value
-		sv.HasValue = true
+		if sv.Mode == SecretModeEnv && sv.EnvDefault == nil && kept.EnvDefault != nil {
+			sv.EnvDefault = kept.EnvDefault
+			sv.HasDefault = true
+		}
+		if sv.Mode == SecretModeLiteral && sv.Value == "" && kept.Mode == SecretModeLiteral {
+			sv.Value = kept.Value
+			sv.HasValue = true
+		}
 	})
 }
 

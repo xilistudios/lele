@@ -412,11 +412,16 @@ Controls:
 ## Secret placeholders
 
 Any JSON string value in `config.json` may hold a placeholder instead of a
-credential, so the file itself never carries the secret:
+credential, so the file itself never carries the secret — with one exception,
+spelled out below:
 
 - `{{ENV_NAME}}` / `{{ENV_NAME:default}}` — replaced by the environment
   variable of that name when the config is loaded (the default is used when the
-  variable is unset or empty).
+  variable is unset or empty). The bare `{{ENV_NAME}}` form keeps the file
+  credential-free; the `{{ENV_NAME:default}}` fallback **is** a credential stored
+  in the file, so the API treats it as a literal secret: `GET
+  /api/v1/config` masks it behind `has_default: true`, and a save that does not
+  resend it keeps the stored fallback (see `docs/client-api.md`, **Config**).
 - `{{SECRET:NAME}}` — replaced by the value stored in the keyring under `NAME` (the
   same names `/secrets` and the `secret` tool manage, e.g.
   `{{SECRET:openai.api_key}}`). The whole string must be the placeholder —
