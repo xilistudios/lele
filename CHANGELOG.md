@@ -105,6 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Config
+- **The config watcher no longer leaks its inotify descriptor** (D-10) — `ConfigWatcher.Start` created an `fsnotify.Watcher` and never closed it: neither the `ctx.Done()` nor the `Stop()` return path called `Close`, and a failing `Add` returned the error with the watcher already allocated, so every reload-enabled start (and every failed one) left an inotify descriptor alive for the life of the process — a long-running gateway that reloads configuration exhausts the descriptor budget. `Start` now closes the watcher on **every** exit path (deferred close plus the `Add` error), and the debounce timer is stopped on the same defer instead of only on the paths that happened to reach it. Closed `Events`/`Errors` channels now end the loop instead of spinning on their zero value. To make that observable, the fsnotify handle sits behind a tiny `configFileWatcher` interface (production implementation is a plain adapter); fsnotify exposes no "closed" state, so the tests inject a fake that records `Close` and the real-watcher test only asserts `Start` returns. The other half of D-10 — `RLock` held across the fsync — was already correct (`config.go` snapshots under the lock, releases at :1588 and only then merges and writes at :1618) and needs no change.
+
+### Fixed
+
 #### CLI
 - **The instance lock no longer unlinks its own file on release** (D-06) — `Release` truncated the PID file, unlocked, closed and then `os.Remove`d it. Unlinking a lock file is a classic race: process B can open the path *before* A unlinks it, A unlinks and exits, B takes the flock on the now-orphaned inode, and process C creates a fresh file at the same path and takes "the same" lock on it — two gateways, each convinced it is the only instance, which is exactly what this lock exists to prevent. `Release` now only unlocks and closes; the file stays on disk with the last PID, and only a held `flock` means anything (`ReadPID` on a released lock reports who held it last, not who holds it now). Re-acquiring over a stale file was already supported, so nothing else changes.
 
