@@ -3,6 +3,7 @@ package migrate
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -984,15 +985,15 @@ func TestMergeConfigKeySurvivesAKeylessNamedEntry(t *testing.T) {
 	}
 }
 
-func TestCopyFile_Forces0600(t *testing.T) {
+func TestCopyFile_StripsGroupAndOtherPermissions(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "config.json")
-	dst := filepath.Join(dir, "dest", "config.json")
+	src := filepath.Join(dir, "MEMORY.md")
+	dst := filepath.Join(dir, "dest", "MEMORY.md")
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(src, []byte(`{"a":1}`), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("notes"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if err := os.Chmod(src, 0o644); err != nil {
@@ -1008,24 +1009,27 @@ func TestCopyFile_Forces0600(t *testing.T) {
 		t.Fatalf("Stat: %v", err)
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("destination mode = %o, want 600: migrated config files carry credentials and must not inherit a world-readable source mode", got)
+		t.Fatalf("destination mode = %o, want 600: a migrated note must not inherit a world-readable source mode", got)
 	}
 
 	data, err := os.ReadFile(dst)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if string(data) != `{"a":1}` {
+	if string(data) != "notes" {
 		t.Fatalf("destination content = %q, want the source bytes", data)
 	}
 }
 
-func TestCopyFile_KeepsExecutableBitOff(t *testing.T) {
+func TestCopyFile_PreservesOwnerExecBit(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "run.sh")
-	dst := filepath.Join(dir, "run-copy.sh")
+	src := filepath.Join(dir, "find-sessions.sh")
+	dst := filepath.Join(dir, "copy", "find-sessions.sh")
 
-	if err := os.WriteFile(src, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if err := os.Chmod(src, 0o755); err != nil {
@@ -1040,7 +1044,94 @@ func TestCopyFile_KeepsExecutableBitOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("destination mode = %o, want 700: a migrated skill script must stay executable for its owner while the group/other bits are stripped", got)
+	}
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("destination is not executable")
+	}
+
+	out, err := exec.Command(dst).CombinedOutput()
+	if err != nil {
+		t.Fatalf("executing the migrated script: %v (output %q)", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "hi" {
+		t.Fatalf("migrated script printed %q, want %q", out, "hi")
+	}
+}
+
+func TestCopyFile_TightensAnExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.md")
+	dst := filepath.Join(dir, "dst.md")
+
+	if err := os.WriteFile(src, []byte("new"), 0o644); err != nil {
+		t.Fatalf("WriteFile(src): %v", err)
+	}
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dst): %v", err)
+	}
+	if err := os.Chmod(dst, 0o644); err != nil {
+		t.Fatalf("Chmod(dst): %v", err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
 	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("destination mode = %o, want 600 even for an executable source", got)
+		t.Fatalf("destination mode = %o, want 600: O_TRUNC keeps the mode of an existing destination, so the copy has to tighten it explicitly", got)
+	}
+}
+
+func TestWorkspaceMigration_KeepsSkillScriptsExecutable(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	scriptDir := filepath.Join(src, "skills", "tmux", "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	script := filepath.Join(scriptDir, "find-sessions.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "MEMORY.md"), []byte("notes"), 0o644); err != nil {
+		t.Fatalf("WriteFile(MEMORY.md): %v", err)
+	}
+
+	actions, err := PlanWorkspaceMigration(src, dst, false)
+	if err != nil {
+		t.Fatalf("PlanWorkspaceMigration: %v", err)
+	}
+	if result := Execute(actions, src, dst); len(result.Errors) > 0 {
+		t.Fatalf("Execute reported errors: %v", result.Errors)
+	}
+
+	migratedScript := filepath.Join(dst, "skills", "tmux", "scripts", "find-sessions.sh")
+	info, err := os.Stat(migratedScript)
+	if err != nil {
+		t.Fatalf("Stat(migrated script): %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("migrated skill script mode = %o, want 700: SKILL.md invokes {baseDir}/scripts/*.sh directly, so dropping the exec bit breaks the migrated skill silently", got)
+	}
+	if out, err := exec.Command(migratedScript).CombinedOutput(); err != nil {
+		t.Fatalf("executing the migrated skill script: %v (output %q)", err, out)
+	} else if strings.TrimSpace(string(out)) != "hi" {
+		t.Fatalf("migrated skill script printed %q, want %q", out, "hi")
+	}
+
+	migratedNotes, err := os.Stat(filepath.Join(dst, "MEMORY.md"))
+	if err != nil {
+		t.Fatalf("Stat(migrated MEMORY.md): %v", err)
+	}
+	if got := migratedNotes.Mode().Perm(); got != 0o600 {
+		t.Fatalf("migrated MEMORY.md mode = %o, want 600", got)
 	}
 }
