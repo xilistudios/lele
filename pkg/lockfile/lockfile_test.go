@@ -43,8 +43,8 @@ func TestAcquireRelease(t *testing.T) {
 	if err := l.Release(); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("lock file still exists after Release: %v", err)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("lock file must survive Release (unlinking it races a concurrent Acquire): %v", err)
 	}
 }
 
@@ -222,5 +222,67 @@ func TestAcquire_AfterRelease(t *testing.T) {
 	}
 	if got, err := strconv.Atoi(string(trimSpace(data))); err != nil || got != os.Getpid() {
 		t.Errorf("PID after reacquire = %d (err %v), want %d", got, err, os.Getpid())
+	}
+}
+
+func TestLockfile_ReleaseNoUnlink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.lock")
+
+	l, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if err := l.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("Release removed the lock file: %v", err)
+	}
+
+	again, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("the lock was not released, or the surviving file cannot be re-locked: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	got, err := strconv.Atoi(string(trimSpace(data)))
+	if err != nil {
+		t.Fatalf("lock file does not contain an integer PID: %q => %v", string(data), err)
+	}
+	if got != os.Getpid() {
+		t.Errorf("lock file PID = %d, want %d", got, os.Getpid())
+	}
+	if err := again.Release(); err != nil {
+		t.Fatalf("second Release: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the lock file did not survive the second Release: %v", err)
+	}
+}
+
+func TestLockfile_ConcurrentAcquireAfterRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.lock")
+
+	first, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if err := first.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	second, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire after Release: %v", err)
+	}
+	defer second.Release()
+
+	if _, err := Acquire(path); err == nil {
+		t.Fatal("a second lock on a live holder succeeded")
+	} else if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("error = %v, want ErrAlreadyRunning", err)
 	}
 }
