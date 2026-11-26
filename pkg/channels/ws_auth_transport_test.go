@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -77,6 +78,13 @@ func TestWS_SubprotocolOfferedWithoutTokenIsRejected(t *testing.T) {
 		if resp == nil || resp.StatusCode != 401 {
 			t.Fatalf("subprotocols %q: status = %v, want 401", protocols, resp)
 		}
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			t.Fatalf("subprotocols %q: reading the rejection body: %v", protocols, readErr)
+		}
+		if !strings.Contains(string(body), "token_missing") {
+			t.Fatalf("subprotocols %q: body = %s, want token_missing: an offer with no credential is a missing token, not an invalid one", protocols, body)
+		}
 	}
 }
 
@@ -136,6 +144,24 @@ func TestWS_NoDeprecationWarnForHeaderAuth(t *testing.T) {
 
 	if strings.Contains(out, "query string is deprecated") {
 		t.Fatalf("a header token must not be reported as deprecated, got %q", out)
+	}
+}
+
+func TestWS_NoDeprecationWarnForSubprotocolAuth(t *testing.T) {
+	ts := newNativeTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws"
+
+	out := captureLogs(t, func() {
+		dialer := &websocket.Dialer{Subprotocols: []string{"bearer", ts.token}}
+		conn, _, err := dialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("subprotocol dial: %v", err)
+		}
+		conn.Close()
+	})
+
+	if strings.Contains(out, "query string is deprecated") {
+		t.Fatalf("a subprotocol token must not be reported as deprecated, got %q", out)
 	}
 }
 
