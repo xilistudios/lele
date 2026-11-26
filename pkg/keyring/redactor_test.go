@@ -1,10 +1,14 @@
 package keyring
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newRedactorTestService(t *testing.T) *Service {
@@ -132,26 +136,161 @@ func TestRedact_NoSecrets(t *testing.T) {
 	}
 }
 
+func TestRedact_EmptyCachePassesThrough(t *testing.T) {
+	resetRedactorWarnings()
+	svc := newRedactorTestService(t)
+	r := NewRedactor(svc)
+
+	content := "an empty vault is not an error: this message must reach the log unchanged"
+	out := captureRedactorLogs(t, func() {
+		if got := r.Redact(content); got != content {
+			t.Fatalf("empty cache must pass the content through, got %q", got)
+		}
+	})
+	if strings.Contains(out, "Secret redaction unavailable") {
+		t.Fatalf("an empty vault must not warn about unavailable redaction, got %q", out)
+	}
+}
+
+func resetRedactorWarnings() {
+	redactorWarnLimiter.mu.Lock()
+	redactorWarnLimiter.last = time.Time{}
+	redactorWarnLimiter.mu.Unlock()
+}
+
+func captureRedactorLogs(t *testing.T, fn func()) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	fn()
+	return buf.String()
+}
+
 func TestRedact_VaultClosed(t *testing.T) {
+	resetRedactorWarnings()
 	svc := aClosedService(t)
 	r := NewRedactor(svc)
 
 	content := "plain text with no secrets"
-	if out := r.Redact(content); out != content {
-		t.Fatalf("closed vault must return content unchanged, got %q", out)
+	if out := r.Redact(content); out != WithheldMarker {
+		t.Fatalf("an unreadable vault must withhold the content, got %q", out)
+	}
+}
+
+func TestRedact_ErrorPathWithholdsContent(t *testing.T) {
+	secret := "sk-live-value-that-must-never-reach-a-log"
+	content := "request failed with credential " + secret
+
+	for _, tc := range []struct {
+		name     string
+		redactor func(*testing.T) *Redactor
+	}{
+		{"unreadable store", func(t *testing.T) *Redactor { return NewRedactor(aClosedService(t)) }},
+		{"nil service", func(t *testing.T) *Redactor { return NewRedactor(nil) }},
+		{"unreadable master key", func(t *testing.T) *Redactor {
+			svc := newTestService(t)
+			svc.keyProv = brokenKeyProvider{err: errors.New("master key unreadable")}
+			return NewRedactor(svc)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetRedactorWarnings()
+			r := tc.redactor(t)
+
+			out := r.Redact(content)
+			if out != WithheldMarker {
+				t.Fatalf("redaction error must withhold the message, got %q", out)
+			}
+			if strings.Contains(out, secret) {
+				t.Fatalf("secret leaked on the error path: %q", out)
+			}
+		})
+	}
+}
+
+func TestRedact_ErrorPathWarnsOncePerInterval(t *testing.T) {
+	resetRedactorWarnings()
+	t.Cleanup(resetRedactorWarnings)
+
+	r := NewRedactor(aClosedService(t))
+
+	out := captureRedactorLogs(t, func() {
+		for i := 0; i < 50; i++ {
+			r.Redact(fmt.Sprintf("attempt %d with nothing secret", i))
+		}
+	})
+
+	if got := strings.Count(out, "Secret redaction unavailable"); got != 1 {
+		t.Fatalf("expected exactly one warning for 50 withheld messages, got %d: %q", got, out)
+	}
+}
+
+func TestRedact_ErrorWarnIsRateLimitedNotSilenced(t *testing.T) {
+	resetRedactorWarnings()
+	t.Cleanup(resetRedactorWarnings)
+
+	r := NewRedactor(nil)
+	if out := captureRedactorLogs(t, func() { r.Redact("first") }); !strings.Contains(out, "Secret redaction unavailable") {
+		t.Fatalf("first error path must warn, got %q", out)
+	}
+
+	redactorWarnLimiter.mu.Lock()
+	redactorWarnLimiter.last = time.Now().Add(-2 * redactorWarnInterval)
+	redactorWarnLimiter.mu.Unlock()
+
+	if out := captureRedactorLogs(t, func() { r.Redact("second") }); !strings.Contains(out, "Secret redaction unavailable") {
+		t.Fatalf("a later error outside the interval must warn again, got %q", out)
 	}
 }
 
 func TestRedact_NilService(t *testing.T) {
-	r := NewRedactor(nil)
+	resetRedactorWarnings()
 	content := "some input with nothing secret"
-	if out := r.Redact(content); out != content {
-		t.Fatalf("nil service must be a no-op, got %q", out)
-	}
 
 	var nilR *Redactor
 	if out := nilR.Redact(content); out != content {
-		t.Fatalf("nil redactor must be a no-op, got %q", out)
+		t.Fatalf("a nil redactor means no redaction is configured, got %q", out)
+	}
+	if out := nilR.Redact(""); out != "" {
+		t.Fatalf("empty content has nothing to withhold, got %q", out)
+	}
+
+	if out := NewRedactor(nil).Redact(content); out != WithheldMarker {
+		t.Fatalf("a redactor without a keyring service must withhold, got %q", out)
+	}
+}
+
+type brokenKeyProvider struct{ err error }
+
+func (p brokenKeyProvider) GetKey() ([]byte, error) { return nil, p.err }
+func (p brokenKeyProvider) Backend() string         { return "broken" }
+func (p brokenKeyProvider) Available() bool         { return false }
+
+func TestRedact_DisabledKeyringPassesThrough(t *testing.T) {
+	resetRedactorWarnings()
+	t.Cleanup(resetRedactorWarnings)
+
+	svc := newTestService(t)
+	svc.cfg.Enabled = false
+	r := NewRedactor(svc)
+
+	content := "tool output must still reach the model when the keyring is deliberately off"
+	out := captureRedactorLogs(t, func() {
+		for i := 0; i < 5; i++ {
+			if got := r.Redact(content); got != content {
+				t.Fatalf("keyring.enabled=false is an explicit opt-out, got %q", got)
+			}
+		}
+	})
+	if !strings.Contains(out, "disabled by config") {
+		t.Fatalf("a disabled keyring must be announced in the log, got %q", out)
+	}
+	if got := strings.Count(out, "disabled by config"); got != 1 {
+		t.Fatalf("the opt-out warning must be emitted once, got %d: %q", got, out)
 	}
 }
 

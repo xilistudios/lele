@@ -96,6 +96,72 @@ Lele stores logs locally and the editable config API marks secret fields with me
 
 Even so, avoid placing secrets in prompts, memory files, or user-facing session content.
 
+### Redaction of tool output (the log redactor)
+
+Tool output is passed through a redactor before it is handed to the model: every *known* keyring value
+longer than 8 characters is replaced by its `{{SECRET:<name>}}` placeholder (longest value first). It is a
+mitigation, not a guarantee — know its limits:
+
+- **8-character floor.** A shorter value is never redacted, because a 1–7 character string matches ordinary
+  text far more often than it identifies a secret. Store secrets of 8+ characters.
+- **Exact substring matching, nothing else.** The comparison is a literal `strings.ReplaceAll` per value.
+  A secret that reaches the output encoded (base64, URL-escaped, JSON-escaped), split across lines, chunked
+  into pieces, hashed, or with any character changed is **not** redacted. So is a secret lele does not carry
+  in its own keyring (`{{ENV_*}}` values, a credential in a file the agent reads, a value another process
+  set).
+- **The placeholder form is not proof of absence.** A model shown `{{SECRET:<name>}}` can still be asked to
+  print it, and code that resolves placeholders (the `exec` tool, provider credentials) expands it again.
+
+Availability is handled the other way round from the matching: redaction **fails closed**. If the redactor
+cannot do its job — no keyring service wired, the vault cannot be opened, the master key is unreadable, the
+secret list cannot be read — the whole message is replaced by
+
+```text
+[log message withheld: secret redaction unavailable]
+```
+
+and a single WARN (`Secret redaction unavailable; withholding log message content`, carrying the reason) is
+emitted at most once per minute, so a broken keyring cannot flood the log. The log event itself still flows:
+only its content is withheld. Two cases are deliberately *not* errors:
+
+- **an empty vault** (a keyring that is open, listable, and holds no secrets) passes the content through
+  unchanged — there is nothing to redact, so nothing is withheld;
+- **`keyring.enabled: false`** is an explicit opt-out, not an availability failure: content passes through
+  unredacted, announced once per process with
+  `Secret redaction is disabled by config (keyring.enabled=false); tool output is not redacted`. Withholding
+  there would blank every tool result on an install that deliberately runs without a keyring.
+
+### The master key sits beside the vault
+
+The file backend keeps the vault and its master key in the same directory:
+
+| file | contents | mode |
+|---|---|---|
+| `<LeleDir>/keyring.enc` | the encrypted vault (`keyring.path` overrides the path) | `0600` |
+| `<LeleDir>/keyring.key` | the raw master key that opens it | `0600` |
+
+This is the standard threat model of an encrypted store for a single-user install: the vault is unusable
+without the key, but anyone who can read *both* files can decrypt it. `0600` plus the user's home directory
+is therefore the boundary. It protects against a copied or backed-up vault, a shared host with other users,
+and a leaked archive — **not** against code running as the same user (including the agent itself, which runs
+as that user).
+
+Hardening that needs no migration:
+
+- back up the vault **without** `keyring.key` (a backup of both is a backup of the plaintext), and keep the
+  key off remote or cloud backups;
+- full-disk encryption on the host, and a `$HOME` that is not inside a world-readable path;
+- prefer a keychain backend where one is available (`keyring.backend: "auto"` uses it when present), so the
+  master key lives in the OS secret service instead of the filesystem;
+- rotate on suspicion: delete `keyring.key` after re-entering the stored secrets, and treat anything that
+  ever read the key as compromised.
+
+> **Follow-up note (not part of this change):** relocating the master key to the OS keychain for the *file*
+> backend — or moving it out of `LeleDir` — cannot be done without a migration for existing vaults, so it is
+> deliberately left out of the hardening backlog. Such a migration must (1) detect `keyring.enc` +
+> `keyring.key`, (2) re-wrap or move the key, (3) keep the old location readable for one release so a
+> rollback cannot lose the vault, and (4) only then refuse to open a vault whose key still sits beside it.
+> Until then, the layout above is the contract.
 ## Exec Secrets
 
 The `exec` tool resolves `{{SECRET:name}}` placeholders against the agent-scoped keyring at run time.
