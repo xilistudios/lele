@@ -668,8 +668,15 @@ func captureThinkingClampWarnings(t *testing.T) *[]map[string]interface{} {
 	warnThinkingClamp = func(component string, message string, fields map[string]interface{}) {
 		warnings = append(warnings, fields)
 	}
+	resetThinkingClampWarnDedupe()
 	t.Cleanup(func() { warnThinkingClamp = previous })
 	return &warnings
+}
+
+func resetThinkingClampWarnDedupe() {
+	thinkingClampWarnMu.Lock()
+	thinkingClampWarnedFor = map[thinkingClampKey]struct{}{}
+	thinkingClampWarnMu.Unlock()
 }
 
 func TestClampEffortToCatalog(t *testing.T) {
@@ -698,54 +705,43 @@ func TestClampEffortToCatalog(t *testing.T) {
 		Name:   "High only",
 		Models: []catalog.Model{{ID: "only-high", Name: "Only High", ThinkingLevels: []string{"high"}}},
 	}
-	seedCatalog(t, anthropic, levelLess, highOnly)
+	mixedCase := catalog.Provider{
+		ID:     "mixed-case",
+		Name:   "Mixed case",
+		Models: []catalog.Model{{ID: "sloppy-model", Name: "Sloppy", ThinkingLevels: []string{"Low", "Medium", "High"}}},
+	}
+	seedCatalog(t, anthropic, levelLess, highOnly, mixedCase)
 
 	tests := []struct {
-		name     string
-		effort   string
-		provider string
-		model    string
-		want     string
-		wantWarn bool
+		name      string
+		effort    string
+		provider  string
+		model     string
+		want      string
+		wantClamp bool
 	}{
-		{name: "xhigh clamps to high", effort: "xhigh", provider: "anthropic", model: "claude-sonnet-4-6", want: "high", wantWarn: true},
-		{name: "max clamps to high", effort: "max", provider: "anthropic", model: "claude-sonnet-4-6", want: "high", wantWarn: true},
+		{name: "xhigh clamps to high", effort: "xhigh", provider: "anthropic", model: "claude-sonnet-4-6", want: "high", wantClamp: true},
+		{name: "max clamps to high", effort: "max", provider: "anthropic", model: "claude-sonnet-4-6", want: "high", wantClamp: true},
 		{name: "supported level is unchanged", effort: "high", provider: "anthropic", model: "claude-sonnet-4-6", want: "high"},
 		{name: "lowest supported level is unchanged", effort: "low", provider: "anthropic", model: "claude-sonnet-4-6", want: "low"},
-		{name: "second catalog model clamps", effort: "xhigh", provider: "anthropic", model: "claude-opus-4-5", want: "high", wantWarn: true},
+		{name: "second catalog model clamps", effort: "xhigh", provider: "anthropic", model: "claude-opus-4-5", want: "high", wantClamp: true},
 		{name: "unknown model passes through", effort: "xhigh", provider: "anthropic", model: "claude-not-in-catalog", want: "xhigh"},
 		{name: "unknown provider passes through", effort: "xhigh", provider: "nope", model: "claude-sonnet-4-6", want: "xhigh"},
 		{name: "empty thinking levels pass through", effort: "xhigh", provider: "level-less", model: "plain-model", want: "xhigh"},
 		{name: "off stays off", effort: "off", provider: "anthropic", model: "claude-sonnet-4-6", want: "off"},
 		{name: "empty effort stays empty", effort: "", provider: "anthropic", model: "claude-sonnet-4-6", want: ""},
-		{name: "below every supported level picks the lowest", effort: "low", provider: "high-only", model: "only-high", want: "high", wantWarn: true},
+		{name: "below every supported level picks the lowest", effort: "low", provider: "high-only", model: "only-high", want: "high", wantClamp: true},
+		{name: "catalog level spelled with capitals still matches", effort: "high", provider: "mixed-case", model: "sloppy-model", want: "high"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			warnings := captureThinkingClampWarnings(t)
-
-			if got := clampEffortToCatalog(tc.effort, tc.provider, tc.model); got != tc.want {
+			got, clamped := clampEffortToCatalog(tc.effort, tc.provider, tc.model)
+			if got != tc.want {
 				t.Fatalf("clampEffortToCatalog(%q, %q, %q) = %q, want %q", tc.effort, tc.provider, tc.model, got, tc.want)
 			}
-
-			switch {
-			case tc.wantWarn:
-				if len(*warnings) != 1 {
-					t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
-				}
-				fields := (*warnings)[0]
-				if fields["requested"] != tc.effort {
-					t.Errorf("warning requested = %v, want %q", fields["requested"], tc.effort)
-				}
-				if fields["clamped"] != tc.want {
-					t.Errorf("warning clamped = %v, want %q", fields["clamped"], tc.want)
-				}
-				if fields["model"] != tc.model {
-					t.Errorf("warning model = %v, want %q", fields["model"], tc.model)
-				}
-			case len(*warnings) != 0:
-				t.Fatalf("clamp warnings = %v, want none", *warnings)
+			if clamped != tc.wantClamp {
+				t.Fatalf("clampEffortToCatalog(%q, %q, %q) clamped = %v, want %v", tc.effort, tc.provider, tc.model, clamped, tc.wantClamp)
 			}
 		})
 	}
@@ -863,6 +859,220 @@ func TestBuildLLMOptions_ClampsLegacyReasoningEffort(t *testing.T) {
 	}
 	if reasoning["effort"] != "high" {
 		t.Fatalf("reasoning effort = %v, want the catalog-clamped %q", reasoning["effort"], "high")
+	}
+	if len(*warnings) != 1 {
+		t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
+	}
+}
+
+func TestWarnThinkingClampOnce_StaysBounded(t *testing.T) {
+	warnings := captureThinkingClampWarnings(t)
+
+	total := maxThinkingClampWarnKeys + 10
+	for i := 0; i < total; i++ {
+		warnThinkingClampOnce(thinkingClampKey{session: fmt.Sprintf("session-%d", i), provider: "anthropic", model: "claude-sonnet-4-6", requested: "max", clamped: "high"})
+	}
+
+	if len(*warnings) != total {
+		t.Fatalf("clamp warnings = %d, want one per distinct state (%d)", len(*warnings), total)
+	}
+	thinkingClampWarnMu.Lock()
+	tracked := len(thinkingClampWarnedFor)
+	thinkingClampWarnMu.Unlock()
+	if tracked > maxThinkingClampWarnKeys {
+		t.Fatalf("tracked clamp states = %d, want at most %d", tracked, maxThinkingClampWarnKeys)
+	}
+}
+
+func TestBuildLLMOptions_ClampWarnsOncePerState(t *testing.T) {
+	seedCatalog(t, loadCatalogFixture(t, "anthropic"))
+
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	al.registry.mu.Lock()
+	al.registry.agents["main"] = agent
+	al.registry.mu.Unlock()
+
+	const sessionKey = "clamp-once-session"
+	al.sessionThinking.Store(sessionKey, "max")
+
+	warnings := captureThinkingClampWarnings(t)
+	caller := newLLMCaller(al)
+
+	build := func(model string) {
+		t.Helper()
+		caller.buildLLMOptions(llmCallOptions{
+			ctx:        context.Background(),
+			agent:      agent,
+			messages:   []providers.Message{{Role: "user", Content: "hi"}},
+			model:      model,
+			sessionKey: sessionKey,
+		})
+	}
+
+	for i := 0; i < 5; i++ {
+		build("anthropic:claude-sonnet-4-6")
+	}
+	if len(*warnings) != 1 {
+		t.Fatalf("clamp warnings after 5 identical calls = %d, want exactly 1 (%v)", len(*warnings), *warnings)
+	}
+	fields := (*warnings)[0]
+	if fields["provider"] != "anthropic" || fields["model"] != "claude-sonnet-4-6" || fields["requested"] != "max" || fields["clamped"] != "high" {
+		t.Fatalf("clamp warning fields = %v, want anthropic/claude-sonnet-4-6 max->high", fields)
+	}
+
+	build("anthropic:claude-opus-4-5")
+	if len(*warnings) != 2 {
+		t.Fatalf("clamp warnings after a different model = %d, want 2 (%v)", len(*warnings), *warnings)
+	}
+
+	al.sessionThinking.Store(sessionKey, "xhigh")
+	build("anthropic:claude-sonnet-4-6")
+	if len(*warnings) != 3 {
+		t.Fatalf("clamp warnings after a different requested level = %d, want 3 (%v)", len(*warnings), *warnings)
+	}
+}
+
+func TestBuildLLMOptions_ClampUsesDefaultProviderForUnprefixedModel(t *testing.T) {
+	seedCatalog(t, loadCatalogFixture(t, "anthropic"))
+
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.ThinkingLevel = "xhigh"
+	al.registry.mu.Lock()
+	al.registry.agents["main"] = agent
+	al.registry.mu.Unlock()
+
+	caller := newLLMCaller(al)
+
+	tests := []struct {
+		name             string
+		defaultProvider  string
+		want             string
+		wantClampWarning bool
+	}{
+		{name: "anthropic default clamps the unprefixed model", defaultProvider: "anthropic", want: "high", wantClampWarning: true},
+		{name: "non-anthropic default passes through", defaultProvider: "openai", want: "xhigh"},
+		{name: "empty default passes through", defaultProvider: "", want: "xhigh"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			al.cfg().Agents.Defaults.Provider = tc.defaultProvider
+			warnings := captureThinkingClampWarnings(t)
+
+			got := caller.buildLLMOptions(llmCallOptions{
+				ctx:      context.Background(),
+				agent:    agent,
+				messages: []providers.Message{{Role: "user", Content: "hi"}},
+				model:    "claude-sonnet-4-6",
+			})
+
+			reasoning, ok := got["reasoning"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("reasoning = %#v, want a map", got["reasoning"])
+			}
+			if reasoning["effort"] != tc.want {
+				t.Fatalf("reasoning effort = %v, want %q (default provider %q)", reasoning["effort"], tc.want, tc.defaultProvider)
+			}
+			if tc.wantClampWarning && len(*warnings) != 1 {
+				t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)
+			}
+			if !tc.wantClampWarning && len(*warnings) != 0 {
+				t.Fatalf("clamp warnings = %v, want none", *warnings)
+			}
+		})
+	}
+}
+
+func TestCallWithFallback_ClampsEffortPerCandidate(t *testing.T) {
+	codexCatalog := catalog.Provider{
+		ID:   "openai",
+		Name: "OpenAI",
+		Models: []catalog.Model{{
+			ID:             "gpt-5.1-codex-max",
+			Name:           "GPT-5.1 Codex Max",
+			Reasoning:      true,
+			ToolCall:       true,
+			ThinkingLevels: []string{"low", "medium", "high", "xhigh", "max"},
+		}},
+	}
+	seedCatalog(t, loadCatalogFixture(t, "anthropic"), codexCatalog)
+
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	al.cfg().Providers = &config.ProvidersConfig{
+		Named: map[string]config.NamedProviderConfig{
+			"openai": {
+				Type:   "openai",
+				Models: map[string]config.ProviderModelConfig{"gpt-5.1-codex-max": {}},
+			},
+			"anthropic": {
+				Type:   "openai",
+				Models: map[string]config.ProviderModelConfig{"claude-sonnet-4-6": {}},
+			},
+		},
+	}
+
+	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker()).
+		WithRetryConfig(1, time.Millisecond)
+
+	const sessionKey = "fallback-clamp-session"
+	al.sessionThinking.Store(sessionKey, "xhigh")
+
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	candidates := []providers.FallbackCandidate{
+		{Provider: "openai", Model: "gpt-5.1-codex-max"},
+		{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+	}
+	agent.Candidates = candidates
+
+	type attempt struct {
+		model  string
+		effort interface{}
+	}
+	var attempts []attempt
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, toolDefs []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			reasoning, _ := opts["reasoning"].(map[string]interface{})
+			attempts = append(attempts, attempt{model: model, effort: reasoning["effort"]})
+			if len(attempts) == 1 {
+				return nil, fmt.Errorf("status: 500 internal server error")
+			}
+			return &providers.LLMResponse{Content: "fallback response"}, nil
+		},
+	}
+
+	warnings := captureThinkingClampWarnings(t)
+
+	caller := newLLMCaller(al)
+	resp, err := caller.call(llmCallOptions{
+		ctx:        context.Background(),
+		agent:      agent,
+		messages:   []providers.Message{{Role: "user", Content: "hi"}},
+		toolDefs:   []providers.ToolDefinition{},
+		model:      "openai:gpt-5.1-codex-max",
+		candidates: candidates,
+		sessionKey: sessionKey,
+	})
+	if err != nil {
+		t.Fatalf("call() error: %v", err)
+	}
+	if resp == nil || resp.Content != "fallback response" {
+		t.Fatalf("response = %#v, want the fallback answer", resp)
+	}
+
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2 (%v)", len(attempts), attempts)
+	}
+	if attempts[0].model != "gpt-5.1-codex-max" || attempts[0].effort != "xhigh" {
+		t.Fatalf("primary attempt = %s@%v, want gpt-5.1-codex-max@xhigh (the level its catalog supports)", attempts[0].model, attempts[0].effort)
+	}
+	if attempts[1].model != "claude-sonnet-4-6" || attempts[1].effort != "high" {
+		t.Fatalf("fallback attempt = %s@%v, want claude-sonnet-4-6@high (the fallback model's catalog-clamped level)", attempts[1].model, attempts[1].effort)
 	}
 	if len(*warnings) != 1 {
 		t.Fatalf("clamp warnings = %d, want exactly 1 (%v)", len(*warnings), *warnings)

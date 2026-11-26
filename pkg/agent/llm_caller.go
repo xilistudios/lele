@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -17,9 +17,43 @@ import (
 
 const (
 	MaxLLMRetries = 2
+
+	maxThinkingClampWarnKeys = 256
 )
 
-var warnThinkingClamp = logger.WarnCF
+var (
+	warnThinkingClamp = logger.WarnCF
+
+	thinkingClampWarnMu    sync.Mutex
+	thinkingClampWarnedFor = map[thinkingClampKey]struct{}{}
+)
+
+type thinkingClampKey struct {
+	session   string
+	provider  string
+	model     string
+	requested string
+	clamped   string
+}
+
+func warnThinkingClampOnce(key thinkingClampKey) {
+	thinkingClampWarnMu.Lock()
+	if len(thinkingClampWarnedFor) >= maxThinkingClampWarnKeys {
+		thinkingClampWarnedFor = map[thinkingClampKey]struct{}{}
+	}
+	_, alreadyWarned := thinkingClampWarnedFor[key]
+	thinkingClampWarnedFor[key] = struct{}{}
+	thinkingClampWarnMu.Unlock()
+	if alreadyWarned {
+		return
+	}
+	warnThinkingClamp("agent", "thinking level clamped to model catalog", map[string]interface{}{
+		"provider":  key.provider,
+		"model":     key.model,
+		"requested": key.requested,
+		"clamped":   key.clamped,
+	})
+}
 
 type llmCallOptions struct {
 	ctx            context.Context
@@ -108,7 +142,7 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	if effort == "" {
 		effort = opts.agent.ThinkingLevel
 	}
-	effort = lc.clampEffortForModel(effort, opts.model)
+	effort = lc.clampEffortForModel(effort, opts.model, opts.sessionKey)
 
 	switch {
 	case effort == "off":
@@ -143,7 +177,7 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	case opts.agent.Reasoning != nil:
 		reasoningMap := map[string]interface{}{}
 		if opts.agent.Reasoning.Effort != nil {
-			reasoningMap["effort"] = lc.clampEffortForModel(*opts.agent.Reasoning.Effort, opts.model)
+			reasoningMap["effort"] = lc.clampEffortForModel(*opts.agent.Reasoning.Effort, opts.model, opts.sessionKey)
 		}
 		if opts.agent.Reasoning.MaxTokens != nil {
 			reasoningMap["max_tokens"] = *opts.agent.Reasoning.MaxTokens
@@ -186,36 +220,76 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	return llmOptions
 }
 
-func (lc *llmCaller) clampEffortForModel(effort, model string) string {
+func (lc *llmCaller) clampEffortForModel(effort, model, sessionKey string) string {
 	if effort == "" {
 		return effort
 	}
 	provider := extractProviderFromModel(model, lc.al.cfg().Agents.Defaults.Provider)
-	return clampEffortToCatalog(effort, provider, providers.StripProviderPrefix(model))
+	return lc.clampEffort(effort, provider, providers.StripProviderPrefix(model), sessionKey)
 }
 
-func clampEffortToCatalog(effort, provider, model string) string {
+func (lc *llmCaller) clampEffort(effort, provider, model, sessionKey string) string {
+	clamped, changed := clampEffortToCatalog(effort, provider, model)
+	if !changed {
+		return clamped
+	}
+	warnThinkingClampOnce(thinkingClampKey{
+		session:   sessionKey,
+		provider:  provider,
+		model:     model,
+		requested: effort,
+		clamped:   clamped,
+	})
+	return clamped
+}
+
+func clampEffortToCatalog(effort, provider, model string) (string, bool) {
 	if effort == "" || effort == "off" {
-		return effort
+		return effort, false
 	}
 	spec, ok := catalog.FindCachedModel(provider, model)
 	if !ok || len(spec.ThinkingLevels) == 0 {
-		return effort
+		return effort, false
 	}
-	if slices.Contains(spec.ThinkingLevels, effort) {
-		return effort
+	want := thinkingLevelRank(effort)
+	if want >= 0 {
+		for _, level := range spec.ThinkingLevels {
+			if thinkingLevelRank(level) == want {
+				return effort, false
+			}
+		}
 	}
 	clamped := nearestLowerThinkingLevel(spec.ThinkingLevels, effort)
 	if clamped == "" || clamped == effort {
-		return effort
+		return effort, false
 	}
-	warnThinkingClamp("agent", "thinking level clamped to model catalog", map[string]interface{}{
-		"provider":  provider,
-		"model":     model,
-		"requested": effort,
-		"clamped":   clamped,
-	})
-	return clamped
+	return clamped, true
+}
+
+func (lc *llmCaller) clampOptionsToModel(llmOptions map[string]interface{}, provider, model, sessionKey string) map[string]interface{} {
+	reasoning, ok := llmOptions["reasoning"].(map[string]interface{})
+	if !ok {
+		return llmOptions
+	}
+	effort, ok := reasoning["effort"].(string)
+	if !ok || effort == "" {
+		return llmOptions
+	}
+	clamped := lc.clampEffort(effort, provider, providers.StripProviderPrefix(model), sessionKey)
+	if clamped == effort {
+		return llmOptions
+	}
+	clampedReasoning := make(map[string]interface{}, len(reasoning))
+	for k, v := range reasoning {
+		clampedReasoning[k] = v
+	}
+	clampedReasoning["effort"] = clamped
+	clampedOptions := make(map[string]interface{}, len(llmOptions))
+	for k, v := range llmOptions {
+		clampedOptions[k] = v
+	}
+	clampedOptions["reasoning"] = clampedReasoning
+	return clampedOptions
 }
 
 func nearestLowerThinkingLevel(levels []string, effort string) string {
@@ -321,14 +395,16 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 				messages = providers.StripContentParts(messages, !candidateHasImages, !candidateHasVideo)
 			}
 
+			candidateOptions := lc.clampOptionsToModel(llmOptions, provider, model, opts.sessionKey)
+
 			providerInst, err := providers.CreateProviderForCandidate(lc.al.cfg(), provider)
 			if err != nil {
 				if opts.agent.Provider != nil {
-					return providers.ChatIdle(ctx, opts.agent.Provider, messages, opts.toolDefs, model, llmOptions)
+					return providers.ChatIdle(ctx, opts.agent.Provider, messages, opts.toolDefs, model, candidateOptions)
 				}
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
-			return providers.ChatIdle(ctx, providerInst, messages, opts.toolDefs, model, llmOptions)
+			return providers.ChatIdle(ctx, providerInst, messages, opts.toolDefs, model, candidateOptions)
 		},
 	)
 	if fbErr != nil {
