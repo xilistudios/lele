@@ -1067,8 +1067,13 @@ preference:
    the deprecation — never the token. Query strings are copied into access logs,
    proxy logs and shell histories, which is why this form is on its way out.
 
-The token is read from the first of those that carries one; the legacy form is
-only consulted when neither header is present.
+Every credential the handshake carries is tried in that order, and the first one
+that **validates** authenticates it: a stale `Authorization` header or an expired
+subprotocol token falls through to the legacy `?token=` instead of rejecting a
+handshake that used to succeed. The documented header form is
+`Authorization: Bearer <token>`; the bare `Authorization: <token>` that predates
+the prefix is still accepted. The deprecation warning is emitted only when the
+query token is the credential that actually authenticated the handshake.
 
 Optional query parameter:
 

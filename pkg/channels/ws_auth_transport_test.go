@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestWS_SubprotocolAuth(t *testing.T) {
 	}
 }
 
-func TestWS_SubprotocolWithoutTokenIsRejected(t *testing.T) {
+func TestWS_SubprotocolWithBadTokenIsRejected(t *testing.T) {
 	ts := newNativeTestServer(t)
 	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws"
 
@@ -59,6 +60,23 @@ func TestWS_SubprotocolWithoutTokenIsRejected(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != 401 {
 		t.Fatalf("status = %v, want 401", resp)
+	}
+}
+
+func TestWS_SubprotocolOfferedWithoutTokenIsRejected(t *testing.T) {
+	ts := newNativeTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws"
+
+	for _, protocols := range [][]string{{"bearer"}, {"bearer", ""}, {"bearer", "   "}} {
+		dialer := &websocket.Dialer{Subprotocols: protocols}
+		conn, resp, err := dialer.Dial(wsURL, nil)
+		if err == nil {
+			conn.Close()
+			t.Fatalf("subprotocols %q authenticated a WebSocket with no token", protocols)
+		}
+		if resp == nil || resp.StatusCode != 401 {
+			t.Fatalf("subprotocols %q: status = %v, want 401", protocols, resp)
+		}
 	}
 }
 
@@ -91,16 +109,93 @@ func TestWS_NoDeprecationWarnForHeaderAuth(t *testing.T) {
 	ts := newNativeTestServer(t)
 	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws"
 
+	header := http.Header{"Authorization": {"Bearer " + ts.token}}
+
+	var dialErr error
 	out := captureLogs(t, func() {
-		dialer := &websocket.Dialer{Subprotocols: []string{"bearer", ts.token}}
-		conn, _, err := dialer.Dial(wsURL, nil)
+		dialer := &websocket.Dialer{}
+		conn, resp, err := dialer.Dial(wsURL, header)
+		dialErr = err
 		if err != nil {
-			t.Fatalf("subprotocol dial: %v", err)
+			if resp != nil {
+				t.Logf("handshake status %d", resp.StatusCode)
+			}
+			return
+		}
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, raw, readErr := conn.ReadMessage(); readErr != nil {
+			t.Logf("welcome read: %v", readErr)
+		} else if !strings.Contains(string(raw), "welcome") {
+			t.Logf("first message is not the welcome event: %s", raw)
 		}
 		conn.Close()
 	})
+	if dialErr != nil {
+		t.Fatalf("an Authorization header must authenticate the handshake, got: %v", dialErr)
+	}
 
 	if strings.Contains(out, "query string is deprecated") {
-		t.Fatalf("a subprotocol token must not be reported as deprecated, got %q", out)
+		t.Fatalf("a header token must not be reported as deprecated, got %q", out)
 	}
+}
+
+func TestWS_BareAuthorizationHeaderTokenStillAuthenticates(t *testing.T) {
+	ts := newNativeTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws"
+
+	header := http.Header{"Authorization": {ts.token}}
+
+	dialer := &websocket.Dialer{}
+	conn, resp, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("an Authorization header carrying the bare token used to authenticate and must keep working, got status %d: %v", status, err)
+	}
+	conn.Close()
+}
+
+func TestWS_RejectedHeaderTokenFallsBackToQueryToken(t *testing.T) {
+	ts := newNativeTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws?token=" + ts.token
+
+	header := http.Header{"Authorization": {"Bearer not-a-valid-token"}}
+
+	var dialErr error
+	out := captureLogs(t, func() {
+		dialer := &websocket.Dialer{}
+		conn, resp, err := dialer.Dial(wsURL, header)
+		dialErr = err
+		if err != nil {
+			if resp != nil {
+				t.Logf("handshake status %d", resp.StatusCode)
+			}
+			return
+		}
+		conn.Close()
+	})
+	if dialErr != nil {
+		t.Fatalf("a stale Authorization header plus a valid ?token= used to authenticate and must keep working, got: %v", dialErr)
+	}
+	if !strings.Contains(out, "query string is deprecated") {
+		t.Fatalf("a handshake that ends up using the query token must still report the deprecation, got %q", out)
+	}
+}
+
+func TestWS_RejectedSubprotocolTokenFallsBackToQueryToken(t *testing.T) {
+	ts := newNativeTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws?token=" + ts.token
+
+	dialer := &websocket.Dialer{Subprotocols: []string{"bearer", "not-a-valid-token"}}
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("a stale subprotocol token plus a valid ?token= must authenticate, got status %d: %v", status, err)
+	}
+	conn.Close()
 }
