@@ -2,6 +2,11 @@ package tools
 
 import "strings"
 
+// SessionKeysRelated reports whether two session keys name the same session or
+// one of its descendants. Keys are hierarchical on ":", so a subagent running as
+// "telegram:chat-1:subagent-2" is related to "telegram:chat-1" but not to
+// "telegram:chat-1:subagent-3" (siblings are separate sessions). The hierarchy is
+// intentional: it is what lets a parent see its subagents' work.
 func SessionKeysRelated(a, b string) bool {
 	if a == "" || b == "" {
 		return false

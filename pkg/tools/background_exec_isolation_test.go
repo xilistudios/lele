@@ -21,7 +21,8 @@ func TestBackgroundProcess_VisibleTo(t *testing.T) {
 		{"different session hidden", "telegram:chat-1", "telegram:chat-2", false},
 		{"prefix-only string is not parent", "telegram:chat-10", "telegram:chat-1", false},
 		{"unowned visible to everyone", "", "telegram:chat-1", true},
-		{"empty caller sees everything", "telegram:chat-1", "", true},
+		{"empty caller sees nothing owned", "telegram:chat-1", "", false},
+		{"empty owner visible to empty caller", "", "", true},
 	}
 
 	for _, tt := range tests {
@@ -135,16 +136,44 @@ func TestBackgroundExecTools_SessionIsolation(t *testing.T) {
 	}
 }
 
+func TestVisibleTo_EmptyCallerDenied(t *testing.T) {
+	p := &BackgroundProcess{OwnerSessionKey: "telegram:chat-1"}
+
+	for _, caller := range []string{"", "telegram:chat-2"} {
+		if p.VisibleTo(caller) {
+			t.Errorf("VisibleTo(%q) = true for a process owned by another session, want false: an empty caller key must not fail open", caller)
+		}
+	}
+	if !p.VisibleTo("telegram:chat-1") {
+		t.Error("owner must still see its own process")
+	}
+}
+
+func TestVisibleTo_EmptyOwnerAllowed(t *testing.T) {
+	p := &BackgroundProcess{}
+
+	if !p.VisibleTo("telegram:chat-1") {
+		t.Error("a system-global process (empty owner) must be visible to a session caller")
+	}
+	if !p.VisibleTo("") {
+		t.Error("a system-global process (empty owner) must be visible to a keyless caller")
+	}
+}
+
 func TestBackgroundExecTools_NoSessionKey(t *testing.T) {
 	mgr := NewBackgroundProcessManager()
 
 	var stdout, stderr threadSafeBuffer
-	proc := mgr.Register(exec.Command("echo", "x"), "echo x", "/tmp", &stdout, &stderr, func() {}, "telegram:chat-1")
+	owned := mgr.Register(exec.Command("echo", "x"), "echo x", "/tmp", &stdout, &stderr, func() {}, "telegram:chat-1")
+	global := mgr.Register(exec.Command("echo", "y"), "echo y", "/tmp", &stdout, &stderr, func() {}, "")
 
 	listTool := NewListBackgroundExecsTool(mgr)
 	res := listTool.Execute(context.Background(), map[string]interface{}{"include_completed": true})
-	if !strings.Contains(res.ForLLM, proc.ID) {
-		t.Errorf("caller without session key should see all processes, got: %s", res.ForLLM)
+	if strings.Contains(res.ForLLM, owned.ID) {
+		t.Errorf("caller without session key must not see a session-owned process, got: %s", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, global.ID) {
+		t.Errorf("caller without session key should see a system-global process, got: %s", res.ForLLM)
 	}
 }
 

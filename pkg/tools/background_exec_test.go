@@ -501,7 +501,8 @@ func TestBackgroundProcessVisibleTo_SessionFamily(t *testing.T) {
 		{"sibling isolated", "telegram:123:chat:1", "telegram:123:chat:2", false},
 		{"cross-channel isolated", "native:uuid", "telegram:uuid", false},
 		{"unowned visible", "", "telegram:123", true},
-		{"operator sees all", "telegram:123", "", true},
+		{"unowned visible to a keyless caller", "", "", true},
+		{"keyless caller denied an owned process", "telegram:123", "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

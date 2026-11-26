@@ -67,6 +67,21 @@ The native channel includes:
 
 Clients can only access session keys within their own namespace.
 
+## Background Process Visibility
+
+Background processes started with `exec` (and the subagent work attached to a session) carry the session key
+that started them, and the `list_background_execs` / `get_background_exec_output` / `stop_background_exec`
+tools refuse to touch a process from another session:
+
+- a process whose owner key matches the caller, or whose owner is a **descendant** of the caller
+  (`telegram:chat-1:subagent-2` is visible to `telegram:chat-1`), is visible — the `:`-separated hierarchy is
+  what lets a parent session reach its subagents;
+- sibling subagents are separate sessions and cannot see each other;
+- a process with **no** owner key is system-global (started by a cron job that names no session, for example)
+  and is visible to every caller;
+- a caller with **no** session key sees only the system-global processes. A keyless caller is not a privileged
+  caller: it cannot reach a session-owned process, and it cannot read or stop it.
+
 ## Upload Safety
 
 Native/web uploads are:
