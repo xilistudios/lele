@@ -26,16 +26,57 @@ const (
 
 var wsQueueSendTimeout = 5 * time.Second
 
+// wsTokenSubprotocol is the offer browsers make so the credential can travel in
+// the Sec-WebSocket-Protocol header, the only handshake field a browser page can
+// set on a WebSocket handshake.
+const wsTokenSubprotocol = "bearer"
+
+// wsRequestToken extracts the client token from a WebSocket handshake.
+//
+// Preference order: the bearer subprotocol (browsers), then the Authorization
+// header (non-browser clients), then the legacy ?token= query parameter. The
+// query parameter is still accepted for old clients but reported as deprecated
+// by the caller, because query strings leak into access logs and proxies.
+func wsRequestToken(r *http.Request) (token string, fromQuery bool) {
+	offered := websocket.Subprotocols(r)
+	for i, protocol := range offered {
+		if strings.EqualFold(protocol, wsTokenSubprotocol) && i+1 < len(offered) {
+			if candidate := strings.TrimSpace(offered[i+1]); candidate != "" {
+				return candidate, false
+			}
+		}
+	}
+
+	if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+		if candidate := strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")); candidate != "" {
+			return candidate, false
+		}
+	}
+
+	return getQueryParam(r, "token"), true
+}
+
+// warnDeprecatedQueryToken reports the legacy ?token= handshake once per hour.
+// The token itself is never logged: that is the whole reason the transport is
+// being retired.
+func (n *NativeChannel) warnDeprecatedQueryToken(r *http.Request) {
+	if !n.wsTokenLimiter.sample("ws|query-token") {
+		return
+	}
+	logger.WarnCF("native", "WebSocket token in the query string is deprecated; use the bearer subprotocol or the Authorization header", map[string]interface{}{
+		"remote_addr": r.RemoteAddr,
+	})
+}
+
 func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
 		return
 	}
 
-	token := getQueryParam(r, "token")
-	if token == "" {
-		hdr := r.Header.Get("Authorization")
-		token = strings.TrimPrefix(hdr, "Bearer ")
+	token, fromQuery := wsRequestToken(r)
+	if fromQuery && token != "" {
+		n.warnDeprecatedQueryToken(r)
 	}
 
 	if token == "" {
@@ -70,6 +111,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		WriteBufferSize:   wsWriteBufferSize,
 		CheckOrigin:       n.checkOrigin,
 		EnableCompression: true,
+		Subprotocols:      []string{wsTokenSubprotocol},
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

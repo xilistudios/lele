@@ -27,6 +27,7 @@ func newFakeSender(script ...error) *fakeSender {
 }
 
 func TestSendChunkWithRetry_HonorsRetryAfterHint(t *testing.T) {
+	defer logger.SetLevel(logger.GetLevel())
 	logger.SetLevel(logger.ERROR)
 	sender := newFakeSender(&RateLimitError{Channel: "test", RetryAfter: 30 * time.Millisecond})
 	send := func(ctx context.Context, msg bus.OutboundMessage) error {

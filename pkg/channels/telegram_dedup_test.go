@@ -12,6 +12,7 @@ func newDedupTestChannel() *TelegramChannel {
 }
 
 func TestIsDuplicate_DetectsAndRecords(t *testing.T) {
+	defer logger.SetLevel(logger.GetLevel())
 	logger.SetLevel(logger.ERROR)
 	c := newDedupTestChannel()
 
@@ -24,6 +25,7 @@ func TestIsDuplicate_DetectsAndRecords(t *testing.T) {
 }
 
 func TestIsDuplicate_EvictsOldestKeepsNewest(t *testing.T) {
+	defer logger.SetLevel(logger.GetLevel())
 	logger.SetLevel(logger.ERROR)
 	c := newDedupTestChannel()
 
@@ -48,6 +50,7 @@ func TestIsDuplicate_EvictsOldestKeepsNewest(t *testing.T) {
 }
 
 func TestIsDuplicate_ReprocessedAfterEviction(t *testing.T) {
+	defer logger.SetLevel(logger.GetLevel())
 	logger.SetLevel(logger.ERROR)
 	c := newDedupTestChannel()
 

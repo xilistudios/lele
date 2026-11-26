@@ -12,11 +12,14 @@ class MockWebSocket {
 
   readyState = MockWebSocket.CONNECTING
   url: string
+  protocols: string[]
   sent: string[] = []
   private listeners: Record<string, Listener[]> = {}
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url
+    this.protocols =
+      protocols === undefined ? [] : Array.isArray(protocols) ? [...protocols] : [protocols]
     MockWebSocket.instances.push(this)
   }
 
@@ -170,5 +173,56 @@ describe('LeleSocket single-connection guarantee', () => {
     client.on('event', (e) => events.push(e.event))
     s2.message({ event: 'message.thinking', data: { delta: 'Let me check' } })
     expect(events).toEqual(['message.thinking'])
+  })
+})
+
+describe('LeleSocket credential transport', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = []
+    ;(globalThis as Record<string, unknown>).WebSocket = MockWebSocket
+    activeClient = null
+  })
+
+  afterEach(() => {
+    activeClient?.close()
+    activeClient = null
+    MockWebSocket.instances = []
+  })
+
+  test('the token never appears in the handshake URL', () => {
+    const client = new LeleSocket('http://localhost', 'secret-token', opts)
+    activeClient = client
+    client.connect()
+
+    const socket = MockWebSocket.instances[0]
+    expect(socket.url).toBe('ws://localhost/api/v1/ws')
+    expect(socket.url).not.toContain('secret-token')
+  })
+
+  test('the token travels as a bearer subprotocol so the server can echo it', () => {
+    const client = new LeleSocket('http://localhost', 'secret-token', opts)
+    activeClient = client
+    client.connect()
+
+    expect(MockWebSocket.instances[0].protocols).toEqual(['bearer', 'secret-token'])
+  })
+
+  test('only the session key rides in the query string, never the token', async () => {
+    const client = new LeleSocket('http://localhost', 'secret-token', opts)
+    activeClient = client
+    client.connect()
+
+    const first = MockWebSocket.instances[0]
+    first.openNow()
+    client.send('subscribe', { session_key: 'native:abc' })
+    first.serverClose()
+
+    await Bun.sleep(200)
+    expect(MockWebSocket.instances.length).toBe(2)
+
+    const second = MockWebSocket.instances[1]
+    expect(second.url).toBe('ws://localhost/api/v1/ws?session_key=native%3Aabc')
+    expect(second.url).not.toContain('secret-token')
+    expect(second.protocols).toEqual(['bearer', 'secret-token'])
   })
 })
