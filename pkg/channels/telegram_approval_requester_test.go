@@ -2,15 +2,10 @@ package channels
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mymmrac/telego"
-
-	"github.com/xilistudios/lele/pkg/logger"
 )
 
 func newApprovalCallbackTestChannel(t *testing.T, recorder *botAPIRecorder, am *ApprovalManager) *TelegramChannel {
@@ -46,34 +41,8 @@ func countBotMethod(calls []botAPICall, suffix string) int {
 	return n
 }
 
-func enableApprovalLogCapture(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	prevLevel := logger.GetLevel()
-	logger.SetLevel(logger.INFO)
-	if err := logger.EnableMultiFileLogging(dir); err != nil {
-		logger.SetLevel(prevLevel)
-		t.Fatalf("EnableMultiFileLogging: %v", err)
-	}
-	t.Cleanup(func() {
-		logger.DisableFileLogging()
-		logger.SetLevel(prevLevel)
-	})
-	return dir
-}
-
-func readCapturedErrorLog(t *testing.T, dir string) string {
-	t.Helper()
-	path := filepath.Join(dir, "errors-"+time.Now().Format("2006-01-02")+".log")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read captured error log: %v", err)
-	}
-	return string(data)
-}
-
 func TestTelegramApproval_OtherUserCannotApprove(t *testing.T) {
-	logDir := enableApprovalLogCapture(t)
+	entries := captureLogEntries(t)
 	am := NewApprovalManager()
 	approval := am.CreateApproval("telegram:555", "rm -rf /tmp/x", "dangerous command", 555, "111|alice")
 
@@ -100,12 +69,15 @@ func TestTelegramApproval_OtherUserCannotApprove(t *testing.T) {
 		t.Fatal("approval must stay pending after a foreign approval attempt")
 	}
 
-	logs := readCapturedErrorLog(t, logDir)
-	if !strings.Contains(logs, "Approval requester mismatch rejected") {
-		t.Fatalf("missing requester-mismatch warning in the error log: %q", logs)
+	warnings := loggedMessages(entries(), "Approval requester mismatch rejected")
+	if len(warnings) != 1 {
+		t.Fatalf("requester-mismatch warnings = %d, want 1", len(warnings))
 	}
-	if !strings.Contains(logs, approval.ID) {
-		t.Fatalf("warning must carry the approval id %q: %q", approval.ID, logs)
+	if got := warnings[0].Fields["approval_id"]; got != approval.ID {
+		t.Fatalf("warning approval_id = %v, want %q", got, approval.ID)
+	}
+	if got := warnings[0].Fields["caller_requester_id"]; got != "222|bob" {
+		t.Fatalf("warning caller_requester_id = %v, want %q", got, "222|bob")
 	}
 }
 
@@ -208,5 +180,82 @@ func TestTelegramApproval_ApprovalWithoutRequesterUsesSession(t *testing.T) {
 
 	if am.GetApproval(approval.ID) != nil {
 		t.Fatal("an approval without a recorded requester must stay resolvable from its chat")
+	}
+}
+
+func TestTelegramApproval_NotFoundAnswered(t *testing.T) {
+	entries := captureLogEntries(t)
+	am := NewApprovalManager()
+
+	recorder := &botAPIRecorder{}
+	channel := newApprovalCallbackTestChannel(t, recorder, am)
+
+	query := telegramApprovalUpdate(111, "alice", "approve", "does-not-exist")
+	if err := channel.handleApprovalCallback(context.Background(), query); err != nil {
+		t.Fatalf("handleApprovalCallback() error = %v", err)
+	}
+
+	texts := answerCallbackTexts(recorder.snapshot())
+	if len(texts) != 1 || !strings.Contains(texts[0], "expired or not found") {
+		t.Fatalf("not-found ack = %#v, want the expiry notice", texts)
+	}
+	if got := len(loggedMessages(entries(), "Approval not found")); got != 1 {
+		t.Fatalf("not-found warnings = %d, want 1", got)
+	}
+}
+
+func TestTelegramApproval_ViewRequiresRequester(t *testing.T) {
+	am := NewApprovalManager()
+	approval := am.CreateApproval("telegram:555", "rm -rf /tmp/x", "dangerous command", 555, "111|alice")
+
+	recorder := &botAPIRecorder{}
+	channel := newApprovalCallbackTestChannel(t, recorder, am)
+
+	foreign := telegramApprovalUpdate(222, "bob", "view", approval.ID)
+	if err := channel.handleApprovalCallback(context.Background(), foreign); err != nil {
+		t.Fatalf("handleApprovalCallback() error = %v", err)
+	}
+
+	calls := recorder.snapshot()
+	texts := answerCallbackTexts(calls)
+	if len(texts) != 1 || !strings.Contains(texts[0], "Only the user who requested this command can view it") {
+		t.Fatalf("foreign view ack = %#v, want the requester-mismatch notice", texts)
+	}
+	if strings.Contains(texts[0], "rm -rf") {
+		t.Fatalf("a foreign member must not see the command: %q", texts[0])
+	}
+	if am.GetApproval(approval.ID) == nil {
+		t.Fatal("viewing must not consume the approval")
+	}
+
+	recorder.reset()
+	owner := telegramApprovalUpdate(111, "alice", "view", approval.ID)
+	if err := channel.handleApprovalCallback(context.Background(), owner); err != nil {
+		t.Fatalf("handleApprovalCallback() error = %v", err)
+	}
+
+	texts = answerCallbackTexts(recorder.snapshot())
+	if len(texts) != 1 || !strings.Contains(texts[0], "rm -rf /tmp/x") || !strings.Contains(texts[0], "dangerous command") {
+		t.Fatalf("owner view ack = %#v, want the command and its reason", texts)
+	}
+	if am.GetApproval(approval.ID) == nil {
+		t.Fatal("viewing must not consume the approval")
+	}
+}
+
+func TestTelegramApproval_ViewOfExpiredApprovalAnswered(t *testing.T) {
+	am := NewApprovalManager()
+
+	recorder := &botAPIRecorder{}
+	channel := newApprovalCallbackTestChannel(t, recorder, am)
+
+	query := telegramApprovalUpdate(111, "alice", "view", "does-not-exist")
+	if err := channel.handleApprovalCallback(context.Background(), query); err != nil {
+		t.Fatalf("handleApprovalCallback() error = %v", err)
+	}
+
+	texts := answerCallbackTexts(recorder.snapshot())
+	if len(texts) != 1 || !strings.Contains(texts[0], "expired or not found") {
+		t.Fatalf("expired view ack = %#v, want the expiry notice", texts)
 	}
 }

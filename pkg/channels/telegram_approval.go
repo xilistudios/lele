@@ -36,23 +36,22 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 		"approval_id": approvalID,
 	})
 
-	var approved bool
+	callerSessionKey := c.resolveSessionKey(telegramCallbackPeerInfo(query))
+	callerRequesterID := telegramSenderID(query.From.ID, query.From.Username)
+
 	switch action {
-	case "approve":
-		approved = true
-	case "reject":
-		approved = false
 	case "view":
-		return c.handleApprovalView(ctx, query, approvalID)
+		return c.handleApprovalView(ctx, query, approvalID, callerSessionKey, callerRequesterID)
+	case "approve", "reject":
 	default:
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
 	}
 
+	approved := action == "approve"
+
 	if query.Message == nil {
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request not available"))
 	}
-	callerSessionKey := fmt.Sprintf("telegram:%d", query.Message.GetChat().ID)
-	callerRequesterID := telegramSenderID(query.From.ID, query.From.Username)
 
 	logger.DebugCF("telegram", "handleApprovalCallback calling HandleApprovalForRequester", map[string]interface{}{
 		"approval_id":         approvalID,
@@ -63,26 +62,7 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 
 	approval, err := c.approvalManager.HandleApprovalForRequester(approvalID, approved, callerSessionKey, callerRequesterID)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrApprovalRequesterMismatch):
-			logger.WarnCF("telegram", "Approval requester mismatch rejected", map[string]interface{}{
-				"approval_id":         approvalID,
-				"caller_requester_id": callerRequesterID,
-				"caller_session_key":  callerSessionKey,
-			})
-			return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("⚠️ Only the user who requested this command can approve it"))
-		case errors.Is(err, ErrApprovalSessionMismatch):
-			logger.WarnCF("telegram", "Approval session mismatch rejected", map[string]interface{}{
-				"approval_id":        approvalID,
-				"caller_session_key": callerSessionKey,
-			})
-			return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("⚠️ Esta aprobación pertenece a otro chat"))
-		}
-		logger.WarnCF("telegram", "Failed to handle approval", map[string]interface{}{
-			"error":       err.Error(),
-			"approval_id": approvalID,
-		})
-		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request expired or not found"))
+		return c.answerApprovalDenial(ctx, query, approvalID, callerSessionKey, callerRequesterID, err, "approve")
 	}
 
 	chatID := query.Message.GetChat().ID
@@ -112,12 +92,43 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 	return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(feedback))
 }
 
-func (c *TelegramChannel) handleApprovalView(ctx context.Context, query telego.CallbackQuery, approvalID string) error {
-	approval := c.approvalManager.GetApproval(approvalID)
-	if approval == nil {
-		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request not found or expired"))
+func (c *TelegramChannel) handleApprovalView(ctx context.Context, query telego.CallbackQuery, approvalID, callerSessionKey, callerRequesterID string) error {
+	approval, err := c.approvalManager.CheckApprovalForRequester(approvalID, callerSessionKey, callerRequesterID)
+	if err != nil {
+		return c.answerApprovalDenial(ctx, query, approvalID, callerSessionKey, callerRequesterID, err, "view")
 	}
 
 	text := fmt.Sprintf("Comando:\n`%s`\n\nRazón: %s", approval.Command, approval.Reason)
 	return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(text))
+}
+
+func (c *TelegramChannel) answerApprovalDenial(ctx context.Context, query telego.CallbackQuery, approvalID, callerSessionKey, callerRequesterID string, err error, verb string) error {
+	switch {
+	case errors.Is(err, ErrApprovalRequesterMismatch):
+		logger.WarnCF("telegram", "Approval requester mismatch rejected", map[string]interface{}{
+			"approval_id":         approvalID,
+			"caller_requester_id": callerRequesterID,
+			"caller_session_key":  callerSessionKey,
+		})
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(fmt.Sprintf("⚠️ Only the user who requested this command can %s it", verb)))
+	case errors.Is(err, ErrApprovalSessionMismatch):
+		logger.WarnCF("telegram", "Approval session mismatch rejected", map[string]interface{}{
+			"approval_id":        approvalID,
+			"caller_session_key": callerSessionKey,
+		})
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("⚠️ Esta aprobación pertenece a otro chat"))
+	case errors.Is(err, ErrApprovalNotFound):
+		logger.WarnCF("telegram", "Approval not found", map[string]interface{}{
+			"approval_id":        approvalID,
+			"caller_session_key": callerSessionKey,
+		})
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request expired or not found"))
+	default:
+		logger.ErrorCF("telegram", "Failed to handle approval", map[string]interface{}{
+			"error":              err.Error(),
+			"approval_id":        approvalID,
+			"caller_session_key": callerSessionKey,
+		})
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("⚠️ Approval could not be processed"))
+	}
 }

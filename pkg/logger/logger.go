@@ -37,6 +37,9 @@ var (
 	logger       *Logger
 	once         sync.Once
 	mu           sync.RWMutex
+
+	hookMu sync.RWMutex
+	hook   func(LogEntry)
 )
 
 type Logger struct {
@@ -325,6 +328,28 @@ func writeWithReopen(f **os.File, apiLevel, data string) {
 	}
 }
 
+func SetHook(fn func(LogEntry)) func() {
+	hookMu.Lock()
+	previous := hook
+	hook = fn
+	hookMu.Unlock()
+
+	return func() {
+		hookMu.Lock()
+		hook = previous
+		hookMu.Unlock()
+	}
+}
+
+func emitToHook(entry LogEntry) {
+	hookMu.RLock()
+	fn := hook
+	hookMu.RUnlock()
+	if fn != nil {
+		fn(entry)
+	}
+}
+
 func logMessage(level LogLevel, component string, message string, fields map[string]interface{}) {
 	if level < currentLevel {
 		return
@@ -346,6 +371,8 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 			entry.Caller = fmt.Sprintf("%s:%d (%s)", file, line, fn.Name())
 		}
 	}
+
+	emitToHook(entry)
 
 	jsonData, err := json.Marshal(entry)
 	if err != nil {

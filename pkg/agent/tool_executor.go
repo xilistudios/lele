@@ -165,7 +165,7 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 		toolResult.ApprovalRequired.Command,
 		toolResult.ApprovalRequired.Reason,
 		chatIDInt,
-		opts.senderID,
+		channels.ApprovalRequesterForTurn(opts.channel, opts.senderID),
 	)
 
 	if opts.channel == channels.ChannelName {
